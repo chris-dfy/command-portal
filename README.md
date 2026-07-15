@@ -14,12 +14,15 @@ The BFF is not a generic proxy. It rejects arbitrary portal routes, unsafe query
 
 ## Portal areas
 
-- Overview
+- Mission Overview
 - Verification
 - Evidence
 - Architecture
+- Runtime Topology
 - Specialists
 - System
+
+Phase 5X-B.5 adds an executive status system, mission operating picture, selectable six-layer architecture, manifest-derived asset coverage, and current-state runtime topology. See `docs/PHASE_5X_B5_EXECUTIVE_EXPERIENCE.md`.
 
 ## Data modes
 

@@ -1,16 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Boxes, BrainCircuit, CheckCircle2, ChevronRight, Database, FileCheck2, Layers3, Menu, RefreshCw, Search, ServerCog, ShieldCheck, TriangleAlert, X } from "lucide-react";
+import { Activity, Boxes, BrainCircuit, ChevronRight, Database, FileCheck2, GitBranch, Layers3, Menu, RefreshCw, Search, ServerCog, ShieldCheck, TriangleAlert, X } from "lucide-react";
 import { portalBrand } from "./brand";
+import { AssetCoverage } from "./components/AssetCoverage";
 import { DataPanel, EmptyRecord } from "./components/DataPanel";
+import { ExecutivePageBrief } from "./components/ExecutivePageBrief";
+import { ExecutiveStatusBar } from "./components/ExecutiveStatusBar";
+import { MissionOverview } from "./components/MissionOverview";
+import { RuntimeTopology } from "./components/RuntimeTopology";
+import { SixLayerArchitecture } from "./components/SixLayerArchitecture";
 import { StatusPill } from "./components/StatusPill";
 import { portalClient } from "./lib/portal-client";
+import { asItems, asRecord, displayLabel as label } from "./lib/presentation";
 import type { DomainEnvelope, PortalEnvelope, PortalSnapshot } from "./lib/types";
 
 const AREAS = [
-  { id: "overview", label: "Overview", detail: "Operational posture", icon: Activity },
+  { id: "overview", label: "Mission Overview", detail: "Executive operating picture", icon: Activity },
   { id: "verification", label: "Verification", detail: "Runtime evidence", icon: ShieldCheck },
   { id: "evidence", label: "Evidence", detail: "Claims and receipts", icon: FileCheck2 },
-  { id: "architecture", label: "Architecture", detail: "Layers and assets", icon: Layers3 },
+  { id: "architecture", label: "Architecture", detail: "Six layers and asset coverage", icon: Layers3 },
+  { id: "topology", label: "Runtime Topology", detail: "Current verified path", icon: GitBranch },
   { id: "specialists", label: "Specialists", detail: "Maturity registry", icon: BrainCircuit },
   { id: "system", label: "System", detail: "Connection and limits", icon: ServerCog }
 ] as const;
@@ -18,45 +26,8 @@ const AREAS = [
 type AreaId = typeof AREAS[number]["id"];
 type Detail = PortalEnvelope<Record<string, unknown>>;
 
-const asRecord = (domain?: DomainEnvelope) => (domain?.data ?? {}) as Record<string, unknown>;
-const asItems = (domain?: DomainEnvelope) => {
-  const value = asRecord(domain).items;
-  return Array.isArray(value) ? value as Record<string, unknown>[] : [];
-};
-const label = (value: unknown) => String(value ?? "unavailable").replaceAll("_", " ");
-
 function Metric({ name, value, tone }: { name: string; value: unknown; tone?: string }) {
   return <article className="metric" data-tone={tone}><span>{name}</span><strong>{label(value)}</strong></article>;
-}
-
-function Overview({ domains }: { domains: Record<string, DomainEnvelope> }) {
-  const status = asRecord(domains.status);
-  const readiness = asRecord(domains.readiness);
-  const exposure = asRecord(domains.exposure);
-  return <div className="area-grid">
-    <DataPanel eyebrow="Executive operations" title="Active posture" icon={<Activity size={18} />} className="span-2">
-      <div className="metric-grid">
-        <Metric name="Runtime" value={status.runtime} />
-        <Metric name="Portal phase" value={status.phase} />
-        <Metric name="Hosted acceptance" value={status.hostedAcceptance} />
-        <Metric name="Source of truth" value="local" tone="good" />
-      </div>
-    </DataPanel>
-    <DataPanel eyebrow="Readiness" title="Delivery gates" icon={<CheckCircle2 size={18} />}>
-      <dl className="definition-list">
-        <div><dt>Phase 5X-A</dt><dd>{label(readiness.phase5XA)}</dd></div>
-        <div><dt>Phase 5X-B</dt><dd>{label(readiness.phase5XB)}</dd></div>
-        <div><dt>Phase 5X-C</dt><dd>{label(readiness.phase5XC)}</dd></div>
-      </dl>
-    </DataPanel>
-    <DataPanel eyebrow="Hosted boundary" title="Exposure state" icon={<ServerCog size={18} />}>
-      <dl className="definition-list">
-        <div><dt>Portal</dt><dd>{label(exposure.portal)}</dd></div>
-        <div><dt>Runtime</dt><dd>{label(exposure.runtime)}</dd></div>
-        <div><dt>Credential</dt><dd>{label(exposure.credential)}</dd></div>
-      </dl>
-    </DataPanel>
-  </div>;
 }
 
 function Verification({ domains }: { domains: Record<string, DomainEnvelope> }) {
@@ -64,6 +35,7 @@ function Verification({ domains }: { domains: Record<string, DomainEnvelope> }) 
   const matrix = asRecord(domains["runtime-matrix"]).matrix;
   const rows = Array.isArray(matrix) ? matrix as Record<string, unknown>[] : [];
   return <div className="area-grid">
+    <ExecutivePageBrief happening="Local runtime evidence is complete with limitations." matters="Every capability claim must remain tied to persisted proof." next="Repeat verification after the hosted runtime is connected." blocked="Hosted verification and rollback evidence are not available." />
     <DataPanel eyebrow="Phase 5W-V" title="Runtime verification center" icon={<ShieldCheck size={18} />} className="span-2">
       <div className="metric-grid compact">
         <Metric name="Acceptance" value={verification.status} />
@@ -84,7 +56,7 @@ function Evidence({ domains, openDetail }: { domains: Record<string, DomainEnvel
     { key: "proofs", title: "Proof ledger", kind: "proof" as const },
     { key: "receipts", title: "Receipt ledger", kind: "receipt" as const }
   ];
-  return <div className="area-grid evidence-grid">{groups.map(({ key, title, kind }) => {
+  return <div className="area-grid evidence-grid"><ExecutivePageBrief happening="The ledger contains bounded local fixture evidence." matters="Proof and receipts prevent preview states from appearing completed." next="Record hosted acceptance evidence during Phase 5X-C." blocked="Fixture records do not prove live or hosted operation." />{groups.map(({ key, title, kind }) => {
     const items = asItems(domains[key]);
     return <DataPanel key={key} eyebrow="Evidence" title={title} icon={<FileCheck2 size={18} />}>
       {items.length ? <div className="record-list">{items.map((item) => {
@@ -96,26 +68,9 @@ function Evidence({ domains, openDetail }: { domains: Record<string, DomainEnvel
 }
 
 function Architecture({ domains }: { domains: Record<string, DomainEnvelope> }) {
-  const capabilities = asItems(domains.capabilities);
-  const coverage = asRecord(domains["asset-coverage"]);
   const manifest = asRecord(domains["asset-manifest"]);
-  const assets = Array.isArray(manifest.assets) ? manifest.assets as Record<string, unknown>[] : [];
-  const categories = new Set(assets.map((item) => String(item.category)));
-  return <div className="area-grid">
-    <DataPanel eyebrow="Six-layer system" title="Capability states" icon={<Layers3 size={18} />} className="span-2">
-      {capabilities.length ? <div className="matrix-list">{capabilities.map((item) => <div key={String(item.id)}><span>{label(item.id)}</span><StatusPill value={String(item.state)} /><small>{label(item.environment)}</small></div>)}</div> : <EmptyRecord />}
-    </DataPanel>
-    <DataPanel eyebrow="Provisioning doctrine" title="Platform asset coverage" icon={<Database size={18} />}>
-      <div className="hero-value">{label(coverage.coverage)}</div>
-      <p>Nothing is treated as authoritative until present, registered, configured, authorized, tested, deployed, verified, and proof-linked.</p>
-      <StatusPill value={String(coverage.verificationState ?? "unavailable")} />
-    </DataPanel>
-    <DataPanel eyebrow={`Manifest ${label(manifest.manifestVersion)}`} title="Registered categories" icon={<Boxes size={18} />}>
-      <div className="hero-value">{categories.size || label(asRecord(domains["asset-manifest"]).categories)}</div>
-      <p>Versioned asset categories are disclosed with provenance, state, proof references, and limitations.</p>
-      <div className="tag-list">{Array.from(categories).slice(0, 16).map((item) => <span key={item}>{item}</span>)}</div>
-    </DataPanel>
-  </div>;
+  const assetCount = Array.isArray(manifest.assets) ? manifest.assets.length : 0;
+  return <div className="architecture-experience"><ExecutivePageBrief happening={`Six runtime layers and ${assetCount} manifest entries are visible.`} matters="Leadership can see verified layers and physical asset gaps separately." next="Close named dependencies before promoting any capability." blocked="Conclave, external connectors, and hosted acceptance remain incomplete." /><SixLayerArchitecture domains={domains} /><AssetCoverage domains={domains} /></div>;
 }
 
 function Specialists({ domains }: { domains: Record<string, DomainEnvelope> }) {
@@ -123,6 +78,7 @@ function Specialists({ domains }: { domains: Record<string, DomainEnvelope> }) {
   const specialists = Array.isArray(registry.items) ? registry.items as Record<string, unknown>[] : [];
   const hosting = asRecord(domains["model-hosting"]);
   return <div className="area-grid">
+    <ExecutivePageBrief happening={`${specialists.length} specialist profiles are registered; no trained SLM exists.`} matters="Profiles, RAG, tools, and trained models are distinct maturity classes." next="Review and evaluate candidates before any later promotion." blocked="No verified trained, hosted, or edge model asset is present." />
     <DataPanel eyebrow="Specialist runtime" title="Maturity registry" icon={<BrainCircuit size={18} />} className="span-2">
       <p className="boundary-note">Prompt profiles, tool-backed agents, RAG specialists, and trained models remain distinct asset classes.</p>
       <div className="specialist-list">{specialists.map((item) => <article key={String(item.id)}><div><strong>{label(item.id)}</strong><span>Trained model: {item.trainedModel ? "yes" : "no"}</span></div><StatusPill value={String(item.maturity)} /></article>)}</div>
@@ -141,6 +97,7 @@ function System({ domains, snapshotMeta }: { domains: Record<string, DomainEnvel
   const hosted = asRecord(domains["hosted-readiness"]);
   const missing = Array.isArray(hosted.missing) ? hosted.missing : [];
   return <div className="area-grid">
+    <ExecutivePageBrief happening={`The portal reports ${label(snapshotMeta.connectionState)} in ${label(snapshotMeta.dataMode)} mode.`} matters="Security remains enforced while hosted connectivity is absent." next="Deploy, issue the scoped read identity, and begin Phase 5X-C acceptance." blocked="The external runtime endpoint and portal read identity are missing." />
     <DataPanel eyebrow="Connection" title="Portal diagnostics" icon={<ServerCog size={18} />}>
       <dl className="definition-list"><div><dt>Mode</dt><dd>{label(snapshotMeta.dataMode)}</dd></div><div><dt>Connection</dt><dd>{label(snapshotMeta.connectionState)}</dd></div><div><dt>Cache</dt><dd>{snapshotMeta.cached ? "cached" : "direct"}</dd></div><div><dt>Read-only</dt><dd>enforced</dd></div></dl>
     </DataPanel>
@@ -181,15 +138,17 @@ export function App() {
 
   return <div className="portal-shell">
     <a className="skip-link" href="#main-content">Skip to portal content</a>
-    <header className="status-rail">
+    <header className="command-header">
       <div className="rail-brand"><span>{portalBrand.parentBrand}</span><strong>{portalBrand.displayName}</strong></div>
-      <div className="rail-signals">
+      <div className="command-truth">
         <StatusPill value="read only" tone="good" />
         <StatusPill value={snapshot?.meta.connectionState ?? "unavailable"} />
-        <span>Local source of truth</span><span>Production: false</span><span>Enterprise: false</span>
+        <span>{snapshot?.meta.dataMode === "contract_fixture" ? "Contract Fixture" : label(snapshot?.meta.dataMode)}</span><span>Production: false</span><span>Enterprise: false</span><span>Cloud primary: false</span>
       </div>
       <button className="refresh-button" onClick={refresh} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""} />{loading ? "Refreshing" : "Refresh"}</button>
     </header>
+
+    <ExecutiveStatusBar domains={domains} meta={snapshot?.meta} />
 
     {data?.referenceFixture && <div className="fixture-banner" role="status"><TriangleAlert size={16} /><strong>{data.fixtureLabel ?? "CONTRACT FIXTURE — NON-LIVE DATA"}</strong><span>Values demonstrate the API contract; they are not current runtime observations.</span></div>}
 
@@ -197,16 +156,17 @@ export function App() {
       <div className="product-mark"><div aria-hidden="true">{portalBrand.shortName.slice(0, 1)}</div><section><span>{portalBrand.parentBrand}</span><h1>{portalBrand.displayName}</h1><p>Read-only runtime intelligence</p></section></div>
       <label className="nav-search"><Search size={15} /><span className="sr-only">Search portal areas</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find an area" /></label>
       <nav aria-label="Portal areas">{visibleAreas.map((area) => <button key={area.id} className={active === area.id ? "active" : ""} onClick={() => { setActive(area.id); setMenuOpen(false); }}><area.icon size={17} /><span><strong>{area.label}</strong><small>{area.detail}</small></span><ChevronRight size={14} /></button>)}</nav>
-      <footer><span>Phase 5X-B</span><p>Hosted connection acceptance pending.</p></footer>
+      <footer><span>Phase 5X-B.5</span><p>Executive experience layer · Hosted connection acceptance pending.</p></footer>
     </aside>
 
     <main id="main-content">
-      <header className="page-header"><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Toggle navigation"><Menu size={18} /></button><div><span>Operational visibility</span><h2>{current.label}</h2><p>{current.detail}</p></div><StatusPill value={snapshot?.meta.dataMode ?? "unavailable"} /></header>
+      <header className="page-header"><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Toggle navigation"><Menu size={18} /></button><div><span>Executive operating system</span><h2>{current.label}</h2><p>{current.detail}</p></div><StatusPill value={snapshot?.meta.dataMode ?? "unavailable"} /></header>
       {error ? <section className="error-state"><TriangleAlert size={28} /><h3>Runtime values unavailable</h3><p>{error}</p><small>No operational data has been fabricated.</small><button onClick={refresh}>Try again</button></section> : !snapshot?.data ? <section className="loading-state"><div /><p>Reading allowlisted portal domains…</p></section> : <>
-        {active === "overview" && <Overview domains={domains} />}
+        {active === "overview" && <MissionOverview domains={domains} meta={snapshot.meta} />}
         {active === "verification" && <Verification domains={domains} />}
         {active === "evidence" && <Evidence domains={domains} openDetail={openDetail} />}
         {active === "architecture" && <Architecture domains={domains} />}
+        {active === "topology" && <div className="topology-experience"><ExecutivePageBrief happening="The supplied provider-to-portal path is visible." matters="Connection truth is separated from architectural intent." next="Establish the secure hosted runtime path and verify every hop." blocked="OpenAI connectivity and live external inference remain unverified." /><RuntimeTopology domains={domains} meta={snapshot.meta} /></div>}
         {active === "specialists" && <Specialists domains={domains} />}
         {active === "system" && <System domains={domains} snapshotMeta={snapshot.meta} />}
       </>}
