@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1.0",
+  "manifestVersion": "1.0.0",
+  "generatedAt": "2026-07-14T00:00:00Z",
+  "doctrine": "An asset is not authoritative or operational until physically present, registered, configured, authorized, tested, deployed, verified, and linked to proof.",
+  "truth": {
+    "productionReady": false,
+    "enterpriseReady": false,
+    "cloudPrimary": false,
+    "localSourceOfTruth": true,
+    "secretValuesExposed": false,
+    "conclave": "staged",
+    "actualTrainedSLMs": 0
+  },
+  "assets": [
+    { "id": "knowledge.model-native", "category": "knowledge", "version": "candidate", "state": "candidate", "provenance": "configured model provider", "proofIds": [], "limitations": ["General reasoning only; not authoritative evidence."] },
+    { "id": "data.contract-fixture", "category": "data", "version": "1.0.0", "state": "verified_fixture", "provenance": "Phase 5X-A handoff", "proofIds": ["PROOF-20260714213158-90F39693"], "limitations": ["Non-live contract demonstration data."] },
+    { "id": "schema.portal-envelope", "category": "schemas", "version": "1.0.0", "state": "registered", "provenance": "Phase 5X-A portal contract", "proofIds": ["PROOF-20260714213158-90F39693"], "limitations": [] },
+    { "id": "handler.portal-read-bff", "category": "handlers", "version": "1.0.0", "state": "implemented", "provenance": "Phase 5X-B standalone repository", "proofIds": [], "limitations": ["GET-only observation handler."] },
+    { "id": "connector.runtime-api", "category": "connectors", "version": "1.0.0", "state": "configured_not_connected", "provenance": "deployment environment", "proofIds": [], "limitations": ["Hosted credential issuance and connectivity acceptance pending Phase 5X-C."] },
+    { "id": "workflow.snapshot-read", "category": "workflows", "version": "1.0.0", "state": "implemented", "provenance": "Phase 5X-B standalone repository", "proofIds": [], "limitations": ["Read-only aggregation; no command execution."] },
+    { "id": "specialist.proposal-estimator", "category": "specialists", "version": "runtime-reported", "state": "rag_backed_specialist", "provenance": "Phase 5X-A runtime report", "proofIds": [], "limitations": ["Not a trained SLM."] },
+    { "id": "specialist.intake-classifier", "category": "specialists", "version": "runtime-reported", "state": "tool_backed_specialist_agent", "provenance": "Phase 5X-A runtime report", "proofIds": [], "limitations": ["Not a trained SLM."] },
+    { "id": "specialist.governance-reviewer", "category": "specialists", "version": "runtime-reported", "state": "prompted_specialist_profile", "provenance": "Phase 5X-A runtime report", "proofIds": [], "limitations": ["Not a trained SLM."] },
+    { "id": "prompt.provisioning-doctrine", "category": "prompts", "version": "1.0.0", "state": "registered", "provenance": "Phase 5X-A deployment handoff", "proofIds": ["PROOF-20260714213158-90F39693"], "limitations": [] },
+    { "id": "index.none", "category": "indexes", "version": "none", "state": "unavailable", "provenance": "standalone portal", "proofIds": [], "limitations": ["No portal-owned search index is provisioned."] },
+    { "id": "model.none-trained", "category": "models", "version": "none", "state": "unavailable", "provenance": "verified Phase 5X-A report", "proofIds": [], "limitations": ["actualTrainedSLMs=0; mock_model was the runtime default."] },
+    { "id": "policy.read-only-browser", "category": "policies", "version": "1.0.0", "state": "implemented", "provenance": "Phase 5X-B standalone repository", "proofIds": [], "limitations": [] },
+    { "id": "evaluation.bff-contract", "category": "evaluations", "version": "1.0.0", "state": "implemented", "provenance": "tests/bff.test.mjs", "proofIds": [], "limitations": ["Local automated verification; hosted acceptance pending."] },
+    { "id": "api.portal-readonly", "category": "APIs", "version": "1.1.0", "state": "implemented", "provenance": "openapi/portal-readonly.openapi.json", "proofIds": [], "limitations": ["Fixed GET allowlist only."] },
+    { "id": "ui.overview", "category": "UI modules", "version": "1.0.0", "state": "implemented", "provenance": "src/App.tsx", "proofIds": [], "limitations": [] },
+    { "id": "ui.verification", "category": "UI modules", "version": "1.0.0", "state": "implemented", "provenance": "src/App.tsx", "proofIds": [], "limitations": [] },
+    { "id": "ui.evidence", "category": "UI modules", "version": "1.0.0", "state": "implemented", "provenance": "src/App.tsx", "proofIds": [], "limitations": [] },
+    { "id": "ui.architecture", "category": "UI modules", "version": "1.0.0", "state": "implemented", "provenance": "src/App.tsx", "proofIds": [], "limitations": [] },
+    { "id": "ui.specialists", "category": "UI modules", "version": "1.0.0", "state": "implemented", "provenance": "src/App.tsx", "proofIds": [], "limitations": [] },
+    { "id": "ui.system", "category": "UI modules", "version": "1.0.0", "state": "implemented", "provenance": "src/App.tsx", "proofIds": [], "limitations": [] },
+    { "id": "proof.phase-5x-a", "category": "proofs", "version": "2026-07-14", "state": "verified_local", "provenance": "Phase 5X-A artifact package", "proofIds": ["PROOF-20260714213158-90F39693"], "limitations": ["Does not prove hosted connectivity."] },
+    { "id": "receipt.phase-5x-a-local", "category": "receipts", "version": "2026-07-14", "state": "verified_local", "provenance": "Phase 5X-A artifact package", "proofIds": ["PROOF-20260714213158-90F39693"], "limitations": ["Local reference fixture only."] },
+    { "id": "fixture.portal-contract", "category": "test fixtures", "version": "1.0.0", "state": "verified_fixture", "provenance": "fixtures/contract-fixture.json", "proofIds": ["PROOF-20260714213158-90F39693"], "limitations": ["Non-live data; never an operational source of truth."] }
+  ]
+}

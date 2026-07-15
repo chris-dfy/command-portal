@@ -1,0 +1,12 @@
+run = "npm run start"
+entrypoint = "server/index.mjs"
+modules = ["nodejs-20"]
+
+[deployment]
+build = ["sh", "-c", "npm ci && npm run build"]
+run = ["sh", "-c", "npm run start"]
+deploymentTarget = "cloudrun"
+
+[[ports]]
+localPort = 4173
+externalPort = 80

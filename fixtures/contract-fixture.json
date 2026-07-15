@@ -1,0 +1,51 @@
+{
+  "fixtureVersion": "1.0.0",
+  "label": "CONTRACT FIXTURE — NON-LIVE DATA",
+  "generatedAt": "2026-07-14T21:31:58.374916Z",
+  "domains": {
+    "status": { "status": "reference_fixture_available", "runtime": "not_connected", "phase": "5X-B", "hostedAcceptance": "pending" },
+    "readiness": { "phase5XA": "complete", "phase5XB": "implementation", "phase5XC": "pending_hosted_connection", "productionReady": false, "enterpriseReady": false },
+    "runtime-verification": { "status": "complete_with_limitations", "environment": "local_reference_fixture", "runId": "PHASE-5X-A9AA85D5C9E6", "drilldownAvailable": true },
+    "runtime-matrix": { "matrix": [
+      { "capabilityId": "integration", "status": "verified_locally", "passed": true },
+      { "capabilityId": "intelligence", "status": "verified_with_model_limitations", "passed": true },
+      { "capabilityId": "conclave", "status": "staged", "passed": false },
+      { "capabilityId": "governance", "status": "verified_locally", "passed": true },
+      { "capabilityId": "execution", "status": "verified_local_bounded_handler_only", "passed": true },
+      { "capabilityId": "rollback", "status": "unverified", "passed": false }
+    ] },
+    "claims": { "items": [
+      { "id": "CLAIM-PORTAL-READONLY", "claim": "The portal contract rejects mutations.", "status": "verified_local", "proofIds": ["PROOF-20260714213158-90F39693"] },
+      { "id": "CLAIM-HOSTED-CONNECTION", "claim": "Hosted runtime connectivity is accepted.", "status": "unverified", "proofIds": [] }
+    ] },
+    "proofs": { "items": [
+      { "id": "PROOF-20260714213158-90F39693", "title": "Phase 5X-A local contract acceptance", "status": "verified_local", "scope": "Reference fixture and BFF contract" }
+    ] },
+    "receipts": { "items": [
+      { "id": "PORTAL-LOCAL-REC-86244CC7947F", "title": "Local reference portal receipt", "status": "verified_local", "scope": "Local fixture only" }
+    ] },
+    "capabilities": { "items": [
+      { "id": "integration", "state": "verified_live", "environment": "local" },
+      { "id": "conclave", "state": "staged", "environment": "none" },
+      { "id": "experience", "state": "preview_only", "environment": "standalone_portal" }
+    ] },
+    "layers": { "items": ["integration", "intelligence", "conclave", "governance", "execution", "experience"] },
+    "connectors": { "items": [], "status": "not_exercised" },
+    "asset-manifest": { "manifestVersion": "1.0.0", "route": "/api/portal/asset-manifest", "categories": 16 },
+    "asset-coverage": { "coverage": "partial", "dependencies": ["runtime read identity", "externally reachable runtime API"], "verificationState": "local_fixture_verified", "limitations": ["Hosted connection not verified"], "missingRequirements": ["Replit deployment", "runtime service identity", "Phase 5X-C acceptance"] },
+    "specialists": { "actualTrainedSLMs": 0, "items": [
+      { "id": "proposal_estimator", "maturity": "rag_backed_specialist", "trainedModel": false },
+      { "id": "intake_classifier", "maturity": "tool_backed_specialist_agent", "trainedModel": false },
+      { "id": "governance_reviewer", "maturity": "prompted_specialist_profile", "trainedModel": false }
+    ] },
+    "model-hosting": { "defaultProvider": "mock_model", "liveExternalInference": "unverified", "hostedModels": 0, "edgeModels": 0 },
+    "limitations": { "items": ["Hosted connection acceptance is pending Phase 5X-C.", "Conclave remains staged.", "No trained, hosted, or edge SLM was verified.", "No external connector was exercised.", "Rollback was not exercised.", "The curated nexicron-demo-factory Replit design reference was not accessible."] },
+    "persistence": { "source": "local", "cloudPrimary": false, "hostedState": "unverified" },
+    "hosted-readiness": { "status": "pending", "missing": ["deployed Replit application", "external runtime endpoint", "portal read service identity"] },
+    "exposure": { "portal": "not_deployed", "runtime": "not_externally_verified", "credential": "not_issued" }
+  },
+  "details": {
+    "proof": { "PROOF-20260714213158-90F39693": { "id": "PROOF-20260714213158-90F39693", "status": "verified_local", "summary": "The Phase 5X-A local reference fixture passed its read-only contract, origin, truth-boundary, and secret-isolation checks.", "limitations": ["Not hosted acceptance", "Not production readiness"] } },
+    "receipt": { "PORTAL-LOCAL-REC-86244CC7947F": { "id": "PORTAL-LOCAL-REC-86244CC7947F", "status": "verified_local", "summary": "Receipt for the bounded local reference portal verification.", "limitations": ["Local fixture only"] } }
+  }
+}
