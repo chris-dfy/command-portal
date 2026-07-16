@@ -99,22 +99,19 @@ test("mission control consumes the versioned Runtime parity contract", async () 
 });
 
 test("Operations Center manifests the Runtime-owned Executive Operating Loop", async () => {
-  const [app, center, client, portalClient] = await Promise.all([
+  const [app, center, contract, portalClient] = await Promise.all([
     read("../src/App.tsx"), read("../src/components/OperationsCenter.tsx"), read("../src/lib/eox-client.ts"), read("../src/lib/portal-client.ts")
   ]);
   assert.match(app, /useState<AreaId>\("center"\)/);
-  for (const label of ["Operations Center", "Executive Brief", "Operational Health", "Attention Queue", "Recommended Actions", "Operational Understanding", "Mission Timeline", "Begin Executive Briefing", "Executive state"]) assert.match(center, new RegExp(label));
+  for (const label of ["Operations Center", "Executive Brief", "Operational Health", "Attention Queue", "Recommended Actions", "Operational Understanding", "Mission Timeline", "Executive state"]) assert.match(center, new RegExp(label));
   assert.match(center, /assessment\.loop\.map/);
   assert.match(center, /Executive Operating Loop/);
   assert.match(portalClient, /"eox"/);
   for (const significance of ["Business impact", "Operational impact", "Mission impact", "Why this matters"]) assert.match(center, new RegExp(significance, "i"));
-  assert.match(client, /\/api\/runtime\/executive-briefing/);
-  assert.match(client, /\/api\/runtime\/interactions/);
-  assert.match(client, /\/resume/);
-  assert.match(center, /eoxClient\.resume/);
-  assert.match(center, /speechSynthesis/);
-  assert.match(center, /HighlightRequested/);
-  assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(center + client), false);
+  assert.doesNotMatch(center, /Begin Executive Briefing|speechSynthesis|HighlightRequested|eoxClient/);
+  assert.match(center, /persistent NEXUS copilot is the client presentation surface/i);
+  assert.doesNotMatch(contract, /beginBriefing|speechRequested|\/api\/runtime\/executive-briefing/);
+  assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(center + contract), false);
 });
 
 test("NEXUS remains a Runtime-governed conversational copilot across every portal area", async () => {
@@ -133,6 +130,7 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.match(copilot, /plan, scope, and price a Nexicron project/i);
   assert.match(hif, /conversationId/);
   assert.match(realtime, /RTCPeerConnection/);
+  assert.doesNotMatch(app, /Begin Executive Briefing/);
   assert.match(styles, /Persistent NEXUS executive copilot/);
   for (const source of [app, copilot, hif]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);

@@ -544,7 +544,6 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 .session-login { display: grid; grid-template-columns: minmax(240px, 1fr) auto; align-items: end; gap: 10px; max-width: 720px; }
 .operations-center { display: grid; gap: 16px; animation: content-enter .35s ease both; }
 .eox-hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .38fr); gap: 20px; padding: 28px; border: 1px solid rgba(var(--accent-rgb), .24); border-radius: 14px; background: radial-gradient(circle at 85% 12%, rgba(var(--accent-rgb), .14), transparent 35%), linear-gradient(145deg, rgba(7, 23, 31, .96), rgba(5, 15, 22, .96)); box-shadow: 0 22px 60px rgba(0, 0, 0, .2); transition: border-color .2s ease, box-shadow .2s ease; }
-.eox-hero[data-highlight="true"], .eox-section[data-highlight="true"], .eox-indicators[data-highlight="true"], .eox-list[data-highlight="true"], .mission-timeline[data-highlight="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), .18), 0 0 32px rgba(var(--accent-rgb), .12); }
 .eox-hero > div:first-child { display: grid; align-content: center; gap: 8px; }
 .eox-hero > div:first-child > span { color: var(--accent); font-size: .63rem; letter-spacing: .15em; text-transform: uppercase; }
 .eox-hero h2 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); font-weight: 520; letter-spacing: -.045em; }
@@ -553,11 +552,6 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 .eox-hero > aside span { color: var(--muted); font-size: .59rem; letter-spacing: .1em; text-transform: uppercase; }
 .eox-hero > aside strong { color: var(--accent); font-size: 1.25rem; font-weight: 520; }
 .eox-hero > aside small { color: var(--muted); font-size: .65rem; line-height: 1.5; }
-.eox-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
-.eox-actions button { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 9px 14px; border: 1px solid rgba(var(--accent-rgb), .42); border-radius: 8px; color: var(--text); background: rgba(var(--accent-rgb), .13); }
-.eox-actions button:first-child { color: #041219; background: var(--accent); font-weight: 650; }
-.eox-actions button:disabled { opacity: .5; cursor: wait; }
-.eox-message { grid-column: 1 / -1; color: var(--muted) !important; font-size: .66rem !important; }
 .operating-loop { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
 .operating-loop > div { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 5px; }
 .operating-loop > div:last-child b { display: none; }
