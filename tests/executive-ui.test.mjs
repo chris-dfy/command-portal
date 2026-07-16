@@ -117,6 +117,28 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(center + client), false);
 });
 
+test("NEXUS remains a Runtime-governed conversational copilot across every portal area", async () => {
+  const [app, copilot, hif, realtime, styles] = await Promise.all([
+    read("../src/App.tsx"),
+    read("../src/components/NexusCopilot.tsx"),
+    read("../src/lib/hif-client.ts"),
+    read("../src/lib/realtime-voice-client.ts"),
+    read("../src/styles.css"),
+  ]);
+  assert.match(app, /<NexusCopilot/);
+  assert.match(copilot, /Enterprise executive operating intelligence/);
+  assert.match(copilot, /hifClient\.start\(request, "text", \{\}, conversationId\.current\)/);
+  assert.match(copilot, /RealtimeVoiceClient/);
+  assert.match(copilot, /Model-native reasoning is labeled\. Runtime evidence remains authoritative/);
+  assert.match(copilot, /plan, scope, and price a Nexicron project/i);
+  assert.match(hif, /conversationId/);
+  assert.match(realtime, /RTCPeerConnection/);
+  assert.match(styles, /Persistent NEXUS executive copilot/);
+  for (const source of [app, copilot, hif]) {
+    assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
+  }
+});
+
 test("fixture mode and silent fixture fallback are absent", async () => {
   const [server, app, readme] = await Promise.all([read("../server/portal-server.mjs"), read("../src/App.tsx"), read("../README.md")]);
   for (const source of [server, app, readme]) {

@@ -79,9 +79,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const hifClient = Object.freeze({
-  start: (inputText: string, modality: string, presentation: Record<string, unknown> = {}) => request<{ interaction: HifInteraction; events: HifEvent[] }>("", {
+  start: (inputText: string, modality: string, presentation: Record<string, unknown> = {}, conversationId?: string) => request<{ interaction: HifInteraction; events: HifEvent[] }>("", {
     method: "POST",
-    body: JSON.stringify({ clientId: "nexus-web", inputText, modality, kind: "converse", stream: true, speechRequested: true, presentation }),
+    body: JSON.stringify({ clientId: "nexus-web", inputText, modality, kind: "converse", conversationId, stream: true, speechRequested: true, presentation }),
   }),
   events: (interactionId: string) => request<{ events: HifEvent[] }>(`/${encodeURIComponent(interactionId)}/events`),
   interrupt: (interactionId: string) => request<{ interaction: HifInteraction; events: HifEvent[] }>(`/${encodeURIComponent(interactionId)}/interrupt`, {

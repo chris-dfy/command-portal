@@ -12,6 +12,7 @@ import { StatusPill } from "./components/StatusPill";
 import { VoiceWorkspace } from "./components/VoiceWorkspace";
 import { OperationsWorkspace } from "./components/OperationsWorkspace";
 import { OperationsCenter } from "./components/OperationsCenter";
+import { NexusCopilot } from "./components/NexusCopilot";
 import { portalClient } from "./lib/portal-client";
 import { displayLabel, statusTone } from "./lib/presentation";
 import type { ConnectionState, GatewayEnvelope, ProviderRecord, RuntimeSnapshot } from "./lib/types";
@@ -155,6 +156,13 @@ export function App() {
         {active === "evidence" && <Evidence snapshot={snapshot} />}
       </>}
     </main>
+
+    <NexusCopilot
+      activeArea={active}
+      activeLabel={current.label}
+      runtimeState={state}
+      onNavigate={(area) => setActive(area)}
+    />
 
     <footer className="global-footer"><span>Same-origin Experience Gateway</span><span>Validated local capability allowlist</span><span>No browser-held Runtime credential</span><span>Runtime-owned context and execution</span></footer>
   </div>;
