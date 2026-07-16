@@ -86,7 +86,10 @@ test("Executive Briefing and its HIF lifecycle are the only bounded hosted Runti
     observed.push({ url, options });
     return runtimeResponse({ interaction: { interactionId: "INT-EOX-1" }, events: [{ type: "SpeechStarted", payload: { text: "Briefing" } }] });
   });
-  assert.deepEqual(RUNTIME_MUTATION_ROUTES, { "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing" });
+  assert.deepEqual(RUNTIME_MUTATION_ROUTES, {
+    "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing",
+    "/api/runtime/interactions": "/runtime/interactions"
+  });
   const response = await fetch(`${base}/api/runtime/executive-briefing`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clientId: "nexus-web", modality: "text", speechRequested: true })
@@ -102,6 +105,36 @@ test("Executive Briefing and its HIF lifecycle are the only bounded hosted Runti
   });
   assert.equal(resumed.status, 200);
   assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/resume");
+});
+
+test("Realtime WebRTC SDP crosses the same-origin gateway without exposing either server credential", async () => {
+  const offer = "v=0\r\na=offer\r\n".repeat(12);
+  const answer = "v=0\r\na=answer\r\n".repeat(12);
+  let observed;
+  const base = await start(async (url, options) => {
+    observed = { url, options };
+    return new Response(answer, { status: 201, headers: { "Content-Type": "application/sdp" } });
+  });
+  const response = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST", headers: { "Content-Type": "application/sdp", Accept: "application/sdp" }, body: offer
+  });
+  assert.equal(response.status, 201);
+  assert.equal(await response.text(), answer);
+  assert.equal(observed.url, "https://runtime.invalid/runtime/voice/realtime/call");
+  assert.equal(observed.options.headers.Authorization, "Bearer server-only-test-token");
+  assert.equal(Buffer.from(observed.options.body).toString("utf8"), offer);
+  assert.equal(answer.includes("server-only-test-token"), false);
+});
+
+test("Realtime gateway rejects non-SDP and unsafe methods before contacting Runtime", async () => {
+  let calls = 0;
+  const base = await start(async () => { calls += 1; return runtimeResponse({}); });
+  const invalid = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+  });
+  assert.equal(invalid.status, 415);
+  assert.equal((await fetch(`${base}/api/runtime/realtime/call`)).status, 405);
+  assert.equal(calls, 0);
 });
 
 test("runtime credential is server-only and never serialized", async () => {

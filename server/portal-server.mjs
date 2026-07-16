@@ -24,11 +24,13 @@ export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/diagnostics": "/runtime/diagnostics",
   "/api/runtime/governance": "/runtime/governance",
   "/api/runtime/connectors": "/runtime/connectors",
+  "/api/runtime/realtime-voice": "/runtime/voice/realtime/status",
   "/api/runtime/eox": "/runtime/executive-operating-loop"
 });
 
 export const RUNTIME_MUTATION_ROUTES = Object.freeze({
-  "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing"
+  "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing",
+  "/api/runtime/interactions": "/runtime/interactions"
 });
 
 function resolveRuntimeMutation(pathname) {
@@ -177,6 +179,7 @@ export function loadConfig(overrides = {}) {
     allowedOrigins: String(overrides.allowedOrigins ?? process.env.COMMAND_PORTAL_ALLOWED_ORIGINS ?? "")
       .split(",").map((item) => item.trim()).filter(Boolean),
     timeoutMs: integer(overrides.timeoutMs ?? process.env.COMMAND_PORTAL_REQUEST_TIMEOUT_MS, 8_000),
+    realtimeTimeoutMs: integer(overrides.realtimeTimeoutMs ?? process.env.COMMAND_PORTAL_REALTIME_TIMEOUT_MS, 25_000),
     cacheTtlMs: integer(overrides.cacheTtlMs ?? process.env.COMMAND_PORTAL_CACHE_TTL_MS, 15_000),
     maxResponseBytes: integer(overrides.maxResponseBytes ?? process.env.COMMAND_PORTAL_MAX_RESPONSE_BYTES, 1_048_576),
     localMaxRequestBytes: integer(overrides.localMaxRequestBytes ?? process.env.COMMAND_PORTAL_LOCAL_MAX_REQUEST_BYTES, 37_748_736),
@@ -384,6 +387,22 @@ async function readJsonBody(request, maximumBytes) {
   } catch {
     throw new GatewayFailure("request_invalid", "Request body must be a JSON object.", "Unknown", 400);
   }
+}
+
+async function readRawBody(request, maximumBytes, contentType) {
+  const declared = Number(request.headers["content-length"] ?? 0);
+  if (declared > maximumBytes) throw new GatewayFailure("request_too_large", "Realtime session offer exceeded the gateway limit.", "Unknown", 413);
+  if (!String(request.headers["content-type"] ?? "").toLowerCase().startsWith(contentType)) {
+    throw new GatewayFailure("content_type_invalid", `Realtime session offers require ${contentType}.`, "Unknown", 415);
+  }
+  const chunks = [];
+  let received = 0;
+  for await (const chunk of request) {
+    received += chunk.length;
+    if (received > maximumBytes) throw new GatewayFailure("request_too_large", "Realtime session offer exceeded the gateway limit.", "Unknown", 413);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 function strictKeys(payload, allowed) {
@@ -714,6 +733,20 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
     strictKeys(raw, new Set(["reason"])); payload = { reason: boundedText(raw.reason ?? "user_barge_in", "reason", 200) };
   } else if (runtimePath.endsWith("/resume") || runtimePath.endsWith("/presentation-complete")) {
     strictKeys(raw, new Set()); payload = {};
+  } else if (runtimePath === "/runtime/interactions") {
+    strictKeys(raw, new Set(["clientId", "inputText", "modality", "kind", "subject", "conversationId", "stream", "speechRequested", "presentation", "metadata"]));
+    payload = {
+      clientId: boundedText(raw.clientId, "clientId", 128),
+      inputText: boundedText(raw.inputText, "inputText", 20_000),
+      modality: boundedText(raw.modality ?? "text", "modality", 40),
+      kind: boundedText(raw.kind ?? "converse", "kind", 80),
+      speechRequested: raw.speechRequested !== false,
+      stream: raw.stream !== false,
+      ...(raw.subject ? { subject: boundedText(raw.subject, "subject", 240) } : {}),
+      ...(raw.conversationId ? { conversationId: boundedText(raw.conversationId, "conversationId", 160) } : {}),
+      ...(raw.presentation && typeof raw.presentation === "object" && !Array.isArray(raw.presentation) ? { presentation: raw.presentation } : {}),
+      ...(raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? { metadata: raw.metadata } : {})
+    };
   } else {
     strictKeys(raw, new Set(["clientId", "modality", "speechRequested"]));
     payload = { clientId: boundedText(raw.clientId, "clientId", 128), modality: boundedText(raw.modality ?? "text", "modality", 40), speechRequested: raw.speechRequested !== false };
@@ -734,6 +767,75 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
     const failure = error instanceof GatewayFailure ? error : new GatewayFailure("runtime_unavailable", "Runtime briefing request failed safely.", "Unavailable", 503);
     return sendJson(response, failure.status, failureEnvelope(config, tracker, url.pathname, failure));
   } finally { clearTimeout(timer); }
+}
+
+async function handleRealtimeCall(request, response, config, runtimeFetch) {
+  const url = new URL(request.url, "http://portal.invalid");
+  if (!requestOriginAllowed(request, config)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
+  if (url.search) return sendJson(response, 400, { ok: false, error: { code: "query_not_allowed", message: "Realtime session routes do not accept browser query parameters." }, truth: TRUTH });
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, { Allow: "POST, OPTIONS", "Cache-Control": "no-store" });
+    return response.end();
+  }
+  if (request.method !== "POST") return sendJson(response, 405, { ok: false, error: { code: "method_not_allowed", message: "Realtime session creation requires POST." }, truth: TRUTH }, { Allow: "POST, OPTIONS" });
+
+  let offer;
+  try {
+    offer = await readRawBody(request, 262_144, "application/sdp");
+  } catch (error) {
+    const failure = error instanceof GatewayFailure ? error : new GatewayFailure("invalid_sdp", "Realtime session offer is invalid.", "Unknown", 400);
+    return sendJson(response, failure.status, { ok: false, error: { code: failure.code, message: failure.message }, truth: TRUTH });
+  }
+  if (!offer.toString("utf8").trimStart().startsWith("v=0")) {
+    return sendJson(response, 400, { ok: false, error: { code: "invalid_sdp", message: "Realtime session offer is not valid SDP." }, truth: TRUTH });
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.realtimeTimeoutMs);
+  try {
+    let upstream;
+    try {
+      upstream = await runtimeFetch(`${config.runtimeBaseUrl}/runtime/voice/realtime/call`, {
+        method: "POST",
+        headers: { Accept: "application/sdp", "Content-Type": "application/sdp", Authorization: `Bearer ${config.runtimeToken}` },
+        body: offer,
+        signal: controller.signal,
+        redirect: "error"
+      });
+    } catch (error) {
+      if (error?.name === "AbortError" || controller.signal.aborted) throw new GatewayFailure("realtime_timed_out", "Realtime session creation timed out.", "Timed Out", 504);
+      throw new GatewayFailure("realtime_unavailable", "Realtime voice is unavailable.", "Unavailable", 503);
+    }
+    if ([401, 403].includes(upstream.status)) throw new GatewayFailure("runtime_unauthorized", "Runtime rejected the server credential.", "Unauthorized", 502);
+    if (!upstream.ok) {
+      let message = "Runtime could not create the Realtime voice session.";
+      try {
+        const body = await upstream.json();
+        if (typeof body?.error?.message === "string") message = body.error.message.slice(0, 300);
+      } catch { /* keep the safe message */ }
+      throw new GatewayFailure("realtime_unavailable", message, "Unavailable", upstream.status >= 500 ? 503 : 502);
+    }
+    if (!String(upstream.headers.get("content-type") ?? "").toLowerCase().startsWith("application/sdp")) {
+      throw new GatewayFailure("realtime_response_invalid", "Runtime returned an invalid Realtime response.", "Unknown", 502);
+    }
+    const answer = Buffer.from(await upstream.arrayBuffer());
+    if (answer.byteLength > 262_144 || !answer.toString("utf8").trimStart().startsWith("v=0")) {
+      throw new GatewayFailure("realtime_response_invalid", "Runtime returned an invalid Realtime response.", "Unknown", 502);
+    }
+    structuredLog("experience_gateway_realtime_session", { route: url.pathname, status: upstream.status });
+    response.writeHead(upstream.status, {
+      "Content-Type": "application/sdp",
+      "Content-Length": answer.byteLength,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff"
+    });
+    return response.end(answer);
+  } catch (error) {
+    const failure = error instanceof GatewayFailure ? error : new GatewayFailure("realtime_gateway_error", "Realtime session creation failed safely.", "Unknown", 500);
+    return sendJson(response, failure.status, { ok: false, error: { code: failure.code, message: failure.message }, truth: TRUTH });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchWithRetry(runtimePath, config, runtimeFetch) {
@@ -851,7 +953,7 @@ function serveStatic(request, response) {
       "Content-Type": CONTENT_TYPES[extname(filePath)] ?? "application/octet-stream",
       "Content-Length": stat.size,
       "X-Content-Type-Options": "nosniff",
-      "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
+      "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
     });
     if (request.method === "HEAD") return response.end();
     createReadStream(filePath).pipe(response);
@@ -875,7 +977,10 @@ export function createPortalServer(options = {}) {
     } else if (request.url?.startsWith("/api/operations")) {
       handleOperationalApi(request, response, config, operationalFetch, sessionAuthority)
         .catch(() => sendJson(response, 500, operationalFailure(config, request.url, "operational_gateway_error", "The hosted operation failed safely.", "Unknown")));
-    } else if (request.url?.startsWith("/api/runtime/executive-briefing") || request.url?.startsWith("/api/runtime/interactions/")) {
+    } else if (request.url?.startsWith("/api/runtime/realtime/call")) {
+      handleRealtimeCall(request, response, config, runtimeFetch)
+        .catch(() => sendJson(response, 500, { ok: false, error: { code: "realtime_gateway_error", message: "Realtime session creation failed safely." }, truth: TRUTH }));
+    } else if (request.url?.startsWith("/api/runtime/executive-briefing") || request.url === "/api/runtime/interactions" || request.url?.startsWith("/api/runtime/interactions/")) {
       handleRuntimeMutation(request, response, config, runtimeFetch, tracker)
         .catch((error) => {
           const failure = error instanceof GatewayFailure ? error : new GatewayFailure("gateway_error", "The bounded Runtime request failed safely.", "Unknown", 500);

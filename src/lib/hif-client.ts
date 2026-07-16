@@ -68,7 +68,7 @@ export function presentHifEvents(events: HifEvent[], initial = initialHifPresent
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/local/interactions${path}`, {
+  const response = await fetch(`/api/runtime/interactions${path}`, {
     ...options,
     credentials: "same-origin",
     headers: { Accept: "application/json", ...(options?.body ? { "Content-Type": "application/json" } : {}) },

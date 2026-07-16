@@ -1,99 +1,151 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Send, Volume2 } from "lucide-react";
+import { Mic, MicOff, Send, Volume2, Waves } from "lucide-react";
 import { DataPanel } from "./DataPanel";
-import { localNexusClient } from "../lib/local-client";
 import { displayLabel } from "../lib/presentation";
-import { hifClient, initialHifPresentationState, presentHifEvents, type HifEvent, type HifInteraction } from "../lib/hif-client";
+import { hifClient, initialHifPresentationState, presentHifEvents, type HifInteraction } from "../lib/hif-client";
+import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
 
-type SpeechResultEvent = { results: ArrayLike<{ 0: { transcript: string } }> };
-type SpeechErrorEvent = { error: string };
-type BrowserSpeechRecognition = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onresult: ((event: SpeechResultEvent) => void) | null;
-  onerror: ((event: SpeechErrorEvent) => void) | null;
-  onend: (() => void) | null;
-  start(): void;
-  stop(): void;
+type VoiceStatus = {
+  state?: string;
+  provider?: string;
+  model?: string;
+  voice?: string;
+  transport?: string;
+  serverVAD?: boolean;
+  interruptResponse?: boolean;
+  contextAssemblyOwner?: string;
+  limitations?: string[];
 };
 
+type TranscriptEntry = { speaker: "You" | "NEXUS"; text: string };
+
 export function VoiceWorkspace() {
+  const [voiceState, setVoiceState] = useState<RealtimeVoiceState>("idle");
+  const [status, setStatus] = useState<VoiceStatus | null>(null);
+  const [amplitude, setAmplitude] = useState(0);
   const [transcript, setTranscript] = useState("");
-  const [history, setHistory] = useState<Array<Record<string, unknown>>>([]);
-  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
-  const [listening, setListening] = useState(false);
-  const [capturedBySpeech, setCapturedBySpeech] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [assistantTranscript, setAssistantTranscript] = useState("");
+  const [history, setHistory] = useState<TranscriptEntry[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [interaction, setInteraction] = useState<HifInteraction | null>(null);
-  const [interactionEvents, setInteractionEvents] = useState<HifEvent[]>([]);
   const [presentation, setPresentation] = useState(initialHifPresentationState);
-  const recognition = useRef<BrowserSpeechRecognition | null>(null);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const liveClient = useRef<RealtimeVoiceClient | null>(null);
 
-  const SpeechRecognition = typeof window === "undefined" ? undefined : (window as unknown as { SpeechRecognition?: new () => BrowserSpeechRecognition; webkitSpeechRecognition?: new () => BrowserSpeechRecognition }).SpeechRecognition
-    ?? (window as unknown as { webkitSpeechRecognition?: new () => BrowserSpeechRecognition }).webkitSpeechRecognition;
+  const connected = !["idle", "error"].includes(voiceState);
+  const supported = RealtimeVoiceClient.supported();
 
-  async function refresh() {
-    const [nextStatus, nextHistory] = await Promise.all([localNexusClient.voiceStatus(), localNexusClient.voiceHistory()]);
-    setStatus(nextStatus); setHistory(nextHistory.events ?? []);
-  }
-  useEffect(() => { void refresh().catch((error) => setMessage(messageFrom(error))); return () => recognition.current?.stop(); }, []);
+  useEffect(() => {
+    void refreshStatus();
+    return () => liveClient.current?.stop();
+  }, []);
 
-  async function route(source: "browser_speech" | "text_fallback") {
-    if (!transcript.trim()) return;
-    setBusy(true); setMessage(null);
+  async function refreshStatus() {
     try {
-      const response = await hifClient.start(transcript.trim(), source, {});
-      setPresentation(presentHifEvents(response.events));
-      setInteraction(response.interaction); setInteractionEvents(response.events);
-      setMessage(response.interaction.responseText || `Runtime returned ${response.interaction.state}.`);
-      const speech = response.events.find((event) => event.type === "SpeechStarted")?.payload.text;
-      if (speech) speak(String(speech));
-      await refresh();
-    } catch (error) { setMessage(messageFrom(error)); }
-    finally { setBusy(false); }
+      const response = await fetch("/api/runtime/realtime-voice", { credentials: "same-origin", headers: { Accept: "application/json", "Cache-Control": "no-cache" } });
+      const body = await response.json() as { ok?: boolean; data?: VoiceStatus; error?: { message?: string } };
+      if (!response.ok || !body.ok || !body.data) throw new Error(body.error?.message ?? "Realtime voice status is unavailable.");
+      setStatus(body.data);
+    } catch (error) {
+      setMessage(messageFrom(error));
+    }
   }
 
-  function toggleListening() {
-    if (!SpeechRecognition) { setMessage("Browser speech recognition is unavailable. Use the text transcript control."); return; }
-    if (listening) { recognition.current?.stop(); return; }
-    const next = new SpeechRecognition();
-    next.continuous = false; next.interimResults = false; next.lang = "en-US";
-    next.onresult = (event) => { const spoken = event.results[0]?.[0]?.transcript ?? ""; setTranscript(spoken); setCapturedBySpeech(true); setMessage("Speech captured by the browser. Review, then send it to the governed Runtime."); };
-    next.onerror = (event) => setMessage(`Speech capture error: ${event.error}`);
-    next.onend = () => setListening(false);
-    recognition.current = next; setListening(true); next.start();
+  async function startLiveVoice() {
+    if (!audio.current) return;
+    setMessage(null);
+    setAssistantTranscript("");
+    const client = new RealtimeVoiceClient(audio.current, {
+      onState: setVoiceState,
+      onAmplitude: setAmplitude,
+      onUserTranscript: (text) => {
+        setTranscript(text);
+        setHistory((items) => [{ speaker: "You", text } as TranscriptEntry, ...items].slice(0, 10));
+      },
+      onAssistantTranscript: (text) => setAssistantTranscript(text),
+      onError: setMessage,
+    });
+    liveClient.current = client;
+    try {
+      await client.connect();
+      setMessage("Live voice is connected. Speak naturally; you can interrupt NEXUS at any time.");
+    } catch (error) {
+      setVoiceState("error");
+      setMessage(messageFrom(error));
+    }
+  }
+
+  function stopLiveVoice() {
+    if (assistantTranscript.trim()) setHistory((items) => [{ speaker: "NEXUS", text: assistantTranscript.trim() } as TranscriptEntry, ...items].slice(0, 10));
+    liveClient.current?.stop();
+    liveClient.current = null;
+    setMessage("Live voice session ended. No provider credential was stored in the browser.");
+  }
+
+  async function sendText() {
+    if (!transcript.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await hifClient.start(transcript.trim(), "text", {});
+      setPresentation(presentHifEvents(response.events));
+      setInteraction(response.interaction);
+      setAssistantTranscript(response.interaction.responseText);
+      setHistory((items) => [
+        { speaker: "NEXUS", text: response.interaction.responseText } as TranscriptEntry,
+        { speaker: "You", text: transcript.trim() } as TranscriptEntry,
+        ...items,
+      ].slice(0, 10));
+      setMessage("Text request was processed by the shared Runtime Human Interaction Framework.");
+    } catch (error) {
+      setMessage(messageFrom(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return <div className="experience-grid local-workspace">
-    <DataPanel eyebrow="Shared Runtime voice operator" title="Speak with NEXUS" icon={<Mic size={18} />} className="span-2">
-      <p className="workspace-intro">Speech is captured by the browser Experience Layer and routed as a transcript to the same governed Runtime voice operator used by Desktop NEXUS Command.</p>
-      <div className="voice-composer">
-        <button className={listening ? "is-listening" : ""} onClick={toggleListening} disabled={busy}>{listening ? <MicOff size={19} /> : <Mic size={19} />}<span>{listening ? "Stop listening" : "Start listening"}</span></button>
-        <textarea value={transcript} onChange={(event) => { setTranscript(event.target.value); setCapturedBySpeech(false); }} placeholder="Speak or type a governed NEXUS request" />
-        <button onClick={() => void route(capturedBySpeech ? "browser_speech" : "text_fallback")} disabled={busy || !transcript.trim()}><Send size={17} /> Send</button>
+    <audio ref={audio} autoPlay className="voice-audio" aria-hidden="true" />
+    <DataPanel eyebrow="Runtime-managed Realtime voice" title="Speak with NEXUS" icon={<Mic size={18} />} className="span-2">
+      <p className="workspace-intro">A natural, full-duplex voice session with server voice detection, streaming audio, and interruption. The Runtime owns the provider session and truth boundaries; this browser owns only microphone capture and playback.</p>
+      <div className="realtime-voice-stage">
+        <div className={`voice-orb voice-${voiceState}`} style={{ "--voice-amplitude": amplitude } as React.CSSProperties}>
+          <span><Waves size={31} /></span>
+        </div>
+        <div className="voice-stage-copy">
+          <small>LIVE VOICE STATE</small>
+          <strong>{displayLabel(voiceState)}</strong>
+          <p>{voiceState === "speaking" ? assistantTranscript || "NEXUS is responding…" : voiceState === "thinking" ? "NEXUS is forming a response…" : connected ? "Listening — speak naturally" : "Start a secure live voice session"}</p>
+        </div>
+        <button className={connected ? "voice-stop" : "voice-start"} onClick={connected ? stopLiveVoice : () => void startLiveVoice()} disabled={!supported || voiceState === "connecting" || status?.state !== "available"}>
+          {connected ? <MicOff size={19} /> : <Mic size={19} />}
+          <span>{connected ? "End live voice" : voiceState === "connecting" ? "Connecting…" : "Start live voice"}</span>
+        </button>
+      </div>
+      <div className="voice-text-fallback">
+        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder="Or type a request for the governed Runtime interaction framework" />
+        <button onClick={() => void sendText()} disabled={busy || !transcript.trim()}><Send size={17} /> Send text</button>
       </div>
       {message && <p className="workspace-message" role="status">{message}</p>}
-      <p className="boundary-note">Browser speech support is capability-detected; its provider and processing location depend on the browser and are not verified by NEXUS Runtime. High-risk voice actions remain approval-gated and cannot self-approve.</p>
+      <p className="boundary-note">Realtime conversation may use model-native knowledge. Organization-specific facts, live operational state, completed actions, and authoritative evidence still require registered Runtime context, connectors, proofs, and receipts.</p>
     </DataPanel>
 
-    <DataPanel eyebrow="Voice state" title="Runtime operator" icon={<Volume2 size={18} />}>
-      <dl className="voice-facts"><div><dt>Status</dt><dd>{displayLabel(interaction?.state ?? String(status?.currentMode ?? "unknown"))}</dd></div><div><dt>Intent Resolution</dt><dd>{displayLabel(interaction?.intentResolution?.name ?? String(status?.lastResolvedIntent ?? "none"))}</dd></div><div><dt>Presentation</dt><dd>{displayLabel(`${presentation.avatarMode} · ${presentation.speech}`)}</dd></div><div><dt>Proof</dt><dd>{interaction?.proofIds?.[0] ?? String(status?.lastProofId ?? "unavailable")}</dd></div></dl>
+    <DataPanel eyebrow="Voice system" title="Connection contract" icon={<Volume2 size={18} />}>
+      <dl className="voice-facts">
+        <div><dt>Availability</dt><dd>{displayLabel(status?.state ?? "unknown")}</dd></div>
+        <div><dt>Provider / model</dt><dd>{status?.provider && status?.model ? `${status.provider} · ${status.model}` : "Not reported"}</dd></div>
+        <div><dt>Voice / transport</dt><dd>{status?.voice && status?.transport ? `${status.voice} · ${status.transport}` : "Not reported"}</dd></div>
+        <div><dt>Conversation</dt><dd>{status?.serverVAD ? "Server voice detection" : "Not verified"}{status?.interruptResponse ? " · interruption enabled" : ""}</dd></div>
+        <div><dt>Context owner</dt><dd>{status?.contextAssemblyOwner ?? "NEXUS Runtime"}</dd></div>
+        <div><dt>Governed text state</dt><dd>{displayLabel(interaction?.state ?? `${presentation.avatarMode} · ${presentation.speech}`)}</dd></div>
+      </dl>
     </DataPanel>
 
-    <DataPanel eyebrow="Governed history" title="Recent voice events" icon={<Mic size={18} />}>
-      <div className="voice-history">{history.length ? history.slice(0, 8).map((event, index) => <article key={String(event.eventId ?? index)}><strong>{String(event.transcript ?? "Voice event")}</strong><span>{displayLabel(String(event.status ?? "unknown"))} · {displayLabel(String(event.resolvedIntent ?? "unknown"))}</span><code>{String(event.receiptId ?? event.proofId ?? "Evidence unavailable")}</code></article>) : <p>No voice-operator events are recorded.</p>}</div>
+    <DataPanel eyebrow="Conversation record" title="This browser session" icon={<Mic size={18} />}>
+      <div className="voice-history">{history.length ? history.map((entry, index) => <article key={`${entry.speaker}-${index}`}><strong>{entry.speaker}</strong><span>{entry.text}</span></article>) : <p>No conversation transcript is held in this browser session.</p>}</div>
     </DataPanel>
   </div>;
-}
-
-function speak(text: string) {
-  if (!("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1; utterance.pitch = 1;
-  window.speechSynthesis.speak(utterance);
 }
 
 const messageFrom = (error: unknown) => error instanceof Error ? error.message : String(error);

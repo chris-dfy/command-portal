@@ -24,7 +24,7 @@ Provider Registry
 AI Providers
 ```
 
-The browser never communicates directly with either Runtime. Hosted observations use twelve fixed same-origin GET routes under `/api/runtime`. The NEXUS Experience Gateway attaches the server-held read credential, validates runtime envelopes, negotiates schema and runtime versions, retries bounded transient failures, enforces response limits, and exposes explicit connection and cache state.
+The browser never communicates directly with either Runtime. Hosted observations use fixed same-origin GET routes under `/api/runtime`. The NEXUS Experience Gateway attaches the server-held credential, validates Runtime envelopes, negotiates schema and Runtime versions, retries bounded transient failures, enforces response limits, and exposes explicit connection and cache state. Live voice uses one exact SDP exchange route; no wildcard proxy or provider credential reaches the browser.
 
 Hosted operational access uses the separate `/api/operations` allowlist. Its current classification is single-workspace hosted alpha: signed HttpOnly sessions, CSRF verification, scoped authorization, idempotency keys, fixed tenant/workspace identity, and a server-only Runtime credential are enforced. It does not claim production multi-tenant isolation.
 
@@ -38,6 +38,7 @@ The portal uses `https://nexus-runtime-dev.fly.dev` by default. All runtime conf
 COMMAND_PORTAL_RUNTIME_API_BASE_URL
 COMMAND_PORTAL_RUNTIME_READ_TOKEN
 COMMAND_PORTAL_REQUEST_TIMEOUT_MS
+COMMAND_PORTAL_REALTIME_TIMEOUT_MS
 COMMAND_PORTAL_CACHE_TTL_MS
 COMMAND_PORTAL_MAX_RESPONSE_BYTES
 ```
@@ -67,11 +68,11 @@ Set `COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED=true`, then run `npm run dev:serv
 
 - Document Intelligence ingests supported files, links sources to projects, queries evidence, and displays the Runtime source inventory.
 - Nexicron Projects creates project records and consumes Runtime-owned scope, estimate, planning context, evidence, and artifact contracts.
-- Voice Operator supports typed transcripts and capability-detected browser speech input/output while routing intent, governance, proof, and receipts through the shared Runtime voice operator.
+- Voice Operator supports natural full-duplex WebRTC audio, server voice detection, streaming response audio, and interruption through the Runtime-owned Realtime session contract. Typed requests remain available through the shared Runtime Human Interaction Framework.
 - Human Interaction Framework events provide the common Runtime-owned conversation, speech, streaming, interruption, avatar, navigation, focus, highlighting, and presentation behavior contract shared with NEXUS Command.
 - Mission Control consumes the versioned Runtime Client Parity Contract and presents mission planning, bounded work sessions, approval decisions, dry-run and governed execution requests, and connector readiness.
 
-Only capabilities reported as implemented by Runtime are presented as executable. Numeric estimates remain unavailable when required rate or quantity evidence is absent. Browser speech recognition and synthesis may use browser or operating-system providers; their processing location is not verified by NEXUS Runtime.
+Only capabilities reported as implemented by Runtime are presented as executable. Numeric estimates remain unavailable when required rate or quantity evidence is absent. The browser owns microphone capture, audio playback, and visual state only. Runtime owns voice provider configuration, instructions, context boundaries, and execution constraints; the permanent provider key remains server-side.
 
 ## Truth boundary
 

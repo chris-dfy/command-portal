@@ -52,12 +52,13 @@ test("browser uses only same-origin allowlisted runtime routes and no token", as
   assert.equal(/VITE_.*TOKEN/.test(env), false);
 });
 
-test("local-first workspaces delegate intake, project intelligence, and voice to Runtime", async () => {
-  const [app, intake, projects, voice, client, hif] = await Promise.all([
+test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
+  const [app, intake, projects, voice, realtime, client, hif] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/components/DocumentIntake.tsx"),
     read("../src/components/ProjectStudio.tsx"),
     read("../src/components/VoiceWorkspace.tsx"),
+    read("../src/lib/realtime-voice-client.ts"),
     read("../src/lib/local-client.ts"),
     read("../src/lib/hif-client.ts"),
   ]);
@@ -69,15 +70,16 @@ test("local-first workspaces delegate intake, project intelligence, and voice to
   assert.match(projects, /browser performs no project calculation/i);
   assert.match(projects, /Missing rates or quantities remain missing/i);
   assert.match(projects, /never fabricates a price/i);
-  assert.match(voice, /SpeechRecognition/);
-  assert.match(voice, /speechSynthesis/);
-  assert.match(voice, /capturedBySpeech \? "browser_speech" : "text_fallback"/);
-  assert.match(voice, /processing location depend on the browser/i);
-  assert.match(voice, /approval-gated and cannot self-approve/i);
+  assert.match(realtime, /RTCPeerConnection/);
+  assert.match(realtime, /echoCancellation: true/);
+  assert.match(realtime, /output_audio_buffer\.clear/);
+  assert.match(voice, /Runtime owns the provider session and truth boundaries/i);
+  assert.match(voice, /model-native knowledge/i);
+  assert.equal(/SpeechRecognition|speechSynthesis/.test(voice + realtime), false);
   for (const event of ["SpeechStarted", "SpeechInterrupted", "ConversationStarted", "AvatarMoveRequested", "NavigationRequested", "FocusRequested", "PresentationStarted", "StreamingChunk"]) assert.match(hif, new RegExp(event));
   assert.match(voice, /hifClient\.start/);
   assert.match(hif, /clientId: "nexus-web"/);
-  for (const source of [app, intake, projects, voice, client, hif]) {
+  for (const source of [app, intake, projects, voice, realtime, client, hif]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
   }
 });
