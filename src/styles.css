@@ -634,67 +634,71 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 }
 
 /* Persistent NEXUS executive copilot */
-.nexus-copilot { grid-column: 3; grid-row: 4; position: sticky; top: 126px; z-index: 22; display: flex; flex-direction: column; align-self: start; height: calc(100vh - 157px); min-height: 590px; overflow: hidden; border-left: 1px solid #57a99d; color: #17211f; background: #f4f1e9; box-shadow: -18px 0 50px rgba(0, 0, 0, .18); }
+.nexus-copilot { grid-column: 3; grid-row: 4; position: sticky; top: 126px; z-index: 22; display: flex; flex-direction: column; align-self: start; height: calc(100vh - 157px); min-height: 590px; overflow: hidden; border-left: 1px solid var(--border-strong); color: var(--text); background: radial-gradient(circle at 16% 0, rgba(var(--accent-rgb), .1), transparent 24rem), rgba(6, 15, 22, .98); box-shadow: -18px 0 50px rgba(0, 0, 0, .32); backdrop-filter: blur(24px); }
 .nexus-copilot button, .nexus-copilot input { color: inherit; }
-.nexus-copilot__header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 17px 17px 14px; border-bottom: 1px solid rgba(31, 88, 79, .15); }
-.nexus-copilot__mark { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid rgba(48, 151, 136, .32); border-radius: 50%; color: #278f80; background: radial-gradient(circle, rgba(48, 151, 136, .18), transparent 68%); }
+.nexus-copilot__header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 17px 17px 14px; border-bottom: 1px solid var(--border); background: rgba(5, 12, 18, .62); }
+.nexus-copilot__mark { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--accent); background: radial-gradient(circle, rgba(var(--accent-rgb), .2), transparent 68%); box-shadow: 0 0 24px rgba(var(--accent-rgb), .1); }
 .nexus-copilot__header > div:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
 .nexus-copilot__header strong { font-size: 1.02rem; letter-spacing: .03em; }
-.nexus-copilot__header span { overflow: hidden; color: #69746f; font-size: .61rem; text-overflow: ellipsis; white-space: nowrap; }
-.nexus-copilot__header > button { display: grid; place-items: center; width: 31px; height: 31px; padding: 0; border: 1px solid rgba(31, 88, 79, .16); border-radius: 50%; background: rgba(255, 255, 255, .35); }
-.nexus-copilot__signals { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; border-bottom: 1px solid rgba(31, 88, 79, .12); }
-.nexus-copilot__signals span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid rgba(31, 88, 79, .15); border-radius: 999px; color: #52635e; background: rgba(255, 255, 255, .38); font-size: .59rem; font-weight: 650; }
+.nexus-copilot__header span { overflow: hidden; color: var(--muted); font-size: .61rem; text-overflow: ellipsis; white-space: nowrap; }
+.nexus-copilot__header > button { display: grid; place-items: center; width: 31px; height: 31px; padding: 0; border: 1px solid var(--border); border-radius: 50%; color: #b9d5e3; background: rgba(var(--accent-rgb), .055); }
+.nexus-copilot__header > button:hover { border-color: var(--border-strong); color: var(--accent); background: rgba(var(--accent-rgb), .1); }
+.nexus-copilot__signals { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.nexus-copilot__signals span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 999px; color: #a8beca; background: rgba(var(--accent-rgb), .035); font-size: .59rem; font-weight: 650; }
 .nexus-copilot__signals i { width: 6px; height: 6px; border-radius: 50%; background: #c89539; }
 .nexus-copilot__signals span[data-online="true"] i { background: #39be72; box-shadow: 0 0 7px #39be72; }
-.nexus-copilot__recommendation { margin: 11px 14px 8px; padding: 13px; border: 1px solid rgba(48, 151, 136, .42); border-radius: 11px; background: linear-gradient(135deg, rgba(48, 151, 136, .09), rgba(255, 255, 255, .35)); }
-.nexus-copilot__recommendation > span, .nexus-copilot__skills header span { color: #278f80; font-size: .59rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.nexus-copilot__recommendation { margin: 11px 14px 8px; padding: 13px; border: 1px solid var(--border-strong); border-radius: 11px; background: linear-gradient(135deg, rgba(var(--accent-rgb), .1), rgba(var(--accent-rgb), .025)); box-shadow: inset 0 1px rgba(255, 255, 255, .02); }
+.nexus-copilot__recommendation > span, .nexus-copilot__skills header span { color: var(--accent); font-size: .59rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .nexus-copilot__recommendation strong { display: block; margin-top: 5px; font-size: .79rem; }
-.nexus-copilot__recommendation p { margin: 5px 0 10px; color: #66736e; font-size: .63rem; line-height: 1.45; }
-.nexus-copilot__recommendation button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border: 0; border-radius: 7px; color: white; background: #2e998a; font-size: .67rem; font-weight: 700; }
-.nexus-copilot__voice { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 15px; border-block: 1px solid rgba(31, 88, 79, .12); }
+.nexus-copilot__recommendation p { margin: 5px 0 10px; color: var(--muted); font-size: .63rem; line-height: 1.45; }
+.nexus-copilot__recommendation button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border: 1px solid rgba(var(--accent-rgb), .5); border-radius: 7px; color: #041219; background: var(--accent); font-size: .67rem; font-weight: 750; }
+.nexus-copilot__voice { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 15px; border-block: 1px solid var(--border); }
 .nexus-copilot__voice > div { display: flex; align-items: center; gap: 7px; }
-.voice-dot { width: 8px; height: 8px; border-radius: 50%; background: #31998a; box-shadow: 0 0 0 4px rgba(49, 153, 138, .1); transition: transform .1s linear; }
+.voice-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .1), 0 0 9px rgba(var(--accent-rgb), .45); transition: transform .1s linear; }
 .nexus-copilot__voice strong { font-size: .62rem; text-transform: capitalize; }
-.nexus-copilot__voice button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 0; border-radius: 999px; color: white; background: #31998a; font-size: .62rem; font-weight: 700; }
-.nexus-copilot__voice button:disabled { color: #8b928f; background: #deddd7; cursor: not-allowed; }
+.nexus-copilot__voice button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid var(--border-strong); border-radius: 999px; color: #c8e6f3; background: rgba(var(--accent-rgb), .09); font-size: .62rem; font-weight: 700; }
+.nexus-copilot__voice button:disabled { color: #607884; border-color: rgba(var(--accent-rgb), .1); background: rgba(var(--accent-rgb), .025); cursor: not-allowed; }
 .nexus-copilot__conversation { flex: 1 1 auto; display: grid; align-content: start; gap: 9px; min-height: 120px; padding: 12px 14px; overflow-y: auto; scroll-behavior: smooth; }
-.nexus-copilot__conversation article { max-width: 92%; padding: 10px 11px; border: 1px solid rgba(31, 88, 79, .12); border-radius: 11px; background: rgba(255, 255, 255, .72); }
-.nexus-copilot__conversation article[data-speaker="operator"] { justify-self: end; border-color: rgba(48, 151, 136, .28); background: rgba(48, 151, 136, .1); }
-.nexus-copilot__conversation article > span { color: #2d8d80; font-size: .52rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.nexus-copilot__conversation article p { margin: 4px 0 0; color: #26332f; font-size: .7rem; line-height: 1.55; white-space: pre-wrap; }
-.nexus-copilot__conversation article small { display: block; margin-top: 7px; padding-top: 6px; border-top: 1px solid rgba(31, 88, 79, .1); color: #7c7563; font-size: .53rem; line-height: 1.4; }
-.nexus-copilot__thinking { display: flex; align-items: center; gap: 4px; color: #68746f; font-size: .59rem; }
-.nexus-copilot__thinking i { width: 5px; height: 5px; border-radius: 50%; background: #2e998a; animation: status-breathe 1s ease-in-out infinite; }
+.nexus-copilot__conversation article { max-width: 92%; padding: 10px 11px; border: 1px solid var(--border); border-radius: 11px; background: rgba(9, 20, 29, .9); box-shadow: 0 10px 24px rgba(0, 0, 0, .12); }
+.nexus-copilot__conversation article[data-speaker="operator"] { justify-self: end; border-color: var(--border-strong); background: rgba(var(--accent-rgb), .095); }
+.nexus-copilot__conversation article > span { color: var(--accent); font-size: .52rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.nexus-copilot__conversation article p { margin: 4px 0 0; color: #c7d8e0; font-size: .7rem; line-height: 1.55; white-space: pre-wrap; }
+.nexus-copilot__conversation article small { display: block; margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--border); color: #8ca4b1; font-size: .53rem; line-height: 1.4; }
+.nexus-copilot__thinking { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: .59rem; }
+.nexus-copilot__thinking i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: status-breathe 1s ease-in-out infinite; }
 .nexus-copilot__thinking i:nth-child(2) { animation-delay: -.2s; }.nexus-copilot__thinking i:nth-child(3) { animation-delay: -.4s; }.nexus-copilot__thinking span { margin-left: 4px; }
 .nexus-copilot__error { margin: 0; padding: 8px; border: 1px solid rgba(160, 62, 48, .24); border-radius: 7px; color: #9e493d; background: rgba(177, 68, 52, .08); font-size: .6rem; }
-.nexus-copilot__skills { padding: 9px 14px; border-top: 1px solid rgba(31, 88, 79, .13); }
+.nexus-copilot__skills { padding: 9px 14px; border-top: 1px solid var(--border); }
 .nexus-copilot__skills header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
-.nexus-copilot__skills header b { display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid rgba(31, 88, 79, .18); border-radius: 50%; font-size: .55rem; }
+.nexus-copilot__skills header b { display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 50%; color: #b6ccd7; font-size: .55rem; }
 .nexus-copilot__skills > div { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; }
-.nexus-copilot__skills button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; max-width: 225px; padding: 6px 8px; border: 1px solid rgba(31, 88, 79, .15); border-radius: 999px; background: rgba(255, 255, 255, .4); font-size: .57rem; }
-.nexus-copilot__composer { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin: 0 13px 8px; padding: 5px; border: 1px solid rgba(48, 151, 136, .55); border-radius: 999px; background: rgba(255, 255, 255, .72); }
+.nexus-copilot__skills button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; max-width: 225px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 999px; color: #aec4cf; background: rgba(var(--accent-rgb), .035); font-size: .57rem; }
+.nexus-copilot__skills button:hover { border-color: var(--border-strong); color: var(--text); background: rgba(var(--accent-rgb), .08); }
+.nexus-copilot__composer { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin: 0 13px 8px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 999px; background: rgba(1, 7, 11, .72); box-shadow: inset 0 1px rgba(255, 255, 255, .02); }
 .nexus-copilot__composer input { min-width: 0; padding: 4px 8px; border: 0; outline: 0; background: transparent; font-size: .68rem; }
-.nexus-copilot__composer button { display: grid; place-items: center; width: 29px; height: 29px; padding: 0; border: 0; border-radius: 50%; color: #2e8f82; background: rgba(48, 151, 136, .1); }
-.nexus-copilot__composer button:last-child { color: white; background: #31998a; }
+.nexus-copilot__composer input { color: var(--text); }
+.nexus-copilot__composer input::placeholder { color: #6f8795; }
+.nexus-copilot__composer button { display: grid; place-items: center; width: 29px; height: 29px; padding: 0; border: 0; border-radius: 50%; color: var(--accent); background: rgba(var(--accent-rgb), .1); }
+.nexus-copilot__composer button:last-child { color: #041219; background: var(--accent); }
 .nexus-copilot__composer button:disabled { opacity: .38; cursor: not-allowed; }
-.nexus-copilot > footer { padding: 0 14px 9px; color: #7a817d; font-size: .52rem; text-align: center; }
-.nexus-copilot.is-expanded { position: fixed; inset: 78px 22px 28px auto; z-index: 90; width: min(680px, calc(100vw - 44px)); height: auto; border: 1px solid #57a99d; border-radius: 14px; }
+.nexus-copilot > footer { padding: 0 14px 9px; color: #647e8c; font-size: .52rem; text-align: center; }
+.nexus-copilot.is-expanded { position: fixed; inset: 78px 22px 28px auto; z-index: 90; width: min(680px, calc(100vw - 44px)); height: auto; border: 1px solid var(--border-strong); border-radius: 14px; }
 .nexus-copilot-launcher { position: fixed; right: 20px; bottom: 40px; z-index: 75; display: inline-flex; align-items: center; gap: 8px; padding: 12px 15px; border: 1px solid rgba(98, 210, 255, .45); border-radius: 999px; color: var(--text); background: #0c2830; box-shadow: 0 12px 40px rgba(0, 0, 0, .36); }
-.nexus-introduction { position: fixed; z-index: 200; inset: 0; display: grid; place-items: center; padding: 20px; color: #1e2825; background: rgba(2, 7, 9, .78); backdrop-filter: blur(7px); }
-.nexus-introduction > section { position: relative; width: min(620px, 100%); padding: 30px; border: 1px solid #48a092; border-radius: 20px; background: #f4f1e9; box-shadow: 0 30px 110px rgba(0, 0, 0, .5); }
-.nexus-introduction > section > span { color: #2c9788; font-size: .69rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.nexus-introduction { position: fixed; z-index: 200; inset: 0; display: grid; place-items: center; padding: 20px; color: var(--text); background: rgba(2, 7, 9, .82); backdrop-filter: blur(9px); }
+.nexus-introduction > section { position: relative; width: min(620px, 100%); padding: 30px; border: 1px solid var(--border-strong); border-radius: 20px; background: radial-gradient(circle at 18% 0, rgba(var(--accent-rgb), .12), transparent 24rem), #08141c; box-shadow: 0 30px 110px rgba(0, 0, 0, .62); }
+.nexus-introduction > section > span { color: var(--accent); font-size: .69rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .nexus-introduction h2 { margin: 7px 40px 10px 0; font-size: 1.65rem; line-height: 1.12; }
-.nexus-introduction p, .nexus-introduction li { color: #56635e; font-size: .76rem; line-height: 1.65; }
+.nexus-introduction p, .nexus-introduction li { color: #a5bbc6; font-size: .76rem; line-height: 1.65; }
 .nexus-introduction ul { padding-left: 20px; }
-.nexus-introduction__boundary { margin: 18px 0; padding: 12px; border: 1px solid rgba(48, 151, 136, .18); border-radius: 9px; color: #6c695f; background: rgba(255, 255, 255, .5); font-size: .68rem; line-height: 1.5; }
-.nexus-introduction__close { position: absolute; top: 18px; right: 18px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid rgba(31, 88, 79, .15); border-radius: 50%; background: transparent; }
-.nexus-introduction__start { padding: 10px 17px; border: 0; border-radius: 999px; color: white; background: #31998a; font-weight: 700; }
+.nexus-introduction__boundary { margin: 18px 0; padding: 12px; border: 1px solid var(--border); border-radius: 9px; color: #8da6b2; background: rgba(var(--accent-rgb), .04); font-size: .68rem; line-height: 1.5; }
+.nexus-introduction__close { position: absolute; top: 18px; right: 18px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--border); border-radius: 50%; color: #b8ced8; background: rgba(var(--accent-rgb), .04); }
+.nexus-introduction__start { padding: 10px 17px; border: 0; border-radius: 999px; color: #041219; background: var(--accent); font-weight: 750; }
 
 @media (min-width: 1051px) and (max-width: 1280px) {
   .portal-shell { grid-template-columns: 268px minmax(0, 1fr); }
 }
 @media (max-width: 1280px) {
-  .nexus-copilot { position: fixed; inset: 0 0 0 auto; z-index: 85; width: min(410px, 100vw); height: 100vh; min-height: 0; border-left: 1px solid #57a99d; }
+  .nexus-copilot { position: fixed; inset: 0 0 0 auto; z-index: 85; width: min(410px, 100vw); height: 100vh; min-height: 0; border-left: 1px solid var(--border-strong); }
   .nexus-copilot.is-expanded { inset: 22px; width: auto; height: auto; }
 }
 @media (max-width: 580px) {
