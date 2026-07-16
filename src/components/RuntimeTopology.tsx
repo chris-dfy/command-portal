@@ -14,7 +14,14 @@ export function RuntimeTopology({ snapshot }: { snapshot: RuntimeSnapshot }) {
     { name: "Runtime Gateway", status: diagnostics?.gateway?.initialized ? "Healthy" : "Unavailable", note: "Hosted server request boundary", icon: Network },
     { name: "Hosted Runtime", status: snapshot.health?.runtime?.status ?? "Unknown", note: snapshot.health?.gateway.runtimeUrl ?? "Runtime URL unavailable", icon: ServerCog },
     { name: "Providers", status: providerHealthy ? "Healthy" : "Unavailable", note: `${providers.length} registry entries`, icon: Boxes },
-    { name: "OpenAI", status: openai?.verified && openai.reachable ? "Healthy" : "Unavailable", note: openai?.configured ? "Configured; live inference unverified" : "Not configured or verified", icon: Globe2 }
+    {
+      name: "OpenAI",
+      status: openai?.verified && openai.reachable && openai.liveInferenceVerified ? "Healthy" : "Unavailable",
+      note: openai?.liveInferenceVerified
+        ? `Live Responses inference verified${openai.modelId ? ` · ${openai.modelId}` : ""}`
+        : openai?.configured ? "Configured; awaiting successful live Responses inference" : "Not configured or verified",
+      icon: Globe2
+    }
   ];
   return <section className="topology-map live-topology" aria-labelledby="topology-heading">
     <header className="visualization-header"><div><span>Hosted observation lane</span><h3 id="topology-heading">Diagnostics topology</h3><p>This view intentionally shows the read-only diagnostics path. Authenticated work uses Mission Control and the separate Hosted Operational Gateway.</p></div><Cable size={21} /></header>

@@ -107,6 +107,34 @@ test("Executive Briefing and its HIF lifecycle are the only bounded hosted Runti
   assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/resume");
 });
 
+test("hosted conversational reasoning has a dedicated bounded timeout", async () => {
+  const started = Date.now();
+  const base = await start(async (_url, options) => new Promise((resolve, reject) => {
+    const completion = setTimeout(() => resolve(runtimeResponse({ interaction: { responseText: "Verified response" }, events: [] })), 18);
+    options.signal.addEventListener("abort", () => { clearTimeout(completion); reject(Object.assign(new Error("aborted"), { name: "AbortError" })); });
+  }), { timeoutMs: 5, reasoningTimeoutMs: 60 });
+  const response = await fetch(`${base}/api/runtime/interactions`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" })
+  });
+  assert.equal(response.status, 200);
+  assert.ok(Date.now() - started >= 15);
+});
+
+test("hosted conversational reasoning reports its own timeout truthfully", async () => {
+  const base = await start(async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+  }), { timeoutMs: 50, reasoningTimeoutMs: 5 });
+  const response = await fetch(`${base}/api/runtime/interactions`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" })
+  });
+  const body = await response.json();
+  assert.equal(response.status, 504);
+  assert.equal(body.gateway.connectionState, "Timed Out");
+  assert.equal(body.error.code, "runtime_reasoning_timeout");
+});
+
 test("Realtime WebRTC SDP crosses the same-origin gateway without exposing either server credential", async () => {
   const offer = "v=0\r\na=offer\r\n".repeat(12);
   const answer = "v=0\r\na=answer\r\n".repeat(12);

@@ -38,6 +38,8 @@ test("topology is live and follows the required read path", async () => {
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
   assert.match(source, /snapshot\.diagnostics/);
   assert.match(source, /snapshot\.providers/);
+  assert.match(source, /Live Responses inference verified/);
+  assert.match(source, /awaiting successful live Responses inference/);
 });
 
 test("browser uses only same-origin allowlisted runtime routes and no token", async () => {

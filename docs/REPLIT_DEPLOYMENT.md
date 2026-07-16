@@ -7,6 +7,7 @@ Configure these server-only secrets and variables in the hosting environment:
 - `COMMAND_PORTAL_RUNTIME_API_BASE_URL=https://nexus-runtime-dev.fly.dev`
 - `COMMAND_PORTAL_RUNTIME_READ_TOKEN` as a scoped server secret
 - `COMMAND_PORTAL_REQUEST_TIMEOUT_MS=8000`
+- `COMMAND_PORTAL_REASONING_TIMEOUT_MS=35000`
 - `COMMAND_PORTAL_CACHE_TTL_MS=15000`
 - `COMMAND_PORTAL_MAX_RESPONSE_BYTES=1048576`
 

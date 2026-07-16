@@ -47,6 +47,7 @@ function connectionState(snapshot: RuntimeSnapshot, failures: GatewayEnvelope[],
 
 function Providers({ snapshot }: { snapshot: RuntimeSnapshot }) {
   const providers = list(snapshot.providers?.data) as unknown as ProviderRecord[];
+  const openai = providers.find((provider) => provider.id === "openai");
   return <div className="experience-grid">
     <DataPanel eyebrow="Provider registry" title="Verified runtime inventory" icon={<ShieldCheck size={18} />} className="span-2">
       {providers.length ? <div className="provider-table" role="table" aria-label="Runtime providers">
@@ -61,7 +62,9 @@ function Providers({ snapshot }: { snapshot: RuntimeSnapshot }) {
       </div> : <EmptyRecord />}
     </DataPanel>
     <DataPanel eyebrow="Provider truth" title="Current boundary" icon={<TriangleAlert size={18} />}>
-      <p className="boundary-note">The default is <strong>mock_model</strong>. OpenAI is present in the registry but is not configured, reachable, verified, or approved for live inference.</p>
+      <p className="boundary-note">The default remains <strong>mock_model</strong>. {openai?.liveInferenceVerified
+        ? <>OpenAI Responses inference is verified for this Runtime process{openai.modelId ? <> using <strong>{openai.modelId}</strong></> : null}; model-native output remains non-authoritative.</>
+        : <>OpenAI configuration is not represented as live capability until a Responses inference succeeds.</>}</p>
     </DataPanel>
     <DataPanel eyebrow="Limitations" title="Provider constraints" icon={<TriangleAlert size={18} />}>
       <ul className="limitation-list">{providers.flatMap((provider) => provider.limitations.map((item) => <li key={`${provider.id}-${item}`}>{provider.displayName}: {item}</li>))}</ul>

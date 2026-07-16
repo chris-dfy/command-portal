@@ -81,9 +81,13 @@ export type RuntimeSnapshot = Partial<Record<RuntimeRoute, GatewayEnvelope>>;
 export type ProviderRecord = {
   id: string;
   displayName: string;
+  modelId?: string | null;
   configured: boolean;
   reachable: boolean;
   verified: boolean;
+  liveInferenceVerified?: boolean;
+  lastVerificationAt?: string | null;
+  lastSuccessfulInferenceAt?: string | null;
   default: boolean;
   hostingMode: string;
   limitations: string[];

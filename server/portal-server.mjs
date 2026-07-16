@@ -179,6 +179,7 @@ export function loadConfig(overrides = {}) {
     allowedOrigins: String(overrides.allowedOrigins ?? process.env.COMMAND_PORTAL_ALLOWED_ORIGINS ?? "")
       .split(",").map((item) => item.trim()).filter(Boolean),
     timeoutMs: integer(overrides.timeoutMs ?? process.env.COMMAND_PORTAL_REQUEST_TIMEOUT_MS, 8_000),
+    reasoningTimeoutMs: integer(overrides.reasoningTimeoutMs ?? process.env.COMMAND_PORTAL_REASONING_TIMEOUT_MS, 35_000),
     realtimeTimeoutMs: integer(overrides.realtimeTimeoutMs ?? process.env.COMMAND_PORTAL_REALTIME_TIMEOUT_MS, 25_000),
     cacheTtlMs: integer(overrides.cacheTtlMs ?? process.env.COMMAND_PORTAL_CACHE_TTL_MS, 15_000),
     maxResponseBytes: integer(overrides.maxResponseBytes ?? process.env.COMMAND_PORTAL_MAX_RESPONSE_BYTES, 1_048_576),
@@ -751,7 +752,8 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
     strictKeys(raw, new Set(["clientId", "modality", "speechRequested"]));
     payload = { clientId: boundedText(raw.clientId, "clientId", 128), modality: boundedText(raw.modality ?? "text", "modality", 40), speechRequested: raw.speechRequested !== false };
   }
-  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  const timeoutMs = runtimePath === "/runtime/interactions" ? config.reasoningTimeoutMs : config.timeoutMs;
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const upstream = await runtimeFetch(`${config.runtimeBaseUrl}${runtimePath}`, {
       method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${config.runtimeToken}` },
@@ -764,7 +766,9 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
     structuredLog("experience_gateway_bounded_runtime_mutation", { route: url.pathname, runtimePath, status: 200 });
     return sendJson(response, 200, successfulEnvelope(config, tracker, url.pathname, body, null, false, false, 1));
   } catch (error) {
-    const failure = error instanceof GatewayFailure ? error : new GatewayFailure("runtime_unavailable", "Runtime briefing request failed safely.", "Unavailable", 503);
+    const failure = error instanceof GatewayFailure ? error
+      : error?.name === "AbortError" ? new GatewayFailure("runtime_reasoning_timeout", "Runtime reasoning exceeded its bounded response window.", "Timed Out", 504)
+      : new GatewayFailure("runtime_unavailable", "Runtime interaction request failed safely.", "Unavailable", 503);
     return sendJson(response, failure.status, failureEnvelope(config, tracker, url.pathname, failure));
   } finally { clearTimeout(timer); }
 }
