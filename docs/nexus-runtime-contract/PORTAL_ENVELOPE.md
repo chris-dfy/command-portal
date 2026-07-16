@@ -1,33 +1,13 @@
-# Portal Envelope 1.0
+# Browser Envelope
 
-Every API response uses the following shape:
+This presentation contract follows the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
 
-```json
-{
-  "ok": true,
-  "data": {},
-  "meta": {
-    "schemaVersion": "1.0",
-    "generatedAt": "RFC-3339 timestamp",
-    "sourceOfTruth": "nexus_runtime",
-    "readOnly": true,
-    "dataMode": "local_runtime",
-    "verificationEnvironment": "local_runtime",
-    "connectionState": "connected",
-    "cached": false,
-    "stale": false,
-    "limitations": [],
-    "proofIds": [],
-    "receiptIds": [],
-    "productionReady": false,
-    "enterpriseReady": false,
-    "cloudPrimary": false,
-    "localSourceOfTruth": true,
-    "secretValuesExposed": false
-  }
-}
-```
+Successful responses contain:
 
-Errors retain the same `meta`, set `ok=false` and `data=null`, and add a safe `{code,message}` object. Runtime response bodies, credentials, authorization headers, internal stacks, and arbitrary upstream errors are never exposed.
+- `ok=true`
+- validated Runtime `data`
+- Runtime status, timestamp, schema version, runtime version, limitations, and proof references
+- Experience Gateway health, connection state, safe public Runtime URL, last-success timestamps, retry count, and cache state
+- preserved truth boundaries
 
-Fixture mode uses `sourceOfTruth=contract_fixture`, `dataMode=contract_fixture`, and `verificationEnvironment=non_live_contract_fixture`. It includes the limitation `CONTRACT FIXTURE — NON-LIVE DATA`.
+Failures contain `data=null`, no Runtime envelope, normalized error code/message, and gateway connection diagnostics. Credentials, authorization headers, secret values, and internal runtime paths are never present.

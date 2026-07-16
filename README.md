@@ -1,73 +1,80 @@
-# Standalone Command Portal
+# NEXUS Command Portal
 
-A standalone, hosted-ready, read-only command portal for observing an allowlisted Runtime API through a same-origin backend-for-frontend (BFF).
+The standalone NEXUS Experience Layer for observing a hosted Runtime and using governed capabilities from the authoritative local NEXUS Runtime through the NEXUS Experience Gateway.
 
-The temporary identity is configured in `config/brand.json`. It is deliberately absent from routes, contracts, security policy, data models, and shared component names so a future rename is a configuration change.
+The [NEXUS Platform Constitution](docs/architecture/NEXUS_Platform_Constitution.md) is the canonical architectural reference for this repository.
 
 ## Architecture
 
 ```text
-Browser  -- same-origin GET -->  Portal BFF  -- allowlisted GET + server credential -->  Runtime API
+Executive User
+    ↓
+Command Portal
+    ↓
+NEXUS Experience Gateway
+    ↓
+NEXUS Runtime Gateway
+    ↓
+NEXUS Runtime
+    ↓
+Provider Router
+    ↓
+Provider Registry
+    ↓
+AI Providers
 ```
 
-The BFF is not a generic proxy. It rejects arbitrary portal routes, unsafe query parameters, and POST, PUT, PATCH, or DELETE. The runtime read credential is read only by the server and is never included in browser configuration, API envelopes, static assets, or logs.
+The browser never communicates directly with either Runtime. Hosted observations use twelve fixed same-origin GET routes under `/api/runtime`. The NEXUS Experience Gateway attaches the server-held read credential, validates runtime envelopes, negotiates schema and runtime versions, retries bounded transient failures, enforces response limits, and exposes explicit connection and cache state.
 
-## Portal areas
+Hosted operational access uses the separate `/api/operations` allowlist. Its current classification is single-workspace hosted alpha: signed HttpOnly sessions, CSRF verification, scoped authorization, idempotency keys, fixed tenant/workspace identity, and a server-only Runtime credential are enforced. It does not claim production multi-tenant isolation.
 
-- Mission Overview
-- Verification
-- Evidence
-- Architecture
-- Runtime Topology
-- Specialists
-- System
+Local document intake, evidence query, project intelligence, artifact compilation, voice routing, missions, work sessions, approvals, governed execution requests, connector readiness, proof, and receipts use a separate explicit allowlist under `/api/local`. The browser supplies operator intent and renders Runtime results; it does not assemble operational context, calculate project scope or price, make governance decisions, or fabricate capability. There is no wildcard proxy or arbitrary URL forwarding.
 
-Phase 5X-B.5 adds an executive status system, mission operating picture, selectable six-layer architecture, manifest-derived asset coverage, and current-state runtime topology. See `docs/PHASE_5X_B5_EXECUTIVE_EXPERIENCE.md`.
+## Hosted runtime mode
 
-## Data modes
+The portal uses `https://nexus-runtime-dev.fly.dev` by default. All runtime configuration is server-only:
 
-Set `COMMAND_PORTAL_MODE` to one of:
+```text
+COMMAND_PORTAL_RUNTIME_API_BASE_URL
+COMMAND_PORTAL_RUNTIME_READ_TOKEN
+COMMAND_PORTAL_REQUEST_TIMEOUT_MS
+COMMAND_PORTAL_CACHE_TTL_MS
+COMMAND_PORTAL_MAX_RESPONSE_BYTES
+```
 
-- `contract_fixture` — starts without a runtime and displays conspicuously labeled, non-live Phase 5X-A contract data.
-- `local_runtime` — reads the configured runtime using the fixed server-side allowlist. A 30-second cache is non-authoritative and expired data is labeled stale.
-- `disconnected` — intentionally returns no operational values and explains that the runtime is disconnected.
+Never create a `VITE_` runtime variable or credential.
 
 ## Local use
 
-Requires Node.js 20 or newer.
+Requires Node.js 20.19 or newer.
 
-```bash
+```sh
 npm install
-npm run check
 cp .env.example .env
+npm run check
 npm run start
 ```
 
-For client development, run `npm run dev:server` and `npm run dev` in separate terminals. The Vite client proxies only `/api/portal` to the local BFF.
+For local-first capability development, first run the private Runtime from the `nexus-assistant` repository:
 
-## Replit import
+```sh
+nexus/bin/python -m nexus_api.server --host 127.0.0.1 --port 8765
+```
 
-The repository includes `.replit`, `replit.nix`, a production build command, and a single-port start command. Add server secrets in Replit Secrets, never in source or any `VITE_` variable. See `docs/REPLIT_DEPLOYMENT.md`.
+Set `COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED=true`, then run `npm run dev:server` and `npm run dev` separately. Vite proxies `/api/runtime` and `/api/local` to the Experience Gateway. The Gateway accepts a loopback local Runtime target only and does not send the hosted Runtime credential to it.
+
+## Local-first capability parity
+
+- Document Intelligence ingests supported files, links sources to projects, queries evidence, and displays the Runtime source inventory.
+- Nexicron Projects creates project records and consumes Runtime-owned scope, estimate, planning context, evidence, and artifact contracts.
+- Voice Operator supports typed transcripts and capability-detected browser speech input/output while routing intent, governance, proof, and receipts through the shared Runtime voice operator.
+- Human Interaction Framework events provide the common Runtime-owned conversation, speech, streaming, interruption, avatar, navigation, focus, highlighting, and presentation behavior contract shared with NEXUS Command.
+- Mission Control consumes the versioned Runtime Client Parity Contract and presents mission planning, bounded work sessions, approval decisions, dry-run and governed execution requests, and connector readiness.
+
+Only capabilities reported as implemented by Runtime are presented as executable. Numeric estimates remain unavailable when required rate or quantity evidence is absent. Browser speech recognition and synthesis may use browser or operating-system providers; their processing location is not verified by NEXUS Runtime.
 
 ## Truth boundary
 
-The portal always preserves these current facts:
+The portal preserves `productionReady=false`, `enterpriseReady=false`, `cloudPrimary=false`, `localSourceOfTruth=true`, `defaultProvider=mock_model`, `conclave=staged`, and `actualTrainedSLMs=0`. Provider configuration never proves reachability or live inference.
 
-- `productionReady=false`
-- `enterpriseReady=false`
-- `cloudPrimary=false`
-- `localSourceOfTruth=true`
-- `secretValuesExposed=false`
-- Conclave is staged
-- `actualTrainedSLMs=0`
-
-Phase 5X-B is the standalone implementation milestone. Phase 5X-C remains pending until a Replit application is created, deployed, configured, connected, and accepted.
-
-## Documentation
-
-- `docs/nexus-runtime-contract/` — curated runtime/BFF contract package
-- `docs/reference-ui/` — design system, shell, components, responsive, and accessibility rules
-- `config/platform-assets.v1.json` — versioned platform asset manifest
-- `openapi/portal-readonly.openapi.json` — browser-facing read-only API description
-
-The expected `nexicron-demo-factory` repository and its curated Replit design reference were not accessible. No access is claimed; the UI derives from the generated command portal client and current NEXUS Command frontend that were available locally.
+See [HostedOperationalGateway.md](docs/HostedOperationalGateway.md), [ClientParityContract.md](docs/ClientParityContract.md), [LocalFirstParity.md](docs/LocalFirstParity.md), [ExperienceGateway.md](docs/architecture/ExperienceGateway.md), [RuntimeConnection.md](docs/RuntimeConnection.md), [FailureModes.md](docs/FailureModes.md), [Caching.md](docs/Caching.md), and [VersionNegotiation.md](docs/VersionNegotiation.md).

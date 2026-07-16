@@ -1,5 +1,7 @@
 # Model-Native Knowledge and Explicit Provisioning
 
+This doctrine operates under the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
+
 Assume no authoritative knowledge, data, connector, workflow, policy, specialist, model, handler, execution capability, or proof exists unless it is physically present, registered, configured, authorized, tested, deployed, verified, and linked to proof.
 
 Model-native knowledge may support general reasoning, explanation, drafting, and candidate generation. It is provider-dependent, cutoff-limited, probabilistic, and not proof of current facts, organization-specific facts, runtime capability, or completed work.

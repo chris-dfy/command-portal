@@ -1,61 +1,24 @@
 {
   "openapi": "3.1.0",
-  "info": {
-    "title": "Standalone Command Portal Read-Only API",
-    "version": "1.1.0",
-    "description": "Product-name-neutral, same-origin, GET-only browser contract. The complete fixed route mapping is documented in docs/nexus-runtime-contract/ENDPOINT_ALLOWLIST.md."
-  },
+  "info": { "title": "NEXUS Experience Gateway", "version": "0.6.0" },
+  "externalDocs": { "description": "NEXUS Platform Constitution", "url": "../docs/architecture/NEXUS_Platform_Constitution.md" },
   "servers": [{ "url": "/" }],
   "paths": {
-    "/api/portal/snapshot": { "get": { "operationId": "getPortalSnapshot", "responses": { "200": { "$ref": "#/components/responses/PortalRead" }, "503": { "$ref": "#/components/responses/PortalError" } } } },
-    "/api/portal/status": { "get": { "operationId": "getRuntimeStatus", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/readiness": { "get": { "operationId": "getRuntimeReadiness", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/runtime-verification": { "get": { "operationId": "getRuntimeVerification", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/claims": { "get": { "operationId": "listClaims", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/proofs": { "get": { "operationId": "listProofs", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/receipts": { "get": { "operationId": "listReceipts", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/asset-manifest": { "get": { "operationId": "getAssetManifest", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/asset-coverage": { "get": { "operationId": "getAssetCoverage", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/specialists": { "get": { "operationId": "listSpecialists", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/limitations": { "get": { "operationId": "getLimitations", "responses": { "200": { "$ref": "#/components/responses/PortalRead" } } } },
-    "/api/portal/proof/{id}": { "get": { "operationId": "getProof", "parameters": [{ "$ref": "#/components/parameters/RecordId" }], "responses": { "200": { "$ref": "#/components/responses/PortalRead" }, "404": { "$ref": "#/components/responses/PortalError" } } } },
-    "/api/portal/receipt/{id}": { "get": { "operationId": "getReceipt", "parameters": [{ "$ref": "#/components/parameters/RecordId" }], "responses": { "200": { "$ref": "#/components/responses/PortalRead" }, "404": { "$ref": "#/components/responses/PortalError" } } } }
+    "/api/runtime/status": { "get": { "operationId": "getRuntimeStatus", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/health": { "get": { "operationId": "getRuntimeHealth", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/ready": { "get": { "operationId": "getRuntimeReadiness", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/version": { "get": { "operationId": "getRuntimeVersion", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/providers": { "get": { "operationId": "listRuntimeProviders", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/capabilities": { "get": { "operationId": "listRuntimeCapabilities", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/proofs": { "get": { "operationId": "listRuntimeProofs", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/receipts": { "get": { "operationId": "listRuntimeReceipts", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/environment": { "get": { "operationId": "getRuntimeEnvironment", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/diagnostics": { "get": { "operationId": "getRuntimeDiagnostics", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/governance": { "get": { "operationId": "getRuntimeGovernance", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } },
+    "/api/runtime/connectors": { "get": { "operationId": "listRuntimeConnectors", "responses": { "200": { "$ref": "#/components/responses/GatewayRead" } } } }
   },
   "components": {
-    "parameters": {
-      "RecordId": { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "maxLength": 160, "pattern": "^[A-Za-z0-9._:-]+$" } }
-    },
-    "schemas": {
-      "PortalMeta": {
-        "type": "object",
-        "required": ["schemaVersion", "sourceOfTruth", "readOnly", "dataMode", "connectionState", "productionReady", "enterpriseReady", "cloudPrimary", "localSourceOfTruth", "secretValuesExposed"],
-        "properties": {
-          "schemaVersion": { "const": "1.0" },
-          "sourceOfTruth": { "enum": ["nexus_runtime", "contract_fixture"] },
-          "readOnly": { "const": true },
-          "dataMode": { "enum": ["contract_fixture", "local_runtime", "disconnected"] },
-          "connectionState": { "type": "string" },
-          "cached": { "type": "boolean" },
-          "stale": { "type": "boolean" },
-          "limitations": { "type": "array", "items": { "type": "string" } },
-          "proofIds": { "type": "array", "items": { "type": "string" } },
-          "receiptIds": { "type": "array", "items": { "type": "string" } },
-          "productionReady": { "const": false },
-          "enterpriseReady": { "const": false },
-          "cloudPrimary": { "const": false },
-          "localSourceOfTruth": { "const": true },
-          "secretValuesExposed": { "const": false }
-        }
-      },
-      "PortalEnvelope": {
-        "type": "object",
-        "required": ["ok", "data", "meta"],
-        "properties": { "ok": { "type": "boolean" }, "data": {}, "meta": { "$ref": "#/components/schemas/PortalMeta" }, "error": { "type": "object" } }
-      }
-    },
-    "responses": {
-      "PortalRead": { "description": "Allowlisted read envelope", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PortalEnvelope" } } } },
-      "PortalError": { "description": "Safe portal error envelope", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PortalEnvelope" } } } }
-    }
+    "responses": { "GatewayRead": { "description": "Validated read-only Experience Gateway response", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GatewayEnvelope" } } } } },
+    "schemas": { "GatewayEnvelope": { "type": "object", "required": ["ok", "data", "runtime", "gateway", "truth"], "properties": { "ok": { "type": "boolean" }, "data": {}, "runtime": { "type": ["object", "null"] }, "gateway": { "type": "object" }, "truth": { "type": "object" }, "error": { "type": "object" } } } }
   }
 }

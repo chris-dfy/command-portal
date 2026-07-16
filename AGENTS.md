@@ -1,10 +1,13 @@
 # Command Portal Project Rules
 
+Follow the [NEXUS Platform Constitution](docs/architecture/NEXUS_Platform_Constitution.md). It is the canonical architectural reference for this repository and supersedes informal terminology.
+
 ## Scope
 
 - This repository is the standalone hosted command portal. Never place its implementation in `nexus-assistant` or register it as a `nexicron-demo-factory` tenant.
-- Phase 5X-B produces a Replit-importable application. Phase 5X-C remains pending until a hosted application is deployed, configured, connected, and accepted.
-- The browser is an observation surface only. Do not add command dispatch, approvals, uploads, mutation controls, or generic proxy behavior.
+- Phase 5X-D connects the Command Portal to the hosted NEXUS Runtime exclusively through the server-side NEXUS Experience Gateway.
+- Hosted Runtime access remains an observation surface. Local-first document, project, and voice capabilities may mutate only through explicitly allowlisted Experience Gateway routes backed by the authoritative local Runtime.
+- No client may assemble operational context, calculate project intelligence, determine authority, or manufacture proof. Every NEXUS client consumes the same Runtime contracts.
 
 ## Identity
 
@@ -13,16 +16,17 @@
 
 ## Runtime boundary
 
-- Preserve the architecture: browser -> same-origin portal BFF -> runtime API.
+- Preserve the architecture: Executive User -> Command Portal -> NEXUS Experience Gateway -> NEXUS Runtime Gateway -> NEXUS Runtime -> Provider Router -> Provider Registry -> AI Providers.
+- Begin every future Codex implementation prompt with: "Follow the NEXUS Platform Constitution."
 - Runtime credentials are server-only. Never prefix credentials with `VITE_`, serialize them into browser responses, include them in logs, or commit them.
-- The BFF permits only explicitly mapped GET routes. Reject arbitrary paths, unsafe query parameters, and POST, PUT, PATCH, and DELETE.
+- Hosted `/api/runtime` access permits only explicitly mapped GET routes. Local `/api/local` access permits only the exact documented method/path pairs and validated payloads. Reject arbitrary paths, unsafe query parameters, unsupported methods, and unregistered artifact types.
 - Keep request timeouts, response size limits, safe error normalization, origin checks, and a short non-authoritative cache.
 
-## Truth and modes
+## Truth and hosted mode
 
 - Always preserve: `productionReady=false`, `enterpriseReady=false`, `cloudPrimary=false`, `localSourceOfTruth=true`, and `secretValuesExposed=false` unless a later, proof-backed contract version explicitly changes them.
 - Conclave is staged. `actualTrainedSLMs` is zero unless verified physical model assets prove otherwise.
-- Supported modes are `contract_fixture`, `local_runtime`, and `disconnected`. Fixture data must be conspicuously labeled non-live. Disconnected mode must not fabricate operational values.
+- Hosted Runtime remains the read-only observation source. The private local Runtime is authoritative for local-first intake, project intelligence, and voice operations. Failure in either mode must not silently fall back to fabricated operational values.
 - Model-native knowledge is useful for reasoning and candidate generation, but is never proof of current facts, organization facts, runtime capabilities, or completed work.
 
 ## Asset doctrine
@@ -34,6 +38,6 @@
 ## Quality gates
 
 - Before handoff, run formatting/type checks where configured, unit and contract tests, and the production build.
-- Add tests for any BFF route, security boundary, mode behavior, or truth-boundary change.
+- Add tests for any NEXUS Experience Gateway route, security boundary, mode behavior, or truth-boundary change.
 - Update `docs/nexus-runtime-contract` when the portal contract changes and `docs/reference-ui` when the UI system changes.
 - Do not claim access to the missing curated `nexicron-demo-factory` Replit reference. Keep that limitation documented.

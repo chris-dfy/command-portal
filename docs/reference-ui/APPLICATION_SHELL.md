@@ -1,13 +1,13 @@
 # Application Shell
 
+This Experience Layer guidance follows the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
+
 The shell has five durable regions:
 
-1. Sticky command header: configurable brand, read-only state, connection, truth flags, refresh.
-2. Persistent executive status bar: Runtime, Knowledge, Governance, Execution, Evidence, Security, Connection, and Operator Mode.
-3. Optional mode banner: fixture and stale states are prominent and cannot be dismissed.
-4. Left navigation: Mission Overview, Verification, Evidence, Architecture, Runtime Topology, Specialists, System.
-5. Main workspace and compact global boundary footer.
+1. Command header: Hosted Runtime, environment, Gateway, Runtime, version, and refresh.
+2. Independent health bar: Gateway Health, Runtime Health, Provider Registry, Environment, Connection, Version, and Diagnostics.
+3. Failure banner: last successful connection, last refresh, and retry state without replacement data.
+4. Navigation: Document Intelligence, Nexicron Projects, Voice Operator, Runtime Information, Health & Diagnostics, Runtime Topology, Providers, and Proofs & Receipts.
+5. Main workspace and compact truth-boundary footer.
 
-Desktop uses a 268px sidebar and a fluid content column. Mission Overview is the default operating picture and explains current health, findings, next steps, and risks. Architecture contains the selectable six-layer visualization and manifest-derived asset coverage. Runtime Topology visualizes the supplied current-state path while marking OpenAI connectivity unverified and the configured provider as `mock_model`. Evidence detail uses a modal with validated JSON for auditability.
-
-The shell contains no action, approval, upload, or command affordance. Refresh is the only runtime-related browser control and performs GET reads only.
+Hosted observation refresh performs the exact same-origin GET allowlist with cache invalidation. Local-first workspaces submit only validated inputs through the same-origin `/api/local` allowlist. They display the resulting evidence, limitations, approval state, proof, and receipts without implementing Runtime context assembly or operational decisions in the client.

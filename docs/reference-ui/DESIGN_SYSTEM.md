@@ -1,5 +1,7 @@
 # Design System
 
+This presentational system follows the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
+
 The available generated portal and current desktop frontend both use a restrained operational interface: deep navy surfaces, fine cyan borders, compact uppercase kickers, monospace evidence IDs, cyan intelligence cues, amber limitations, green verified states, and red unavailable states.
 
 ## Tokens

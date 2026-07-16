@@ -1,39 +1,90 @@
-export type ConnectionState = "connected" | "local_only" | "hosted_sandbox_connected" | "externally_reachable" | "configured_not_connected" | "disconnected" | "stale" | "unavailable";
+export type ConnectionState =
+  | "Connecting"
+  | "Healthy"
+  | "Degraded"
+  | "Unavailable"
+  | "Retrying"
+  | "Timed Out"
+  | "Version Mismatch"
+  | "Schema Mismatch"
+  | "Unauthorized"
+  | "Unknown";
 
-export type PortalMeta = {
-  schemaVersion: "1.0";
-  generatedAt: string;
-  sourceOfTruth: "nexus_runtime" | "contract_fixture";
-  readOnly: true;
-  dataMode: "contract_fixture" | "local_runtime" | "disconnected";
-  verificationEnvironment: string;
-  connectionState: ConnectionState;
-  cached: boolean;
-  stale: boolean;
-  fetchedAt?: string;
-  expiresAt?: string;
-  limitations: string[];
-  proofIds: string[];
-  receiptIds: string[];
+export type TruthState = {
   productionReady: false;
   enterpriseReady: false;
   cloudPrimary: false;
   localSourceOfTruth: true;
+  defaultProvider: "mock_model";
+  conclave: "staged";
+  actualTrainedSLMs: 0;
   secretValuesExposed: false;
 };
 
-export type PortalEnvelope<T = unknown> = {
+export type RuntimeMeta = {
+  status: string;
+  timestamp: string;
+  schemaVersion: string;
+  runtimeVersion: string;
+  proofIds: string[];
+  limitations: string[];
+};
+
+export type CacheState = {
+  lastRefresh: string | null;
+  age: number | null;
+  stale: boolean;
+  expires: string | null;
+  cached: boolean;
+};
+
+export type GatewayMeta = {
+  status: "Healthy" | "Degraded" | "Connecting" | "Retrying";
+  connectionState: ConnectionState;
+  route: string;
+  runtimeUrl: string;
+  lastSuccessfulConnection: string | null;
+  lastSuccessfulRefresh: string | null;
+  cache: CacheState;
+  readOnly: true;
+  secretValuesExposed: false;
+  attempts?: number;
+  warning?: string | null;
+};
+
+export type GatewayEnvelope<T = unknown> = {
   ok: boolean;
   data: T | null;
-  meta: PortalMeta;
+  runtime: RuntimeMeta | null;
+  gateway: GatewayMeta;
+  truth: TruthState;
   error?: { code: string; message: string };
 };
 
-export type DomainEnvelope = PortalEnvelope<Record<string, unknown>>;
-export type PortalSnapshot = {
-  brand: { appId: string; displayName: string; shortName: string; parentBrand: string };
-  referenceFixture: boolean;
-  fixtureLabel?: string;
-  domains: Record<string, DomainEnvelope>;
-  failedDomains: string[];
+export type RuntimeRoute =
+  | "status"
+  | "health"
+  | "ready"
+  | "version"
+  | "providers"
+  | "capabilities"
+  | "proofs"
+  | "receipts"
+  | "environment"
+  | "diagnostics"
+  | "governance"
+  | "connectors"
+  | "eox";
+
+export type RuntimeSnapshot = Partial<Record<RuntimeRoute, GatewayEnvelope>>;
+
+export type ProviderRecord = {
+  id: string;
+  displayName: string;
+  configured: boolean;
+  reachable: boolean;
+  verified: boolean;
+  default: boolean;
+  hostingMode: string;
+  limitations: string[];
 };

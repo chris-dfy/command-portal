@@ -1,37 +1,22 @@
-import { Activity, BookOpenCheck, Eye, FileCheck2, Gavel, LockKeyhole, Network, Workflow } from "lucide-react";
-import type { DomainEnvelope, PortalMeta } from "../lib/types";
-import { asItems, asRecord, displayLabel, statusTone } from "../lib/presentation";
+import { Activity, Boxes, Cloud, FileCheck2, Network, ServerCog, ShieldCheck } from "lucide-react";
+import type { ConnectionState, RuntimeSnapshot } from "../lib/types";
+import { statusTone } from "../lib/presentation";
 
-type Props = {
-  domains: Record<string, DomainEnvelope>;
-  meta?: PortalMeta;
-};
-
-export function ExecutiveStatusBar({ domains, meta }: Props) {
-  const status = asRecord(domains.status);
-  const matrixValue = asRecord(domains["runtime-matrix"]).matrix;
-  const matrix = Array.isArray(matrixValue) ? matrixValue as Record<string, unknown>[] : [];
-  const matrixStatus = (id: string) => matrix.find((item) => item.capabilityId === id)?.status;
-  const manifest = asRecord(domains["asset-manifest"]);
-  const assets = Array.isArray(manifest.assets) ? manifest.assets as Record<string, unknown>[] : [];
-  const knowledgeCount = assets.filter((asset) => asset.category === "knowledge").length;
-  const evidenceCount = asItems(domains.proofs).length + asItems(domains.receipts).length;
-  const runtimeValue = status.runtime === "not_connected" ? "Awaiting secure connection" : displayLabel(status.runtime);
+export function ExecutiveStatusBar({ snapshot, connectionState }: { snapshot: RuntimeSnapshot; connectionState: ConnectionState }) {
+  const health = snapshot.health?.data as { checks?: Record<string, boolean> } | undefined;
+  const diagnostics = snapshot.diagnostics?.data as { checks?: Record<string, boolean> } | undefined;
+  const environment = snapshot.environment?.data as { valid?: boolean } | undefined;
+  const providers = Array.isArray(snapshot.providers?.data) ? snapshot.providers.data : [];
   const items = [
-    { title: "Runtime", value: runtimeValue, description: "Hosted runtime pending", icon: Activity },
-    { title: "Knowledge", value: `${knowledgeCount} registered item${knowledgeCount === 1 ? "" : "s"}`, description: "Fixture inventory only", icon: BookOpenCheck },
-    { title: "Governance", value: displayLabel(matrixStatus("governance")), description: "Local verification", icon: Gavel },
-    { title: "Execution", value: "Bounded local only", description: displayLabel(matrixStatus("execution")), icon: Workflow },
-    { title: "Evidence", value: `${evidenceCount} local record${evidenceCount === 1 ? "" : "s"}`, description: "Proof and receipt ledger", icon: FileCheck2 },
-    { title: "Security", value: meta?.secretValuesExposed === false ? "Secrets isolated" : "Unavailable", description: "Server-held credential", icon: LockKeyhole },
-    { title: "Connection", value: displayLabel(meta?.connectionState), description: meta?.dataMode === "contract_fixture" ? "Contract fixture" : "Runtime observation", icon: Network },
-    { title: "Operator mode", value: "Observation only", description: "Read-only controls", icon: Eye }
+    { title: "Gateway Health", value: snapshot.health?.gateway.status ?? "Connecting", description: "Same-origin read boundary", icon: ShieldCheck },
+    { title: "Runtime Health", value: snapshot.health?.runtime?.status ?? "Unknown", description: "Hosted liveness", icon: Activity },
+    { title: "Provider Registry", value: health?.checks?.providerRegistryLoaded ? "Healthy" : "Unavailable", description: `${providers.length} registered providers`, icon: Boxes },
+    { title: "Environment", value: environment?.valid ? "Healthy" : "Unavailable", description: String((snapshot.status?.data as { environment?: string })?.environment ?? "Unknown"), icon: Cloud },
+    { title: "Connection", value: connectionState, description: "Gateway to runtime", icon: Network },
+    { title: "Version", value: snapshot.version?.runtime ? "Compatible" : "Unknown", description: snapshot.version?.runtime?.runtimeVersion ?? "Unavailable", icon: ServerCog },
+    { title: "Diagnostics", value: diagnostics?.checks && Object.values(diagnostics.checks).every(Boolean) ? "Healthy" : "Degraded", description: "All checks remain visible", icon: FileCheck2 }
   ];
-
-  return <section className="executive-status-bar" aria-label="Executive system status">
-    {items.map((item) => <article key={item.title} data-tone={statusTone(item.value)} aria-label={`${item.title}: ${item.value}. ${item.description}`}>
-      <item.icon size={15} aria-hidden="true" />
-      <div><span>{item.title}</span><strong>{item.value}</strong><small>{item.description}</small></div>
-    </article>)}
+  return <section className="executive-status-bar" aria-label="Experience Gateway health model">
+    {items.map((item) => <article key={item.title} data-tone={statusTone(item.value)} aria-label={`${item.title}: ${item.value}. ${item.description}`}><item.icon size={15} aria-hidden="true" /><div><span>{item.title}</span><strong>{item.value}</strong><small>{item.description}</small></div></article>)}
   </section>;
 }

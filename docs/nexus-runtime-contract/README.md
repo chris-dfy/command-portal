@@ -1,16 +1,16 @@
 # Runtime Contract Package
 
-This directory is the curated Phase 5X-B contract between the standalone portal BFF and the Runtime API. The browser contract is product-name-neutral and versioned independently from visible identity.
+This contract is governed by the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
+
+This directory is the curated contract between the Command Portal's NEXUS Experience Gateway and the Runtime API. The browser contract is product-name-neutral and versioned independently from visible identity.
 
 ## Contract
 
 - Browser envelope: `portal-envelope/1.0`
-- Browser route prefix: `/api/portal`
+- Browser route prefix: `/api/runtime`
 - Runtime access: server-side GET only
-- Allowed browser query keys: `limit`, `offset`
-- `limit`: integer 1–100
-- Cache TTL: 30 seconds by default, non-authoritative
-- Detail IDs: 1–160 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `-`
+- Allowed browser query keys: none
+- Cache TTL: 15 seconds by default, non-authoritative
 
 The route set is closed. Adding a runtime endpoint requires an explicit mapping, schema review, threat review, tests, and a contract documentation update.
 

@@ -1,16 +1,16 @@
 # Truth Boundaries
 
-Until a later proof-backed contract changes them, every portal response and every UI area must preserve:
+These truth boundaries are required by the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
+
+The Experience Gateway and browser preserve:
 
 - `productionReady=false`
 - `enterpriseReady=false`
 - `cloudPrimary=false`
 - `localSourceOfTruth=true`
-- `secretValuesExposed=false`
-- Conclave is `staged`
+- `defaultProvider=mock_model`
+- `conclave=staged`
 - `actualTrainedSLMs=0`
-- Hosted connection acceptance is pending Phase 5X-C
+- `secretValuesExposed=false`
 
-No UI language may convert `preview`, `staged`, `configured`, `candidate`, `fixture`, or `local` into `live`, `deployed`, `trained`, `hosted`, `production`, or `accepted`.
-
-`contract_fixture` values demonstrate schema and navigation behavior only. `disconnected` mode reports absence and does not backfill values. `local_runtime` reports runtime responses, proof links, receipt links, limitations, cache state, and staleness without strengthening claims.
+Hosted transport does not imply production or enterprise readiness. Configured providers do not imply reachability, verification, trained-model knowledge, or live inference. Runtime failure reports absence and never backfills values.

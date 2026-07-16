@@ -1,19 +1,40 @@
-import type { PortalEnvelope, PortalSnapshot } from "./types";
+import type { GatewayEnvelope, RuntimeRoute, RuntimeSnapshot } from "./types";
 
-async function get<T>(path: string): Promise<PortalEnvelope<T>> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 15_000);
-  try {
-    const response = await fetch(path, { method: "GET", headers: { Accept: "application/json" }, signal: controller.signal, credentials: "same-origin" });
-    const body = await response.json() as PortalEnvelope<T>;
-    if (!response.ok && !body.data) throw new Error(body.error?.message ?? `Portal read failed (${response.status})`);
-    return body;
-  } finally {
-    window.clearTimeout(timer);
-  }
+export const RUNTIME_ROUTES: RuntimeRoute[] = [
+  "status", "health", "ready", "version", "providers", "capabilities",
+  "proofs", "receipts", "environment", "diagnostics", "governance", "connectors", "eox"
+];
+
+async function get<T>(route: RuntimeRoute, forceRefresh = false): Promise<GatewayEnvelope<T>> {
+  const response = await fetch(`/api/runtime/${route}`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      ...(forceRefresh ? { "Cache-Control": "no-cache" } : {})
+    },
+    credentials: "same-origin"
+  });
+  const body = await response.json() as GatewayEnvelope<T>;
+  if (!response.ok || !body.ok) throw Object.assign(new Error(body.error?.message ?? `Gateway read failed (${response.status})`), { envelope: body });
+  return body;
 }
 
-export const portalClient = Object.freeze({
-  snapshot: () => get<PortalSnapshot>("/api/portal/snapshot"),
-  detail: (kind: "proof" | "receipt" | "claim", id: string) => get<Record<string, unknown>>(`/api/portal/${kind}/${encodeURIComponent(id)}`)
-});
+async function snapshot(forceRefresh = false): Promise<{ data: RuntimeSnapshot; failures: GatewayEnvelope[] }> {
+  const results = await Promise.allSettled(RUNTIME_ROUTES.map((route) => get(route, forceRefresh)));
+  const data: RuntimeSnapshot = {};
+  const failures: GatewayEnvelope[] = [];
+  results.forEach((result, index) => {
+    const route = RUNTIME_ROUTES[index];
+    if (result.status === "fulfilled") data[route] = result.value;
+    else {
+      const envelope = (result.reason as { envelope?: GatewayEnvelope }).envelope;
+      if (envelope) {
+        data[route] = envelope;
+        failures.push(envelope);
+      }
+    }
+  });
+  return { data, failures };
+}
+
+export const portalClient = Object.freeze({ get, snapshot });

@@ -1,5 +1,7 @@
 # Responsive Rules
 
+This Experience Layer guidance follows the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
+
 - Above 1280px: the eight-domain status bar uses one row; health uses four columns.
 - 1051–1280px: status and health use balanced multi-row grids.
 - 821–1050px: mission and topology columns collapse; evidence uses one column; metrics use two columns.
