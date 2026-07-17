@@ -26,8 +26,7 @@ export type ConclaveReview = {
   limitations: string[];
 };
 
-type RuntimeEnvelope = { data: { review: ConclaveReview } };
-type GatewayEnvelope = { ok: boolean; data: RuntimeEnvelope | null; error?: { message?: string } };
+type GatewayEnvelope = { ok: boolean; data: { review: ConclaveReview } | null; error?: { message?: string } };
 
 export async function runConclaveReview(proposal: string): Promise<ConclaveReview> {
   const response = await fetch("/api/runtime/conclave/reviews", {
@@ -37,8 +36,8 @@ export async function runConclaveReview(proposal: string): Promise<ConclaveRevie
     body: JSON.stringify({ clientId: "nexus-web", proposal }),
   });
   const gateway = await response.json() as GatewayEnvelope;
-  if (!response.ok || !gateway.ok || !gateway.data?.data.review) {
+  if (!response.ok || !gateway.ok || !gateway.data?.review) {
     throw new Error(gateway.error?.message ?? `Conclave review failed (${response.status})`);
   }
-  return gateway.data.data.review;
+  return gateway.data.review;
 }

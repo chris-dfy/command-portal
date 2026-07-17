@@ -8,7 +8,7 @@ import { displayLabel } from "../lib/presentation";
 const suggestedProposal = "Authorize a new operational capability before registered evidence, governance authority, and rollback criteria are complete.";
 
 export function ConclaveWorkspace({ status }: { status?: Record<string, unknown> | null }) {
-  const [proposal, setProposal] = useState(suggestedProposal);
+  const [proposal, setProposal] = useState("");
   const [review, setReview] = useState<ConclaveReview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +29,7 @@ export function ConclaveWorkspace({ status }: { status?: Record<string, unknown>
     </section>
 
     <DataPanel eyebrow="Proposal under review" title="Frame the decision" icon={<Scale size={18} />}>
-      <div className="conclave-composer"><label htmlFor="conclave-proposal">What should Conclave challenge?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><button onClick={() => void runReview()} disabled={!proposal.trim() || busy}><BrainCircuit size={16} />{busy ? "Reviewing registered context…" : "Run governed review"}</button></div></div>
+      <div className="conclave-composer"><label htmlFor="conclave-proposal">What should Conclave challenge?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><button onClick={() => void runReview()} disabled={!proposal.trim() || busy}><BrainCircuit size={16} />{busy ? "Reviewing registered context…" : "Run governed review"}</button></div></div>
       {error && <p className="conclave-error" role="alert">{error}</p>}
     </DataPanel>
 

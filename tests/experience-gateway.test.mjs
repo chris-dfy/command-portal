@@ -131,6 +131,10 @@ test("hosted conversational reasoning has a dedicated bounded timeout", async ()
     body: JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" })
   });
   assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.data.interaction.responseText, "Verified response");
+  assert.equal("data" in body.data, false);
   assert.ok(Date.now() - started >= 15);
 });
 

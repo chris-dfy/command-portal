@@ -130,6 +130,9 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(app, /<ConclaveWorkspace/);
   for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
   assert.match(client, /\/api\/runtime\/conclave\/reviews/);
+  assert.match(conclave, /useState\(""\)/);
+  assert.match(conclave, /placeholder=\{suggestedProposal\}/);
+  assert.doesNotMatch(client, /gateway\.data\.data/);
   assert.match(conclave, /execution/i);
   assert.match(styles, /understanding-grid \{ grid-template-columns: repeat\(2/);
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(conclave + client), false);
@@ -155,6 +158,8 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   for (const control of ["Mute mic", "Mute NEXUS", "Unmute mic", "Unmute NEXUS"]) assert.match(copilot, new RegExp(control));
   assert.match(copilot, /if \(voiceConnected\) stopVoice\(\)/);
   assert.match(hif, /conversationId/);
+  assert.match(hif, /return gateway\.data/);
+  assert.doesNotMatch(hif, /gateway\.data\.data/);
   assert.match(realtime, /RTCPeerConnection/);
   assert.doesNotMatch(app, /Begin Executive Briefing/);
   assert.match(styles, /Persistent NEXUS executive copilot/);

@@ -28,7 +28,6 @@ export type HifInteraction = {
   proofIds: string[];
 };
 
-type RuntimeEnvelope<T> = { status: string; data: T; proofIds: string[]; limitations: string[] };
 type GatewayEnvelope<T> = { ok: boolean; data: T | null; error?: { message?: string } };
 
 export type HifPresentationState = {
@@ -73,9 +72,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     credentials: "same-origin",
     headers: { Accept: "application/json", ...(options?.body ? { "Content-Type": "application/json" } : {}) },
   });
-  const gateway = await response.json() as GatewayEnvelope<RuntimeEnvelope<T>>;
-  if (!response.ok || !gateway.ok || !gateway.data?.data) throw new Error(gateway.error?.message ?? `HIF request failed (${response.status})`);
-  return gateway.data.data;
+  const gateway = await response.json() as GatewayEnvelope<T>;
+  if (!response.ok || !gateway.ok || !gateway.data) throw new Error(gateway.error?.message ?? `HIF request failed (${response.status})`);
+  return gateway.data;
 }
 
 export const hifClient = Object.freeze({
