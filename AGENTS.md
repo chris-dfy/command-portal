@@ -25,7 +25,7 @@ Follow the [NEXUS Platform Constitution](docs/architecture/NEXUS_Platform_Consti
 ## Truth and hosted mode
 
 - Always preserve: `productionReady=false`, `enterpriseReady=false`, `cloudPrimary=false`, `localSourceOfTruth=true`, and `secretValuesExposed=false` unless a later, proof-backed contract version explicitly changes them.
-- Conclave is staged. `actualTrainedSLMs` is zero unless verified physical model assets prove otherwise.
+- Conclave provides an available bounded Runtime review. It preserves structured dissent and synthesis but does not claim independent model participants or authorize execution. `actualTrainedSLMs` is zero unless verified physical model assets prove otherwise.
 - Hosted Runtime remains the read-only observation source. The private local Runtime is authoritative for local-first intake, project intelligence, and voice operations. Failure in either mode must not silently fall back to fabricated operational values.
 - Model-native knowledge is useful for reasoning and candidate generation, but is never proof of current facts, organization facts, runtime capabilities, or completed work.
 

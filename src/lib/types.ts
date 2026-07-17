@@ -16,7 +16,7 @@ export type TruthState = {
   cloudPrimary: false;
   localSourceOfTruth: true;
   defaultProvider: "mock_model";
-  conclave: "staged";
+  conclave: "available_bounded_review";
   actualTrainedSLMs: 0;
   secretValuesExposed: false;
 };
@@ -74,6 +74,7 @@ export type RuntimeRoute =
   | "diagnostics"
   | "governance"
   | "connectors"
+  | "conclave"
   | "eox";
 
 export type RuntimeSnapshot = Partial<Record<RuntimeRoute, GatewayEnvelope>>;

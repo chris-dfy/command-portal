@@ -116,6 +116,20 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(center + contract), false);
 });
 
+test("Conclave is a visible Runtime-owned decision challenge capability", async () => {
+  const [app, conclave, client, styles] = await Promise.all([
+    read("../src/App.tsx"), read("../src/components/ConclaveWorkspace.tsx"),
+    read("../src/lib/conclave-client.ts"), read("../src/styles.css")
+  ]);
+  assert.match(app, /label: "Conclave"/);
+  assert.match(app, /<ConclaveWorkspace/);
+  for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
+  assert.match(client, /\/api\/runtime\/conclave\/reviews/);
+  assert.match(conclave, /execution/i);
+  assert.match(styles, /understanding-grid \{ grid-template-columns: repeat\(2/);
+  assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(conclave + client), false);
+});
+
 test("NEXUS remains a Runtime-governed conversational copilot across every portal area", async () => {
   const [app, copilot, hif, realtime, styles] = await Promise.all([
     read("../src/App.tsx"),

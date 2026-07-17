@@ -16,6 +16,9 @@ This allowlist enforces the communication boundary defined by the [NEXUS Platfor
 | `/api/runtime/diagnostics` | `/runtime/diagnostics` |
 | `/api/runtime/governance` | `/runtime/governance` |
 | `/api/runtime/connectors` | `/runtime/connectors` |
+| `/api/runtime/conclave` | `/runtime/conclave/status` |
+
+The bounded mutation allowlist additionally maps `POST /api/runtime/conclave/reviews` to `POST /runtime/conclave/reviews`. The gateway accepts only `clientId` and a bounded `proposal`; it cannot forward execution or client-authored governance decisions.
 
 No query parameters, record interpolation, wildcard proxy, or arbitrary forwarding exists.
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, ChevronRight, FileCheck2, Files, FolderKanban, GitBranch, Menu, Mic2, Network, RefreshCw, Search, ServerCog, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
+import { Activity, BrainCircuit, ChevronRight, FileCheck2, Files, FolderKanban, GitBranch, Menu, Mic2, Network, RefreshCw, Search, ServerCog, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
 import { portalBrand } from "./brand";
 import { DataPanel, EmptyRecord } from "./components/DataPanel";
 import { ExecutiveStatusBar } from "./components/ExecutiveStatusBar";
@@ -13,6 +13,7 @@ import { VoiceWorkspace } from "./components/VoiceWorkspace";
 import { OperationsWorkspace } from "./components/OperationsWorkspace";
 import { OperationsCenter } from "./components/OperationsCenter";
 import { NexusCopilot } from "./components/NexusCopilot";
+import { ConclaveWorkspace } from "./components/ConclaveWorkspace";
 import { portalClient } from "./lib/portal-client";
 import { displayLabel, statusTone } from "./lib/presentation";
 import type { ConnectionState, GatewayEnvelope, ProviderRecord, RuntimeSnapshot } from "./lib/types";
@@ -24,6 +25,7 @@ const AREAS = [
   { id: "projects", label: "Nexicron Projects", detail: "Plan, scope, and price", icon: FolderKanban },
   { id: "voice", label: "Voice Operator", detail: "Speak through governed runtime", icon: Mic2 },
   { id: "operations", label: "Mission Control", detail: "Plan, govern, and execute bounded work", icon: Network },
+  { id: "conclave", label: "Conclave", detail: "Challenge, dissent, and synthesize", icon: BrainCircuit },
   { id: "information", label: "Runtime Information", detail: "Discovery and truth state", icon: ServerCog },
   { id: "health", label: "Health & Diagnostics", detail: "Independent runtime signals", icon: Activity },
   { id: "topology", label: "Runtime Topology", detail: "Live read path", icon: GitBranch },
@@ -152,6 +154,7 @@ export function App() {
         {active === "projects" && <ProjectStudio />}
         {active === "voice" && <VoiceWorkspace />}
         {active === "operations" && <OperationsWorkspace />}
+        {active === "conclave" && <ConclaveWorkspace status={record(snapshot.conclave?.data)} />}
         {active === "information" && <RuntimeInformation snapshot={snapshot} connectionState={state} />}
         {active === "health" && <RuntimeHealth snapshot={snapshot} connectionState={state} />}
         {active === "topology" && <RuntimeTopology snapshot={snapshot} />}

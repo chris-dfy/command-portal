@@ -80,7 +80,7 @@ test("arbitrary routes, queries, and every mutation method are rejected", async 
   assert.equal(calls, 0);
 });
 
-test("Executive Briefing and its HIF lifecycle are the only bounded hosted Runtime presentation mutations", async () => {
+test("Conclave, Executive Briefing, and HIF lifecycle are bounded hosted Runtime mutations", async () => {
   const observed = [];
   const base = await start(async (url, options) => {
     observed.push({ url, options });
@@ -88,6 +88,7 @@ test("Executive Briefing and its HIF lifecycle are the only bounded hosted Runti
   });
   assert.deepEqual(RUNTIME_MUTATION_ROUTES, {
     "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing",
+    "/api/runtime/conclave/reviews": "/runtime/conclave/reviews",
     "/api/runtime/interactions": "/runtime/interactions"
   });
   const response = await fetch(`${base}/api/runtime/executive-briefing`, {
@@ -105,6 +106,18 @@ test("Executive Briefing and its HIF lifecycle are the only bounded hosted Runti
   });
   assert.equal(resumed.status, 200);
   assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/resume");
+
+  const conclave = await fetch(`${base}/api/runtime/conclave/reviews`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: "nexus-web", proposal: "Challenge this proposal" })
+  });
+  assert.equal(conclave.status, 200);
+  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/conclave/reviews");
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { clientId: "nexus-web", proposal: "Challenge this proposal" });
+  assert.equal((await fetch(`${base}/api/runtime/conclave/reviews`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: "nexus-web", proposal: "Review", execute: true })
+  })).status, 400);
 });
 
 test("hosted conversational reasoning has a dedicated bounded timeout", async () => {
@@ -320,7 +333,7 @@ test("truth-boundary regression remains fixed in every gateway envelope", async 
     cloudPrimary: false,
     localSourceOfTruth: true,
     defaultProvider: "mock_model",
-    conclave: "staged",
+    conclave: "available_bounded_review",
     actualTrainedSLMs: 0,
     secretValuesExposed: false
   });

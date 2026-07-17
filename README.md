@@ -78,6 +78,6 @@ Only capabilities reported as implemented by Runtime are presented as executable
 
 ## Truth boundary
 
-The portal preserves `productionReady=false`, `enterpriseReady=false`, `cloudPrimary=false`, `localSourceOfTruth=true`, `defaultProvider=mock_model`, `conclave=staged`, and `actualTrainedSLMs=0`. Provider configuration never proves reachability or live inference.
+The portal preserves `productionReady=false`, `enterpriseReady=false`, `cloudPrimary=false`, `localSourceOfTruth=true`, `defaultProvider=mock_model`, `conclave=available_bounded_review`, and `actualTrainedSLMs=0`. Conclave is a structured Runtime review that preserves dissent but does not claim independent model participants or authorize execution. Provider configuration never proves reachability or live inference.
 
 See [HostedOperationalGateway.md](docs/HostedOperationalGateway.md), [ClientParityContract.md](docs/ClientParityContract.md), [LocalFirstParity.md](docs/LocalFirstParity.md), [ExperienceGateway.md](docs/architecture/ExperienceGateway.md), [RuntimeConnection.md](docs/RuntimeConnection.md), [FailureModes.md](docs/FailureModes.md), [Caching.md](docs/Caching.md), and [VersionNegotiation.md](docs/VersionNegotiation.md).

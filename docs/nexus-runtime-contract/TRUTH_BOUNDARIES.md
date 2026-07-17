@@ -9,7 +9,7 @@ The Experience Gateway and browser preserve:
 - `cloudPrimary=false`
 - `localSourceOfTruth=true`
 - `defaultProvider=mock_model`
-- `conclave=staged`
+- `conclave=available_bounded_review`: structured Runtime challenge and synthesis is available; independent model participation and execution authority remain false.
 - `actualTrainedSLMs=0`
 - `secretValuesExposed=false`
 

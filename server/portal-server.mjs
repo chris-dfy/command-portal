@@ -25,11 +25,13 @@ export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/governance": "/runtime/governance",
   "/api/runtime/connectors": "/runtime/connectors",
   "/api/runtime/realtime-voice": "/runtime/voice/realtime/status",
+  "/api/runtime/conclave": "/runtime/conclave/status",
   "/api/runtime/eox": "/runtime/executive-operating-loop"
 });
 
 export const RUNTIME_MUTATION_ROUTES = Object.freeze({
   "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing",
+  "/api/runtime/conclave/reviews": "/runtime/conclave/reviews",
   "/api/runtime/interactions": "/runtime/interactions"
 });
 
@@ -99,7 +101,7 @@ const TRUTH = Object.freeze({
   cloudPrimary: false,
   localSourceOfTruth: true,
   defaultProvider: "mock_model",
-  conclave: "staged",
+  conclave: "available_bounded_review",
   actualTrainedSLMs: 0,
   secretValuesExposed: false
 });
@@ -748,6 +750,12 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
       ...(raw.presentation && typeof raw.presentation === "object" && !Array.isArray(raw.presentation) ? { presentation: raw.presentation } : {}),
       ...(raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? { metadata: raw.metadata } : {})
     };
+  } else if (runtimePath === "/runtime/conclave/reviews") {
+    strictKeys(raw, new Set(["clientId", "proposal"]));
+    payload = {
+      clientId: boundedText(raw.clientId, "clientId", 128),
+      proposal: boundedText(raw.proposal, "proposal", 8_000),
+    };
   } else {
     strictKeys(raw, new Set(["clientId", "modality", "speechRequested"]));
     payload = { clientId: boundedText(raw.clientId, "clientId", 128), modality: boundedText(raw.modality ?? "text", "modality", 40), speechRequested: raw.speechRequested !== false };
@@ -984,7 +992,7 @@ export function createPortalServer(options = {}) {
     } else if (request.url?.startsWith("/api/runtime/realtime/call")) {
       handleRealtimeCall(request, response, config, runtimeFetch)
         .catch(() => sendJson(response, 500, { ok: false, error: { code: "realtime_gateway_error", message: "Realtime session creation failed safely." }, truth: TRUTH }));
-    } else if (request.url?.startsWith("/api/runtime/executive-briefing") || request.url === "/api/runtime/interactions" || request.url?.startsWith("/api/runtime/interactions/")) {
+    } else if (request.url?.startsWith("/api/runtime/executive-briefing") || request.url === "/api/runtime/conclave/reviews" || request.url === "/api/runtime/interactions" || request.url?.startsWith("/api/runtime/interactions/")) {
       handleRuntimeMutation(request, response, config, runtimeFetch, tracker)
         .catch((error) => {
           const failure = error instanceof GatewayFailure ? error : new GatewayFailure("gateway_error", "The bounded Runtime request failed safely.", "Unknown", 500);

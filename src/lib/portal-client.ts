@@ -2,7 +2,7 @@ import type { GatewayEnvelope, RuntimeRoute, RuntimeSnapshot } from "./types";
 
 export const RUNTIME_ROUTES: RuntimeRoute[] = [
   "status", "health", "ready", "version", "providers", "capabilities",
-  "proofs", "receipts", "environment", "diagnostics", "governance", "connectors", "eox"
+  "proofs", "receipts", "environment", "diagnostics", "governance", "connectors", "eox", "conclave"
 ];
 
 async function get<T>(route: RuntimeRoute, forceRefresh = false): Promise<GatewayEnvelope<T>> {

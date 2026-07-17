@@ -4,7 +4,7 @@ import { hifClient } from "../lib/hif-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
 
 type Message = { speaker: "operator" | "nexus"; text: string; limitation?: string };
-type AreaId = "center" | "intake" | "projects" | "voice" | "operations" | "information" | "health" | "topology" | "providers" | "evidence";
+type AreaId = "center" | "intake" | "projects" | "voice" | "operations" | "conclave" | "information" | "health" | "topology" | "providers" | "evidence";
 
 const SKILLS: Array<{ label: string; prompt: string; area: AreaId }> = [
   { label: "Summarize operational readiness", prompt: "Summarize operational readiness and identify the highest-priority constraint.", area: "center" },
@@ -12,6 +12,7 @@ const SKILLS: Array<{ label: string; prompt: string; area: AreaId }> = [
   { label: "Explain the Runtime topology", prompt: "Explain the current Runtime topology and any unverified connection boundaries.", area: "topology" },
   { label: "Help plan a Nexicron project", prompt: "Help me plan, scope, and price a Nexicron project. Begin with the essential discovery questions.", area: "projects" },
   { label: "Review governance and evidence", prompt: "Review the current governance, proof, and receipt posture without claiming evidence that is not registered.", area: "evidence" },
+  { label: "Challenge a decision in Conclave", prompt: "Help me frame the decision I should pressure-test in Conclave, including the evidence and authority it would require.", area: "conclave" },
   { label: "Generate an executive briefing", prompt: "Generate a concise executive briefing from the registered Operational Context.", area: "center" },
 ];
 

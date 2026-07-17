@@ -14,3 +14,8 @@ Component ownership follows the [NEXUS Platform Constitution](../architecture/NE
 | Provider registry | Provider configuration and verification | Does not infer live inference |
 | Proofs & Receipts | Runtime evidence references | Always bypasses cache |
 | Failure banner | Unavailability, timestamps, retry state | Never substitutes generated data |
+# Conclave
+
+`ConclaveWorkspace` presents the Runtime-owned bounded review contract. It includes proposal framing, preserved specialist mandates, dissent, confidence, context completeness, synthesis, and explicit non-execution boundaries. The client does not assemble context or calculate review conclusions.
+
+Operational Understanding uses two-column evidence cards at desktop widths so long status labels and evidence bases remain readable without overlap.
