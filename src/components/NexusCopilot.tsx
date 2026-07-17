@@ -19,14 +19,16 @@ const SKILLS: Array<{ label: string; prompt: string; area: AreaId }> = [
 const introductionKey = "nexus-copilot-introduced-v1";
 const messageFrom = (error: unknown) => error instanceof Error ? error.message : String(error);
 
-export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate }: {
+export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate, open, expanded, onOpenChange, onExpandedChange }: {
   activeArea: AreaId;
   activeLabel: string;
   runtimeState: string;
   onNavigate: (area: AreaId) => void;
+  open: boolean;
+  expanded: boolean;
+  onOpenChange: (open: boolean) => void;
+  onExpandedChange: (expanded: boolean) => void;
 }) {
-  const [open, setOpen] = useState(true);
-  const [expanded, setExpanded] = useState(false);
   const [introduced, setIntroduced] = useState(true);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -107,7 +109,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     void ask(skill.prompt);
   }
 
-  if (!open) return <button className="nexus-copilot-launcher" onClick={() => setOpen(true)}><Sparkles size={20} /><span>Open NEXUS</span></button>;
+  if (!open) return <button className="nexus-copilot-launcher" onClick={() => onOpenChange(true)}><Sparkles size={20} /><span>Open NEXUS</span></button>;
 
   const voiceConnected = !["idle", "error"].includes(voiceState);
   return <>
@@ -116,8 +118,8 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       <header className="nexus-copilot__header">
         <div className="nexus-copilot__mark"><Bot size={23} /></div>
         <div><strong>NEXUS</strong><span>Enterprise executive operating intelligence</span></div>
-        <button onClick={() => setExpanded(!expanded)} aria-label={expanded ? "Restore NEXUS panel" : "Expand NEXUS panel"}>{expanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
-        <button onClick={() => setOpen(false)} aria-label="Close NEXUS panel"><X size={18} /></button>
+        <button onClick={() => onExpandedChange(!expanded)} aria-label={expanded ? "Restore NEXUS panel" : "Expand NEXUS panel"}>{expanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+        <button onClick={() => { onExpandedChange(false); onOpenChange(false); }} aria-label="Close NEXUS panel"><X size={18} /></button>
       </header>
 
       <div className="nexus-copilot__signals">

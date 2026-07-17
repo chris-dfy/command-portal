@@ -139,6 +139,9 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
     read("../src/styles.css"),
   ]);
   assert.match(app, /<NexusCopilot/);
+  assert.match(app, /portal-shell.*has-copilot/);
+  assert.match(app, /open=\{copilotOpen\}/);
+  assert.match(copilot, /open: boolean/);
   assert.match(copilot, /Enterprise executive operating intelligence/);
   assert.match(copilot, /hifClient\.start\(request, "text", \{\}, conversationId\.current\)/);
   assert.match(copilot, /RealtimeVoiceClient/);
@@ -148,6 +151,10 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.match(realtime, /RTCPeerConnection/);
   assert.doesNotMatch(app, /Begin Executive Briefing/);
   assert.match(styles, /Persistent NEXUS executive copilot/);
+  assert.match(styles, /portal-shell\.has-copilot \{ grid-template-columns/);
+  assert.match(styles, /container-name: portal-main/);
+  assert.match(styles, /@container portal-main/);
+  assert.match(styles, /Modules respond to the workspace width/);
   for (const source of [app, copilot, hif]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
   }

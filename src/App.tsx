@@ -101,6 +101,8 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [copilotOpen, setCopilotOpen] = useState(true);
+  const [copilotExpanded, setCopilotExpanded] = useState(false);
 
   const refresh = (forceRefresh = false) => {
     setLoading(true);
@@ -123,7 +125,7 @@ export function App() {
   const lastRefresh = Object.values(snapshot).map((item) => item?.gateway.lastSuccessfulRefresh).filter(Boolean).sort().at(-1) ?? null;
   const eox = snapshot.eox?.data as EoxAssessment | null | undefined;
 
-  return <div className="portal-shell">
+  return <div className={`portal-shell${copilotOpen ? " has-copilot" : ""}${copilotExpanded ? " has-expanded-copilot" : ""}`}>
     <a className="skip-link" href="#main-content">Skip to portal content</a>
     <header className="command-header">
       <div className="rail-brand"><span>{portalBrand.parentBrand}</span><strong>{portalBrand.displayName}</strong></div>
@@ -168,6 +170,10 @@ export function App() {
       activeLabel={current.label}
       runtimeState={state}
       onNavigate={(area) => setActive(area)}
+      open={copilotOpen}
+      expanded={copilotExpanded}
+      onOpenChange={setCopilotOpen}
+      onExpandedChange={setCopilotExpanded}
     />
 
     <footer className="global-footer"><span>Same-origin Experience Gateway</span><span>Validated local capability allowlist</span><span>No browser-held Runtime credential</span><span>Runtime-owned context and execution</span></footer>
