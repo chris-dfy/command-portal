@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Send, Volume2, Waves } from "lucide-react";
+import { Mic, MicOff, Send, Volume2, VolumeX, Waves } from "lucide-react";
 import { DataPanel } from "./DataPanel";
 import { displayLabel } from "../lib/presentation";
 import { hifClient, initialHifPresentationState, presentHifEvents, type HifInteraction } from "../lib/hif-client";
@@ -21,6 +21,8 @@ type TranscriptEntry = { speaker: "You" | "NEXUS"; text: string };
 
 export function VoiceWorkspace() {
   const [voiceState, setVoiceState] = useState<RealtimeVoiceState>("idle");
+  const [microphoneMuted, setMicrophoneMuted] = useState(false);
+  const [nexusMuted, setNexusMuted] = useState(false);
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [amplitude, setAmplitude] = useState(0);
   const [transcript, setTranscript] = useState("");
@@ -56,6 +58,9 @@ export function VoiceWorkspace() {
     if (!audio.current) return;
     setMessage(null);
     setAssistantTranscript("");
+    setMicrophoneMuted(false);
+    setNexusMuted(false);
+    audio.current.muted = false;
     const client = new RealtimeVoiceClient(audio.current, {
       onState: setVoiceState,
       onAmplitude: setAmplitude,
@@ -80,7 +85,23 @@ export function VoiceWorkspace() {
     if (assistantTranscript.trim()) setHistory((items) => [{ speaker: "NEXUS", text: assistantTranscript.trim() } as TranscriptEntry, ...items].slice(0, 10));
     liveClient.current?.stop();
     liveClient.current = null;
+    setMicrophoneMuted(false);
+    setNexusMuted(false);
     setMessage("Live voice session ended. No provider credential was stored in the browser.");
+  }
+
+  function toggleMicrophoneMute() {
+    const muted = !microphoneMuted;
+    liveClient.current?.setMicrophoneMuted(muted);
+    setMicrophoneMuted(muted);
+    setMessage(muted ? "Your microphone is muted. The live session remains connected." : "Your microphone is live. The session remains connected.");
+  }
+
+  function toggleNexusMute() {
+    const muted = !nexusMuted;
+    liveClient.current?.setOutputMuted(muted);
+    setNexusMuted(muted);
+    setMessage(muted ? "NEXUS audio is muted. Responses remain visible as text." : "NEXUS audio playback is restored.");
   }
 
   async function sendText() {
@@ -106,7 +127,7 @@ export function VoiceWorkspace() {
   }
 
   return <div className="experience-grid local-workspace">
-    <audio ref={audio} autoPlay className="voice-audio" aria-hidden="true" />
+    <audio ref={audio} autoPlay muted={nexusMuted} className="voice-audio" aria-hidden="true" />
     <DataPanel eyebrow="Runtime-managed Realtime voice" title="Speak with NEXUS" icon={<Mic size={18} />} className="span-2">
       <p className="workspace-intro">A natural, full-duplex voice session with server voice detection, streaming audio, and interruption. The Runtime owns the provider session and truth boundaries; this browser owns only microphone capture and playback.</p>
       <div className="realtime-voice-stage">
@@ -115,13 +136,16 @@ export function VoiceWorkspace() {
         </div>
         <div className="voice-stage-copy">
           <small>LIVE VOICE STATE</small>
-          <strong>{displayLabel(voiceState)}</strong>
-          <p>{voiceState === "speaking" ? assistantTranscript || "NEXUS is responding…" : voiceState === "thinking" ? "NEXUS is forming a response…" : connected ? "Listening — speak naturally" : "Start a secure live voice session"}</p>
+          <strong>{microphoneMuted && connected ? "Microphone muted" : displayLabel(voiceState)}</strong>
+          <p>{microphoneMuted && connected ? "Background audio is not being sent; the live session remains connected." : voiceState === "speaking" ? assistantTranscript || "NEXUS is responding…" : voiceState === "thinking" ? "NEXUS is forming a response…" : connected ? "Listening — speak naturally" : "Start a secure live voice session"}</p>
         </div>
-        <button className={connected ? "voice-stop" : "voice-start"} onClick={connected ? stopLiveVoice : () => void startLiveVoice()} disabled={!supported || voiceState === "connecting" || status?.state !== "available"}>
-          {connected ? <MicOff size={19} /> : <Mic size={19} />}
-          <span>{connected ? "End live voice" : voiceState === "connecting" ? "Connecting…" : "Start live voice"}</span>
-        </button>
+        {connected ? <div className="voice-stage-controls">
+          <button data-active={microphoneMuted} aria-pressed={microphoneMuted} onClick={toggleMicrophoneMute}>{microphoneMuted ? <MicOff size={17} /> : <Mic size={17} />}<span>{microphoneMuted ? "Unmute microphone" : "Mute microphone"}</span></button>
+          <button data-active={nexusMuted} aria-pressed={nexusMuted} onClick={toggleNexusMute}>{nexusMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>{nexusMuted ? "Unmute NEXUS" : "Mute NEXUS"}</span></button>
+          <button className="voice-stop" onClick={stopLiveVoice}><MicOff size={17} /><span>End live voice</span></button>
+        </div> : <button className="voice-start" onClick={() => void startLiveVoice()} disabled={!supported || voiceState === "connecting" || status?.state !== "available"}>
+          <Mic size={19} /><span>{voiceState === "connecting" ? "Connecting…" : "Start live voice"}</span>
+        </button>}
       </div>
       <div className="voice-text-fallback">
         <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder="Or type a request for the governed Runtime interaction framework" />

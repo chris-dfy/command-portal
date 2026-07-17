@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, ChevronRight, Maximize2, Mic, MicOff, Minimize2, Send, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Bot, ChevronRight, Maximize2, Mic, MicOff, Minimize2, Send, ShieldCheck, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import { hifClient } from "../lib/hif-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
 
@@ -35,6 +35,8 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   const [error, setError] = useState<string | null>(null);
   const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [voiceState, setVoiceState] = useState<RealtimeVoiceState>("idle");
+  const [microphoneMuted, setMicrophoneMuted] = useState(false);
+  const [nexusMuted, setNexusMuted] = useState(false);
   const [amplitude, setAmplitude] = useState(0);
   const [liveAssistant, setLiveAssistant] = useState("");
   const [messages, setMessages] = useState<Message[]>([
@@ -85,6 +87,9 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     if (!audio.current || !voiceAvailable) return;
     setError(null);
     setLiveAssistant("");
+    setMicrophoneMuted(false);
+    setNexusMuted(false);
+    audio.current.muted = false;
     const client = new RealtimeVoiceClient(audio.current, {
       onState: setVoiceState,
       onAmplitude: setAmplitude,
@@ -102,6 +107,20 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     liveClient.current?.stop();
     liveClient.current = null;
     setLiveAssistant("");
+    setMicrophoneMuted(false);
+    setNexusMuted(false);
+  }
+
+  function toggleMicrophoneMute() {
+    const muted = !microphoneMuted;
+    liveClient.current?.setMicrophoneMuted(muted);
+    setMicrophoneMuted(muted);
+  }
+
+  function toggleNexusMute() {
+    const muted = !nexusMuted;
+    liveClient.current?.setOutputMuted(muted);
+    setNexusMuted(muted);
   }
 
   function useSkill(skill: typeof SKILLS[number]) {
@@ -114,12 +133,12 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   const voiceConnected = !["idle", "error"].includes(voiceState);
   return <>
     <aside className={`nexus-copilot${expanded ? " is-expanded" : ""}`} aria-label="NEXUS executive copilot">
-      <audio ref={audio} autoPlay className="voice-audio" aria-hidden="true" />
+      <audio ref={audio} autoPlay muted={nexusMuted} className="voice-audio" aria-hidden="true" />
       <header className="nexus-copilot__header">
         <div className="nexus-copilot__mark"><Bot size={23} /></div>
         <div><strong>NEXUS</strong><span>Enterprise executive operating intelligence</span></div>
         <button onClick={() => onExpandedChange(!expanded)} aria-label={expanded ? "Restore NEXUS panel" : "Expand NEXUS panel"}>{expanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
-        <button onClick={() => { onExpandedChange(false); onOpenChange(false); }} aria-label="Close NEXUS panel"><X size={18} /></button>
+        <button onClick={() => { if (voiceConnected) stopVoice(); onExpandedChange(false); onOpenChange(false); }} aria-label="Close NEXUS panel"><X size={18} /></button>
       </header>
 
       <div className="nexus-copilot__signals">
@@ -136,10 +155,16 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       </section>
 
       <div className="nexus-copilot__voice">
-        <div><span className="voice-dot" style={{ transform: `scale(${1 + amplitude * 1.8})` }} /><strong>{voiceConnected ? voiceState : voiceAvailable ? "Voice ready" : "Voice unavailable"}</strong></div>
-        <button onClick={voiceConnected ? stopVoice : () => void startVoice()} disabled={!voiceAvailable || voiceState === "connecting"}>
-          {voiceConnected ? <MicOff size={17} /> : <Mic size={17} />}{voiceConnected ? "End conversation" : "Start conversation"}
-        </button>
+        <div><span className="voice-dot" style={{ transform: `scale(${1 + amplitude * 1.8})` }} /><strong>{voiceConnected ? microphoneMuted ? "Microphone muted" : voiceState : voiceAvailable ? "Voice ready" : "Voice unavailable"}</strong></div>
+        <div className="nexus-copilot__voice-controls">
+          {voiceConnected && <>
+            <button type="button" data-active={microphoneMuted} aria-pressed={microphoneMuted} onClick={toggleMicrophoneMute}>{microphoneMuted ? <MicOff size={15} /> : <Mic size={15} />}{microphoneMuted ? "Unmute mic" : "Mute mic"}</button>
+            <button type="button" data-active={nexusMuted} aria-pressed={nexusMuted} onClick={toggleNexusMute}>{nexusMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}{nexusMuted ? "Unmute NEXUS" : "Mute NEXUS"}</button>
+          </>}
+          <button onClick={voiceConnected ? stopVoice : () => void startVoice()} disabled={!voiceAvailable || voiceState === "connecting"}>
+            {voiceConnected ? <MicOff size={15} /> : <Mic size={15} />}{voiceConnected ? "End" : "Start conversation"}
+          </button>
+        </div>
       </div>
 
       <div className="nexus-copilot__conversation" ref={scroll} aria-live="polite">
@@ -158,7 +183,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
 
       <form className="nexus-copilot__composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}>
         <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask NEXUS…" aria-label="Ask NEXUS" />
-        <button type="button" onClick={voiceConnected ? stopVoice : () => void startVoice()} disabled={!voiceAvailable} aria-label="Toggle voice"><Mic size={17} /></button>
+        <button type="button" onClick={voiceConnected ? toggleMicrophoneMute : () => void startVoice()} disabled={!voiceAvailable} aria-label={voiceConnected ? microphoneMuted ? "Unmute microphone" : "Mute microphone" : "Start voice conversation"}>{microphoneMuted ? <MicOff size={17} /> : <Mic size={17} />}</button>
         <button type="submit" disabled={!input.trim() || busy} aria-label="Send message"><Send size={17} /></button>
       </form>
       <footer>Model-native reasoning is labeled. Runtime evidence remains authoritative.</footer>

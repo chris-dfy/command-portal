@@ -7,7 +7,7 @@ Component ownership follows the [NEXUS Platform Constitution](../architecture/NE
 | Command header | Hosted source, environment, Gateway, Runtime, version | Validated gateway metadata |
 | Executive status bar | Seven independent health signals | Never collapses into one status |
 | Operations Center | Runtime-owned Executive Operating Loop assessment | Presents operational state without a separate briefing launcher |
-| Persistent NEXUS copilot | Conversational executive interaction across every portal area in a non-overlapping application column | Consumes Runtime-owned context and interaction behavior through stable gateway interfaces; overlays only below the mobile breakpoint |
+| Persistent NEXUS copilot | Conversational executive interaction across every portal area in a non-overlapping application column | Consumes Runtime-owned context and interaction behavior through stable gateway interfaces; browser-owned microphone and playback mute remain independent; overlays only below the mobile breakpoint |
 | Runtime Information | Discovery, capabilities, truth, limitations | Validated Runtime responses only |
 | Health & Diagnostics | Lifecycle and component checks | Required and informational checks remain visible |
 | Runtime topology | Portal-to-provider live path | Health derived at every node |

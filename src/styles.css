@@ -269,6 +269,9 @@ main { grid-column: 2; grid-row: 4; min-width: 0; padding: 24px clamp(17px, 2.4v
 .voice-stage-copy p { margin: 0; overflow: hidden; color: var(--muted); font-size: .68rem; line-height: 1.45; text-overflow: ellipsis; }
 .realtime-voice-stage button, .voice-text-fallback button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 9px 14px; border: 1px solid rgba(var(--accent-rgb), .42); border-radius: 8px; color: var(--text); background: rgba(var(--accent-rgb), .12); cursor: pointer; }
 .realtime-voice-stage button.voice-stop { border-color: rgba(255, 110, 100, .48); color: #ffc0ba; background: rgba(255, 91, 82, .08); }
+.voice-stage-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; max-width: 440px; }
+.voice-stage-controls button { min-height: 36px; padding: 7px 10px; font-size: .66rem; }
+.voice-stage-controls button[data-active="true"] { border-color: var(--warning); color: #f8d994; background: rgba(242, 198, 109, .09); box-shadow: inset 0 0 0 1px rgba(242, 198, 109, .08); }
 .realtime-voice-stage button:disabled, .voice-text-fallback button:disabled { opacity: .46; cursor: not-allowed; }
 .voice-text-fallback { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 10px; }
 .voice-text-fallback textarea { min-height: 54px; padding: 10px 11px; border: 1px solid rgba(var(--accent-rgb), .2); border-radius: 8px; outline: none; resize: vertical; color: var(--text); background: rgba(1, 7, 11, .72); font: inherit; }
@@ -671,12 +674,15 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 .nexus-copilot__recommendation strong { display: block; margin-top: 5px; font-size: .79rem; }
 .nexus-copilot__recommendation p { margin: 5px 0 10px; color: var(--muted); font-size: .63rem; line-height: 1.45; }
 .nexus-copilot__recommendation button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border: 1px solid rgba(var(--accent-rgb), .5); border-radius: 7px; color: #041219; background: var(--accent); font-size: .67rem; font-weight: 750; }
-.nexus-copilot__voice { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 15px; border-block: 1px solid var(--border); }
+.nexus-copilot__voice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 10px; padding: 8px 15px; border-block: 1px solid var(--border); }
 .nexus-copilot__voice > div { display: flex; align-items: center; gap: 7px; }
 .voice-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .1), 0 0 9px rgba(var(--accent-rgb), .45); transition: transform .1s linear; }
 .nexus-copilot__voice strong { font-size: .62rem; text-transform: capitalize; }
 .nexus-copilot__voice button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid var(--border-strong); border-radius: 999px; color: #c8e6f3; background: rgba(var(--accent-rgb), .09); font-size: .62rem; font-weight: 700; }
 .nexus-copilot__voice button:disabled { color: #607884; border-color: rgba(var(--accent-rgb), .1); background: rgba(var(--accent-rgb), .025); cursor: not-allowed; }
+.nexus-copilot__voice-controls { display: flex; flex: 1 1 220px; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.nexus-copilot__voice-controls button { padding: 6px 8px; font-size: .56rem; }
+.nexus-copilot__voice-controls button[data-active="true"] { border-color: var(--warning); color: #f8d994; background: rgba(242, 198, 109, .09); }
 .nexus-copilot__conversation { flex: 1 1 auto; display: grid; align-content: start; gap: 9px; min-height: 120px; padding: 12px 14px; overflow-y: auto; scroll-behavior: smooth; }
 .nexus-copilot__conversation article { max-width: 92%; padding: 10px 11px; border: 1px solid var(--border); border-radius: 11px; background: rgba(9, 20, 29, .9); box-shadow: 0 10px 24px rgba(0, 0, 0, .12); }
 .nexus-copilot__conversation article[data-speaker="operator"] { justify-self: end; border-color: var(--border-strong); background: rgba(var(--accent-rgb), .095); }

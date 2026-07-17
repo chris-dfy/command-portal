@@ -75,6 +75,11 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /RTCPeerConnection/);
   assert.match(realtime, /echoCancellation: true/);
   assert.match(realtime, /output_audio_buffer\.clear/);
+  assert.match(realtime, /setMicrophoneMuted/);
+  assert.match(realtime, /track\.enabled = !this\.microphoneMuted/);
+  assert.match(realtime, /setOutputMuted/);
+  assert.match(realtime, /this\.audio\.muted = muted/);
+  for (const control of ["Mute microphone", "Mute NEXUS", "Unmute microphone", "Unmute NEXUS"]) assert.match(voice, new RegExp(control));
   assert.match(voice, /Runtime owns the provider session and truth boundaries/i);
   assert.match(voice, /model-native knowledge/i);
   assert.equal(/SpeechRecognition|speechSynthesis/.test(voice + realtime), false);
@@ -147,6 +152,8 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.match(copilot, /RealtimeVoiceClient/);
   assert.match(copilot, /Model-native reasoning is labeled\. Runtime evidence remains authoritative/);
   assert.match(copilot, /plan, scope, and price a Nexicron project/i);
+  for (const control of ["Mute mic", "Mute NEXUS", "Unmute mic", "Unmute NEXUS"]) assert.match(copilot, new RegExp(control));
+  assert.match(copilot, /if \(voiceConnected\) stopVoice\(\)/);
   assert.match(hif, /conversationId/);
   assert.match(realtime, /RTCPeerConnection/);
   assert.doesNotMatch(app, /Begin Executive Briefing/);

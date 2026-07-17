@@ -23,6 +23,8 @@ export class RealtimeVoiceClient {
   private animationFrame: number | null = null;
   private assistantTranscript = "";
   private speaking = false;
+  private microphoneMuted = false;
+  private outputMuted = false;
 
   constructor(private readonly audio: HTMLAudioElement, private readonly callbacks: RealtimeVoiceCallbacks) {}
 
@@ -37,6 +39,8 @@ export class RealtimeVoiceClient {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
       });
+      this.applyMicrophoneMute();
+      this.audio.muted = this.outputMuted;
       this.startAmplitudeMeter(this.stream);
 
       const peer = new RTCPeerConnection();
@@ -94,11 +98,27 @@ export class RealtimeVoiceClient {
     this.peer = null;
     this.audio.pause();
     this.audio.srcObject = null;
+    this.audio.muted = false;
     void this.audioContext?.close();
     this.audioContext = null;
     this.speaking = false;
     this.callbacks.onAmplitude(0);
     this.callbacks.onState("idle");
+  }
+
+  setMicrophoneMuted(muted: boolean) {
+    this.microphoneMuted = muted;
+    this.applyMicrophoneMute();
+    if (muted) this.callbacks.onAmplitude(0);
+  }
+
+  setOutputMuted(muted: boolean) {
+    this.outputMuted = muted;
+    this.audio.muted = muted;
+  }
+
+  private applyMicrophoneMute() {
+    this.stream?.getAudioTracks().forEach((track) => { track.enabled = !this.microphoneMuted; });
   }
 
   private handleEvent(raw: unknown) {
@@ -165,7 +185,7 @@ export class RealtimeVoiceClient {
     const update = () => {
       analyser.getByteFrequencyData(values);
       const mean = values.reduce((sum, value) => sum + value, 0) / (values.length * 255);
-      this.callbacks.onAmplitude(Math.min(1, mean * 3.2));
+      this.callbacks.onAmplitude(this.microphoneMuted ? 0 : Math.min(1, mean * 3.2));
       this.animationFrame = requestAnimationFrame(update);
     };
     update();
