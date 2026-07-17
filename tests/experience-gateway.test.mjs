@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { afterEach, test } from "node:test";
 import { createPortalServer, LOCAL_CAPABILITY_ROUTES, RUNTIME_MUTATION_ROUTES, RUNTIME_ROUTES } from "../server/portal-server.mjs";
 
@@ -136,6 +137,41 @@ test("hosted conversational reasoning has a dedicated bounded timeout", async ()
   assert.equal(body.data.interaction.responseText, "Verified response");
   assert.equal("data" in body.data, false);
   assert.ok(Date.now() - started >= 15);
+});
+
+test("Experience Gateway signs authoritative Runtime tenant context without exposing the secret", async () => {
+  const secret = "shared-context-assertion-secret-at-least-thirty-two-characters";
+  let observed;
+  const base = await start(async (url, options) => {
+    observed = { url, options };
+    return runtimeResponse({ interaction: { responseText: "Context received" }, events: [] });
+  }, { contextAssertionSecret: secret, operationalTenantId: "nexicron" });
+  const response = await fetch(`${base}/api/runtime/interactions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      clientId: "nexus-web",
+      inputText: "What is Nexicron's mission?",
+      modality: "text",
+      metadata: { tenantId: "untrusted-browser-tenant", contextAssemblyOwner: "browser" }
+    })
+  });
+  assert.equal(response.status, 200);
+  const token = observed.options.headers["X-NEXUS-Context-Assertion"];
+  const [encodedPayload, signature] = token.split(".");
+  const assertion = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+  assert.equal(assertion.iss, "command-portal-experience-gateway");
+  assert.equal(assertion.aud, "nexus-runtime");
+  assert.equal(assertion.tid, "nexicron");
+  assert.equal(assertion.sub, "command-portal-observer");
+  assert.deepEqual(assertion.roles, ["observer"]);
+  assert.equal(assertion.clientId, "nexus-web");
+  assert.equal(assertion.exp - assertion.iat, 60);
+  assert.equal(signature, createHmac("sha256", secret).update(encodedPayload).digest("base64url"));
+  const forwarded = JSON.parse(observed.options.body);
+  assert.equal(forwarded.metadata.tenantId, "nexicron");
+  assert.equal(forwarded.metadata.contextAssemblyOwner, "nexus-runtime");
+  assert.equal(JSON.stringify(await response.json()).includes(secret), false);
 });
 
 test("hosted conversational reasoning reports its own timeout truthfully", async () => {
