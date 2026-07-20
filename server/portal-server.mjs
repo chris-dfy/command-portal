@@ -2,7 +2,7 @@ import { createReadStream, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { createSessionAuthority, requiredScope } from "./operational-auth.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -10,6 +10,8 @@ const DIST = join(ROOT, "dist");
 
 export const SUPPORTED_SCHEMA_VERSION = "1.0.0";
 export const SUPPORTED_RUNTIME_VERSION = "0.1.0";
+const CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime";
+const CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway";
 
 export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/status": "/runtime/status",
@@ -152,6 +154,34 @@ function requiredSecret(value, name, minimum = 24) {
   return secret;
 }
 
+function optionalSecret(value, name, minimum = 32) {
+  const secret = String(value ?? "");
+  if (secret && secret.length < minimum) throw new Error(`${name} must contain at least ${minimum} characters when configured.`);
+  return secret;
+}
+
+const encodeBase64Url = (value) => Buffer.from(value).toString("base64url");
+
+export function createTenantContextAssertion(config, claims, clientId, clock = () => Date.now()) {
+  if (!config.contextAssertionSecret) return "";
+  const issuedAt = Math.floor(clock() / 1000);
+  const payload = {
+    v: 1,
+    iss: CONTEXT_ASSERTION_ISSUER,
+    aud: CONTEXT_ASSERTION_AUDIENCE,
+    tid: claims?.tenantId ?? config.operationalTenantId,
+    sub: claims?.sub ?? config.contextAssertionPrincipalId,
+    roles: claims?.role ? [claims.role] : ["observer"],
+    clientId,
+    iat: issuedAt,
+    exp: issuedAt + 60,
+    jti: randomUUID()
+  };
+  const encodedPayload = encodeBase64Url(JSON.stringify(payload));
+  const signature = createHmac("sha256", config.contextAssertionSecret).update(encodedPayload).digest("base64url");
+  return `${encodedPayload}.${signature}`;
+}
+
 export function loadConfig(overrides = {}) {
   const runtimeBaseUrl = safeRuntimeUrl(String(
     overrides.runtimeBaseUrl ?? process.env.COMMAND_PORTAL_RUNTIME_API_BASE_URL ?? "https://nexus-runtime-dev.fly.dev"
@@ -197,6 +227,8 @@ export function loadConfig(overrides = {}) {
     operationalTenantId: String(overrides.operationalTenantId ?? process.env.COMMAND_PORTAL_TENANT_ID ?? "nexicron"),
     operationalWorkspaceId: String(overrides.operationalWorkspaceId ?? process.env.COMMAND_PORTAL_WORKSPACE_ID ?? "primary"),
     operationalRole: String(overrides.operationalRole ?? process.env.COMMAND_PORTAL_OPERATOR_ROLE ?? "admin"),
+    contextAssertionSecret: optionalSecret(overrides.contextAssertionSecret ?? process.env.NEXUS_CONTEXT_ASSERTION_SECRET, "NEXUS_CONTEXT_ASSERTION_SECRET"),
+    contextAssertionPrincipalId: String(overrides.contextAssertionPrincipalId ?? process.env.COMMAND_PORTAL_CONTEXT_PRINCIPAL_ID ?? "command-portal-observer"),
     operationalScopes,
     operationalSessionTtlSeconds: integer(overrides.operationalSessionTtlSeconds ?? process.env.COMMAND_PORTAL_SESSION_TTL_SECONDS, 3600, 300),
     operationalCookieSecure: enabled(overrides.operationalCookieSecure ?? process.env.COMMAND_PORTAL_COOKIE_SECURE, true),
@@ -724,7 +756,7 @@ async function fetchRuntime(runtimePath, config, runtimeFetch) {
   }
 }
 
-async function handleRuntimeMutation(request, response, config, runtimeFetch, tracker) {
+async function handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, clock) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config)) return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("origin_denied", "Request origin is not allowed.", "Unknown", 403)));
   const runtimePath = resolveRuntimeMutation(url.pathname);
@@ -738,8 +770,12 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
     strictKeys(raw, new Set()); payload = {};
   } else if (runtimePath === "/runtime/interactions") {
     strictKeys(raw, new Set(["clientId", "inputText", "modality", "kind", "subject", "conversationId", "stream", "speechRequested", "presentation", "metadata"]));
+    const clientId = boundedText(raw.clientId, "clientId", 128);
+    const metadata = raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? { ...raw.metadata } : {};
+    for (const reserved of ["tenantId", "trustedTenantContext", "operator", "roles", "subjectId", "issuer", "assertionId"]) delete metadata[reserved];
+    const assertion = createTenantContextAssertion(config, sessionAuthority.authenticate(request), clientId, clock);
     payload = {
-      clientId: boundedText(raw.clientId, "clientId", 128),
+      clientId,
       inputText: boundedText(raw.inputText, "inputText", 20_000),
       modality: boundedText(raw.modality ?? "text", "modality", 40),
       kind: boundedText(raw.kind ?? "converse", "kind", 80),
@@ -748,7 +784,11 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
       ...(raw.subject ? { subject: boundedText(raw.subject, "subject", 240) } : {}),
       ...(raw.conversationId ? { conversationId: boundedText(raw.conversationId, "conversationId", 160) } : {}),
       ...(raw.presentation && typeof raw.presentation === "object" && !Array.isArray(raw.presentation) ? { presentation: raw.presentation } : {}),
-      ...(raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? { metadata: raw.metadata } : {})
+      metadata: {
+        ...metadata,
+        contextAssemblyOwner: "nexus-runtime",
+        ...(assertion ? { tenantId: sessionAuthority.authenticate(request)?.tenantId ?? config.operationalTenantId } : {})
+      }
     };
   } else if (runtimePath === "/runtime/conclave/reviews") {
     strictKeys(raw, new Set(["clientId", "proposal"]));
@@ -763,8 +803,15 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
   const timeoutMs = runtimePath === "/runtime/interactions" ? config.reasoningTimeoutMs : config.timeoutMs;
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const clientId = typeof payload.clientId === "string" ? payload.clientId : "nexus-web";
+    const assertion = createTenantContextAssertion(config, sessionAuthority.authenticate(request), clientId, clock);
     const upstream = await runtimeFetch(`${config.runtimeBaseUrl}${runtimePath}`, {
-      method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${config.runtimeToken}` },
+      method: "POST", headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.runtimeToken}`,
+        ...(assertion ? { "X-NEXUS-Context-Assertion": assertion } : {})
+      },
       body: JSON.stringify(payload), signal: controller.signal, redirect: "error"
     });
     if ([401, 403].includes(upstream.status)) throw new GatewayFailure("runtime_unauthorized", "Runtime rejected the server credential.", "Unauthorized", 502);
@@ -781,7 +828,7 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
   } finally { clearTimeout(timer); }
 }
 
-async function handleRealtimeCall(request, response, config, runtimeFetch) {
+async function handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, clock) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
   if (url.search) return sendJson(response, 400, { ok: false, error: { code: "query_not_allowed", message: "Realtime session routes do not accept browser query parameters." }, truth: TRUTH });
@@ -807,9 +854,15 @@ async function handleRealtimeCall(request, response, config, runtimeFetch) {
   try {
     let upstream;
     try {
+      const assertion = createTenantContextAssertion(config, sessionAuthority.authenticate(request), "nexus-web", clock);
       upstream = await runtimeFetch(`${config.runtimeBaseUrl}/runtime/voice/realtime/call`, {
         method: "POST",
-        headers: { Accept: "application/sdp", "Content-Type": "application/sdp", Authorization: `Bearer ${config.runtimeToken}` },
+        headers: {
+          Accept: "application/sdp",
+          "Content-Type": "application/sdp",
+          Authorization: `Bearer ${config.runtimeToken}`,
+          ...(assertion ? { "X-NEXUS-Context-Assertion": assertion } : {})
+        },
         body: offer,
         signal: controller.signal,
         redirect: "error"
@@ -990,10 +1043,10 @@ export function createPortalServer(options = {}) {
       handleOperationalApi(request, response, config, operationalFetch, sessionAuthority)
         .catch(() => sendJson(response, 500, operationalFailure(config, request.url, "operational_gateway_error", "The hosted operation failed safely.", "Unknown")));
     } else if (request.url?.startsWith("/api/runtime/realtime/call")) {
-      handleRealtimeCall(request, response, config, runtimeFetch)
+      handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, options.clock)
         .catch(() => sendJson(response, 500, { ok: false, error: { code: "realtime_gateway_error", message: "Realtime session creation failed safely." }, truth: TRUTH }));
     } else if (request.url?.startsWith("/api/runtime/executive-briefing") || request.url === "/api/runtime/conclave/reviews" || request.url === "/api/runtime/interactions" || request.url?.startsWith("/api/runtime/interactions/")) {
-      handleRuntimeMutation(request, response, config, runtimeFetch, tracker)
+      handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, options.clock)
         .catch((error) => {
           const failure = error instanceof GatewayFailure ? error : new GatewayFailure("gateway_error", "The bounded Runtime request failed safely.", "Unknown", 500);
           sendJson(response, failure.status, failureEnvelope(config, tracker, request.url, failure));

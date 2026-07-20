@@ -26,6 +26,8 @@ AI Providers
 
 The browser never communicates directly with either Runtime. Hosted observations use fixed same-origin GET routes under `/api/runtime`. The NEXUS Experience Gateway attaches the server-held credential, validates Runtime envelopes, negotiates schema and Runtime versions, retries bounded transient failures, enforces response limits, and exposes explicit connection and cache state. Live voice uses one exact SDP exchange route; no wildcard proxy or provider credential reaches the browser.
 
+Tenant Operational Context is also Runtime-owned. When `NEXUS_CONTEXT_ASSERTION_SECRET` is configured on both services, the Experience Gateway issues a 60-second, single-use assertion for the fixed provisioned tenant and sends it on text and Realtime voice requests. Browser metadata cannot select, replace, or strengthen a tenant profile. An authenticated operational session supplies the human subject and role; otherwise the gateway truthfully uses its configured observer service principal. Runtime verifies the assertion and assembles the same eight-domain context model for every client.
+
 Hosted operational access uses the separate `/api/operations` allowlist. Its current classification is single-workspace hosted alpha: signed HttpOnly sessions, CSRF verification, scoped authorization, idempotency keys, fixed tenant/workspace identity, and a server-only Runtime credential are enforced. It does not claim production multi-tenant isolation.
 
 Local document intake, evidence query, project intelligence, artifact compilation, voice routing, missions, work sessions, approvals, governed execution requests, connector readiness, proof, and receipts use a separate explicit allowlist under `/api/local`. The browser supplies operator intent and renders Runtime results; it does not assemble operational context, calculate project scope or price, make governance decisions, or fabricate capability. There is no wildcard proxy or arbitrary URL forwarding.
@@ -37,6 +39,8 @@ The portal uses `https://nexus-runtime-dev.fly.dev` by default. All runtime conf
 ```text
 COMMAND_PORTAL_RUNTIME_API_BASE_URL
 COMMAND_PORTAL_RUNTIME_READ_TOKEN
+NEXUS_CONTEXT_ASSERTION_SECRET
+COMMAND_PORTAL_CONTEXT_PRINCIPAL_ID
 COMMAND_PORTAL_REQUEST_TIMEOUT_MS
 COMMAND_PORTAL_REASONING_TIMEOUT_MS
 COMMAND_PORTAL_REALTIME_TIMEOUT_MS
