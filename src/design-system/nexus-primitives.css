@@ -137,9 +137,10 @@
   font-size: var(--nx-type-2xs);
   font-weight: 680;
   letter-spacing: 0.055em;
-  line-height: 1;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
   text-transform: uppercase;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .nx-status i,
