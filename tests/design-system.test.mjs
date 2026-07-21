@@ -11,6 +11,10 @@ test("canonical tokens provide theme, contrast, motion, and legacy compatibility
     "--nx-font-display",
     "--nx-type-3xl",
     "--nx-space-16",
+    "--nx-status-card-gap",
+    "--nx-status-card-grid-gap",
+    "--nx-status-card-padding-block",
+    "--nx-status-card-padding-inline",
     "--nx-radius-xl",
     "--nx-surface-glass",
     "--nx-text-strong",
@@ -97,6 +101,12 @@ test("canonical primitives expose reusable controls, surfaces, states, and keybo
   assert.match(styles, /data-nx-state-change="attention"/);
   assert.match(styles, /data-nx-state-change="critical"/);
   assert.match(styles, /\.nx-status \{[\s\S]*?overflow-wrap: anywhere;[\s\S]*?white-space: normal;/);
+  assert.match(styles, /\.nx-metric \{[\s\S]*?min-width: 0;/);
+  assert.match(styles, /\.nx-metric \{[\s\S]*?height: 100%;[\s\S]*?gap: var\(--nx-status-card-gap\);[\s\S]*?padding: var\(--nx-status-card-padding-block\) var\(--nx-status-card-padding-inline\);/);
+  assert.match(styles, /\.nx-metric > span,[\s\S]*?\.nx-metric > small \{[^}]*min-block-size: 2lh;[^}]*overflow-wrap: anywhere;/);
+  for (const row of ["span", "strong", "small"]) {
+    assert.match(styles, new RegExp(`\\.nx-metric > ${row}`));
+  }
   assert.match(styles, /@keyframes nx-state-success/);
   assert.match(styles, /@keyframes nx-skeleton-scan/);
 });

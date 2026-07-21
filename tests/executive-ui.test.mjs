@@ -250,6 +250,12 @@ test("navigation, Context Inspector, and NEXUS reflow without covering the works
   for (const breakpoint of [1100, 900, 680, 460]) {
     assert.match(routeStyles, new RegExp(`@container portal-main \\(max-width: ${breakpoint}px\\)`));
   }
+  assert.match(routeStyles, /\.nx-runtime-ribbon \{[^}]*grid-auto-rows: 1fr;[^}]*align-items: stretch;/);
+  assert.match(routeStyles, /\.nx-runtime-ribbon__signal \{[^}]*display: grid;[^}]*height: 100%;/);
+  assert.match(routeStyles, /\.nx-runtime-ribbon__signal \.nx-metric \{[^}]*box-sizing: border-box;[^}]*width: 100%;[^}]*height: 100%;[^}]*min-height: 8\.75rem;[^}]*gap: var\(--nx-status-card-gap\);/);
+  assert.match(routeStyles, /\.nx-runtime-ribbon__signal \.nx-metric > span \{[^}]*min-block-size: 2lh;[^}]*line-height: 1\.25;/);
+  assert.match(routeStyles, /\.nx-runtime-ribbon__signal \.nx-metric > strong \{[^}]*min-block-size: 2lh;[^}]*line-height: var\(--nx-leading-tight\);[^}]*text-transform: capitalize;/);
+  assert.match(routeStyles, /\.nx-runtime-ribbon__signal \.nx-metric > small \{[^}]*min-block-size: 2lh;/);
   assert.match(routeStyles, /\.nx-runtime-ribbon \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); overflow-x: visible; scroll-snap-type: none; \}/);
   assert.match(routeStyles, /\.eox-indicators strong \{[^}]*overflow-wrap: anywhere;/);
   assert.match(routeStyles, /\.eox-indicators:not\(\.understanding-grid\) article \{ grid-template-columns: 1fr; \}/);

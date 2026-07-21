@@ -57,6 +57,12 @@
   --nx-control-md: 2.375rem;
   --nx-control-lg: 2.75rem;
 
+  /* Shared operational status-card geometry */
+  --nx-status-card-gap: var(--nx-space-2);
+  --nx-status-card-grid-gap: var(--nx-space-3);
+  --nx-status-card-padding-block: var(--nx-space-5);
+  --nx-status-card-padding-inline: var(--nx-space-4);
+
   /* Layering */
   --nx-z-base: 0;
   --nx-z-sticky: 30;
