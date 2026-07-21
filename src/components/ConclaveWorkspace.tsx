@@ -60,6 +60,7 @@ export function ConclaveWorkspace({ status }: { status?: Record<string, unknown>
       <article><span>Evidence</span><strong>{workspace?.evidence.length ?? 0} immutable records</strong><p>{workspace?.waitingForEvidence ? "Active specialists are waiting for authorized collectors." : "Evidence posture updates from the Runtime."}</p></article>
       <article><span>Knowledge Graph</span><strong>{workspace ? `${workspace.contradictions.length} open contradiction records` : "Not established"}</strong><p>Findings, provenance, unknowns, and contradictions remain linked.</p></article>
       <article><span>Operational Replay</span><strong>{workspace ? `${workspace.operationalReplay.stageCount} recorded stages` : "No Replay"}</strong><p>{workspace ? workspace.operationalReplay.contentDigest : "Replay begins when the mission is admitted."}</p></article>
+      <article><span>Lifecycle Receipt</span><strong>{workspace?.lifecycleReceipt?.receiptId ?? "Not issued"}</strong><p>{workspace?.lifecycleReceipt ? `Recorded ${workspace.lifecycleReceipt.recordedStatus}; completion is not claimed.` : "A Runtime receipt is issued when the mission lifecycle starts."}</p></article>
       <article><span>Executive Conclusions</span><strong>{workspace?.executiveSummary ? "Evidence-backed synthesis available" : "Withheld"}</strong><p>{workspace?.recommendedNextAction ?? "Conclusions require completed tasks and admitted Evidence."}</p></article>
     </section>
 

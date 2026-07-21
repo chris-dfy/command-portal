@@ -331,6 +331,14 @@ export type ConclaveWorkspaceRecord = {
   contradictions: Array<Record<string, unknown>>;
   executiveSummary: Record<string, unknown> | null;
   completionReceipt: Record<string, unknown> | null;
+  lifecycleReceipt: {
+    receiptId: string;
+    missionId: string;
+    replayId: string;
+    recordedStatus: string;
+    contentDigest: string;
+    completionClaimed: false;
+  } | null;
   operationalReplay: {
     runId: string;
     status: string;
