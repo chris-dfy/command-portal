@@ -251,6 +251,8 @@ test("navigation, Context Inspector, and NEXUS reflow without covering the works
     assert.match(routeStyles, new RegExp(`@container portal-main \\(max-width: ${breakpoint}px\\)`));
   }
   assert.match(routeStyles, /\.nx-runtime-ribbon \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); overflow-x: visible; scroll-snap-type: none; \}/);
+  assert.match(routeStyles, /\.eox-indicators strong \{[^}]*overflow-wrap: anywhere;/);
+  assert.match(routeStyles, /\.eox-indicators:not\(\.understanding-grid\) article \{ grid-template-columns: 1fr; \}/);
   assert.match(routeStyles, /\.understanding-grid article > header \{ align-items: flex-start; flex-direction: column; \}/);
   assert.match(routeStyles, /overflow-wrap: anywhere/);
   for (const workspace of [missions, knowledge]) {

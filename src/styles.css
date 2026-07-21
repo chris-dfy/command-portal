@@ -470,7 +470,7 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 .eox-indicators { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .eox-indicators article { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; min-height: 110px; padding: 12px; border: 1px solid rgba(var(--accent-rgb), .12); border-radius: 8px; background: rgba(0, 0, 0, .12); }
 .eox-indicators article > span:first-child { grid-column: 1 / -1; color: var(--muted); font-size: .57rem; letter-spacing: .06em; text-transform: uppercase; }
-.eox-indicators strong { font-size: .78rem; font-weight: 550; }
+.eox-indicators strong { min-width: 0; font-size: .78rem; font-weight: 550; overflow-wrap: anywhere; }
 .eox-indicators small { grid-column: 1 / -1; color: var(--muted); font-size: .58rem; line-height: 1.45; }
 .understanding-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .understanding-grid article { grid-template-columns: 1fr; min-height: 138px; align-content: start; padding: 15px; }
@@ -888,6 +888,8 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
   .nx-workspace-hero { min-height: 0; align-items: flex-start; flex-direction: column; }
   .nx-workspace-hero > .nx-action, .nx-workspace-hero > .replay-live { flex: none; }
   .nx-metrics { grid-template-columns: 1fr; }
+  .eox-indicators:not(.understanding-grid) article { grid-template-columns: 1fr; }
+  .eox-indicators:not(.understanding-grid) article > .nx-status { justify-self: start; }
   .understanding-grid article > header { align-items: flex-start; flex-direction: column; }
   .understanding-grid article > header .nx-status { width: auto; max-width: 100%; }
   .mission-compose { grid-template-columns: 1fr; }
