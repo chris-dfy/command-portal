@@ -1,0 +1,334 @@
+@import "./nexus-primitives.css";
+
+/*
+ * NEXUS Platform Design System
+ * Canonical semantic tokens shared by every hosted platform workspace.
+ *
+ * Components consume the semantic --nx-* contract. The older short names at
+ * the end of :root are compatibility aliases only, allowing feature surfaces
+ * to migrate without carrying a second visual foundation.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Typography */
+  --nx-font-display: "Avenir Next", "Helvetica Neue", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --nx-font-body: "Avenir Next", "Helvetica Neue", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --nx-font-mono: "SFMono-Regular", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  --nx-type-2xs: 0.625rem;
+  --nx-type-xs: 0.6875rem;
+  --nx-type-sm: 0.75rem;
+  --nx-type-md: 0.875rem;
+  --nx-type-lg: 1rem;
+  --nx-type-xl: 1.25rem;
+  --nx-type-2xl: 1.5rem;
+  --nx-type-3xl: clamp(1.75rem, 3vw, 2.75rem);
+  --nx-leading-tight: 1.12;
+  --nx-leading-copy: 1.6;
+  --nx-tracking-tight: -0.025em;
+  --nx-tracking-label: 0.12em;
+
+  /* Four-pixel spatial rhythm */
+  --nx-space-0: 0;
+  --nx-space-1: 0.25rem;
+  --nx-space-2: 0.5rem;
+  --nx-space-3: 0.75rem;
+  --nx-space-4: 1rem;
+  --nx-space-5: 1.25rem;
+  --nx-space-6: 1.5rem;
+  --nx-space-8: 2rem;
+  --nx-space-10: 2.5rem;
+  --nx-space-12: 3rem;
+  --nx-space-16: 4rem;
+
+  /* Shape and layout */
+  --nx-radius-xs: 0.1875rem;
+  --nx-radius-sm: 0.3125rem;
+  --nx-radius-md: 0.5rem;
+  --nx-radius-lg: 0.75rem;
+  --nx-radius-xl: 1rem;
+  --nx-radius-full: 999px;
+  --nx-sidebar-width: 16rem;
+  --nx-inspector-width: 20rem;
+  --nx-topbar-height: 4.75rem;
+  --nx-content-max: 105rem;
+  --nx-control-sm: 2rem;
+  --nx-control-md: 2.375rem;
+  --nx-control-lg: 2.75rem;
+
+  /* Layering */
+  --nx-z-base: 0;
+  --nx-z-sticky: 30;
+  --nx-z-navigation: 50;
+  --nx-z-overlay: 80;
+  --nx-z-dialog: 100;
+  --nx-z-toast: 120;
+
+  /* Semantic motion */
+  --nx-motion-scale: 1;
+  --nx-duration-instant: calc(1ms * var(--nx-motion-scale));
+  --nx-duration-fast: calc(140ms * var(--nx-motion-scale));
+  --nx-duration-base: calc(220ms * var(--nx-motion-scale));
+  --nx-duration-state: calc(360ms * var(--nx-motion-scale));
+  --nx-duration-slow: calc(640ms * var(--nx-motion-scale));
+  --nx-ease-standard: cubic-bezier(0.2, 0.72, 0.2, 1);
+  --nx-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --nx-ease-exit: cubic-bezier(0.7, 0, 0.84, 0);
+  --nx-ease-emphasized: cubic-bezier(0.34, 1.26, 0.64, 1);
+
+  /* Dark is the canonical operating theme. */
+  --nx-canvas: #1e1e1e;
+  --nx-surface-0: var(--nx-canvas);
+  --nx-canvas-subtle: #191a19;
+  --nx-surface-1: #232423;
+  --nx-surface-2: #292a29;
+  --nx-surface-3: #303130;
+  --nx-surface-4: #383a38;
+  --nx-surface-glass: rgba(35, 36, 35, 0.94);
+  --nx-surface-overlay: rgba(25, 26, 25, 0.985);
+  --nx-surface-inset: rgba(0, 0, 0, 0.18);
+  --nx-text-strong: #f4f0e9;
+  --nx-text: #e6e3dd;
+  --nx-text-muted: #a7aaa6;
+  --nx-text-subtle: #777c78;
+  --nx-text-inverse: #1e1e1e;
+  --nx-border-subtle: rgba(244, 240, 233, 0.11);
+  --nx-border: rgba(244, 240, 233, 0.18);
+  --nx-border-strong: rgba(134, 245, 213, 0.54);
+  --nx-accent: #86f5d5;
+  --nx-accent-rgb: 134, 245, 213;
+  --nx-accent-hover: #a4ffe4;
+  --nx-accent-pressed: #68dbb9;
+  --nx-accent-soft: rgba(134, 245, 213, 0.105);
+  --nx-accent-softer: rgba(134, 245, 213, 0.048);
+
+  /* Operational state colors are semantic, never decorative. */
+  --nx-success: #86f5d5;
+  --nx-success-rgb: 134, 245, 213;
+  --nx-attention: #f0c97a;
+  --nx-attention-rgb: 240, 201, 122;
+  --nx-critical: #ff9393;
+  --nx-critical-rgb: 255, 147, 147;
+  --nx-info: #a7d7ff;
+  --nx-info-rgb: 167, 215, 255;
+  --nx-neutral: #b0b3af;
+  --nx-neutral-rgb: 176, 179, 175;
+  --nx-state-success-surface: rgba(var(--nx-success-rgb), 0.09);
+  --nx-state-attention-surface: rgba(var(--nx-attention-rgb), 0.1);
+  --nx-state-critical-surface: rgba(var(--nx-critical-rgb), 0.1);
+  --nx-state-info-surface: rgba(var(--nx-info-rgb), 0.09);
+
+  /* Elevation, focus and atmospheric detail */
+  --nx-shadow-panel: 0 12px 36px rgba(0, 0, 0, 0.16);
+  --nx-shadow-raised: 0 22px 64px rgba(0, 0, 0, 0.28);
+  --nx-shadow-dialog: 0 34px 110px rgba(0, 0, 0, 0.48);
+  --nx-focus-ring: 0 0 0 3px rgba(var(--nx-accent-rgb), 0.28);
+  --nx-glow-accent: 0 0 32px rgba(var(--nx-accent-rgb), 0.18);
+  --nx-grid-line: rgba(244, 240, 233, 0.035);
+  --nx-backdrop-blur: 18px;
+
+  /* Native NEXUS compatibility contract. */
+  --nexus-primary: #243f37;
+  --nexus-accent: var(--nx-accent);
+  --nexus-accent-rgb: var(--nx-accent-rgb);
+  --nexus-panel: var(--nx-surface-glass);
+  --nexus-panel-border: var(--nx-border);
+  --nexus-text: var(--nx-text-strong);
+  --nexus-muted: var(--nx-text-muted);
+  --nexus-background: var(--nx-canvas);
+  --nexus-glow-strength: 0.72;
+  --nexus-motion-speed: 1;
+  --nexus-panel-opacity: 0.9;
+
+  /* Existing hosted feature aliases. Remove only after every route migrates. */
+  --bg: var(--nx-canvas);
+  --panel: var(--nx-surface-glass);
+  --panel-solid: var(--nx-surface-1);
+  --border: var(--nx-border-subtle);
+  --border-strong: var(--nx-border-strong);
+  --text: var(--nx-text-strong);
+  --muted: var(--nx-text-muted);
+  --accent: var(--nx-accent);
+  --accent-rgb: var(--nx-accent-rgb);
+  --success: var(--nx-success);
+  --warning: var(--nx-attention);
+  --danger: var(--nx-critical);
+}
+
+:root[data-nexus-theme="dark"],
+:root[data-theme="dark"],
+[data-nexus-theme="dark"],
+[data-theme="dark"] {
+  color-scheme: dark;
+  --nx-canvas: #03070b;
+  --nx-canvas-subtle: #061019;
+  --nx-surface-1: #091620;
+  --nx-surface-2: #0d1c27;
+  --nx-surface-3: #132631;
+  --nx-surface-4: #19313d;
+  --nx-surface-glass: rgba(7, 17, 25, 0.9);
+  --nx-surface-overlay: rgba(3, 9, 14, 0.97);
+  --nx-surface-inset: rgba(0, 0, 0, 0.22);
+  --nx-text-strong: #f2f8fb;
+  --nx-text: #dcebf2;
+  --nx-text-muted: #93a8b4;
+  --nx-text-subtle: #6f8793;
+  --nx-text-inverse: #041017;
+  --nx-border-subtle: rgba(127, 174, 194, 0.16);
+  --nx-border: rgba(127, 174, 194, 0.25);
+  --nx-border-strong: rgba(98, 210, 255, 0.42);
+  --nx-accent: #62d2ff;
+  --nx-accent-rgb: 98, 210, 255;
+  --nx-accent-hover: #8adeff;
+  --nx-accent-pressed: #44bce9;
+  --nx-accent-soft: rgba(98, 210, 255, 0.1);
+  --nx-accent-softer: rgba(98, 210, 255, 0.055);
+  --nx-success: #67d9ad;
+  --nx-success-rgb: 103, 217, 173;
+  --nx-attention: #e8bc64;
+  --nx-attention-rgb: 232, 188, 100;
+  --nx-critical: #ed8585;
+  --nx-critical-rgb: 237, 133, 133;
+  --nx-info: #72ccef;
+  --nx-info-rgb: 114, 204, 239;
+  --nx-neutral: #a8bac4;
+  --nx-neutral-rgb: 168, 186, 196;
+  --nx-shadow-panel: 0 18px 60px rgba(0, 0, 0, 0.26);
+  --nx-shadow-raised: 0 24px 80px rgba(0, 0, 0, 0.38);
+  --nx-shadow-dialog: 0 34px 110px rgba(0, 0, 0, 0.55);
+  --nx-focus-ring: 0 0 0 3px rgba(var(--nx-accent-rgb), 0.28);
+  --nx-grid-line: rgba(var(--nx-accent-rgb), 0.055);
+}
+
+:root[data-nexus-color-scheme="light"],
+:root[data-nexus-theme="light"],
+:root[data-theme="light"],
+[data-nexus-theme="light"],
+[data-theme="light"] {
+  color-scheme: light;
+  --nx-canvas: #f4f0e9;
+  --nx-canvas-subtle: #ebe7df;
+  --nx-surface-1: #fffdf8;
+  --nx-surface-2: #f7f3ec;
+  --nx-surface-3: #ebe7df;
+  --nx-surface-4: #ded9d0;
+  --nx-surface-glass: rgba(255, 253, 248, 0.94);
+  --nx-surface-overlay: rgba(244, 240, 233, 0.985);
+  --nx-surface-inset: rgba(30, 30, 30, 0.045);
+  --nx-text-strong: #1e1e1e;
+  --nx-text: #343633;
+  --nx-text-muted: #626762;
+  --nx-text-subtle: #7b807a;
+  --nx-text-inverse: #f4f0e9;
+  --nx-border-subtle: rgba(30, 30, 30, 0.11);
+  --nx-border: rgba(30, 30, 30, 0.2);
+  --nx-border-strong: rgba(14, 129, 103, 0.55);
+  --nx-accent: #0e8167;
+  --nx-accent-rgb: 14, 129, 103;
+  --nx-accent-hover: #096d57;
+  --nx-accent-pressed: #075744;
+  --nx-accent-soft: rgba(14, 129, 103, 0.1);
+  --nx-accent-softer: rgba(14, 129, 103, 0.05);
+  --nx-success: #087458;
+  --nx-success-rgb: 8, 116, 88;
+  --nx-attention: #8a5b00;
+  --nx-attention-rgb: 138, 91, 0;
+  --nx-critical: #a52c36;
+  --nx-critical-rgb: 165, 44, 54;
+  --nx-info: #315f88;
+  --nx-info-rgb: 49, 95, 136;
+  --nx-neutral: #626762;
+  --nx-neutral-rgb: 98, 103, 98;
+  --nx-shadow-panel: 0 14px 42px rgba(24, 54, 67, 0.1);
+  --nx-shadow-raised: 0 22px 64px rgba(24, 54, 67, 0.16);
+  --nx-shadow-dialog: 0 30px 90px rgba(24, 54, 67, 0.22);
+  --nx-focus-ring: 0 0 0 3px rgba(var(--nx-accent-rgb), 0.24);
+  --nx-grid-line: rgba(30, 30, 30, 0.045);
+}
+
+/* Explicit system mode is opt-in; the default remains the NEXUS dark theme. */
+@media (prefers-color-scheme: light) {
+  :root[data-nexus-theme="system"],
+  :root[data-theme="system"] {
+    color-scheme: light;
+    --nx-canvas: #eef3f5;
+    --nx-canvas-subtle: #e5ecef;
+    --nx-surface-1: #fbfdfe;
+    --nx-surface-2: #f2f7f9;
+    --nx-surface-3: #e8f0f3;
+    --nx-surface-4: #dae6eb;
+    --nx-surface-glass: rgba(251, 253, 254, 0.92);
+    --nx-surface-overlay: rgba(248, 251, 252, 0.98);
+    --nx-surface-inset: rgba(19, 51, 66, 0.055);
+    --nx-text-strong: #07151d;
+    --nx-text: #17303b;
+    --nx-text-muted: #506b78;
+    --nx-text-subtle: #6d838d;
+    --nx-text-inverse: #f5fbfd;
+    --nx-border-subtle: rgba(26, 73, 92, 0.14);
+    --nx-border: rgba(26, 73, 92, 0.23);
+    --nx-border-strong: rgba(0, 111, 152, 0.52);
+    --nx-accent: #006f98;
+    --nx-accent-rgb: 0, 111, 152;
+    --nx-accent-hover: #005f83;
+    --nx-accent-pressed: #004b68;
+    --nx-accent-soft: rgba(0, 111, 152, 0.1);
+    --nx-accent-softer: rgba(0, 111, 152, 0.055);
+    --nx-success: #16714e;
+    --nx-success-rgb: 22, 113, 78;
+    --nx-attention: #8a5b00;
+    --nx-attention-rgb: 138, 91, 0;
+    --nx-critical: #a52c36;
+    --nx-critical-rgb: 165, 44, 54;
+    --nx-info: #096a91;
+    --nx-info-rgb: 9, 106, 145;
+    --nx-neutral: #526d79;
+    --nx-neutral-rgb: 82, 109, 121;
+    --nx-shadow-panel: 0 14px 42px rgba(24, 54, 67, 0.1);
+    --nx-shadow-raised: 0 22px 64px rgba(24, 54, 67, 0.16);
+    --nx-shadow-dialog: 0 30px 90px rgba(24, 54, 67, 0.22);
+    --nx-focus-ring: 0 0 0 3px rgba(var(--nx-accent-rgb), 0.24);
+    --nx-grid-line: rgba(var(--nx-accent-rgb), 0.07);
+  }
+}
+
+:root[data-nexus-contrast="high"],
+:root[data-contrast="high"],
+[data-nexus-contrast="high"],
+[data-contrast="high"] {
+  --nx-text-muted: var(--nx-text);
+  --nx-text-subtle: var(--nx-text-muted);
+  --nx-border-subtle: color-mix(in srgb, var(--nx-text) 38%, transparent);
+  --nx-border: color-mix(in srgb, var(--nx-text) 54%, transparent);
+  --nx-border-strong: var(--nx-accent);
+  --nx-focus-ring: 0 0 0 3px var(--nx-canvas), 0 0 0 6px var(--nx-accent);
+  --nx-shadow-panel: none;
+  --nx-shadow-raised: none;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --nx-text-muted: var(--nx-text);
+    --nx-text-subtle: var(--nx-text-muted);
+    --nx-border-subtle: color-mix(in srgb, var(--nx-text) 38%, transparent);
+    --nx-border: color-mix(in srgb, var(--nx-text) 54%, transparent);
+    --nx-border-strong: var(--nx-accent);
+    --nx-focus-ring: 0 0 0 3px var(--nx-canvas), 0 0 0 6px var(--nx-accent);
+  }
+}
+
+:root[data-nexus-motion="reduced"],
+:root[data-motion="reduced"],
+[data-nexus-motion="reduced"],
+[data-motion="reduced"] {
+  --nx-motion-scale: 0.01;
+  --nexus-motion-speed: 100;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --nx-motion-scale: 0.01;
+    --nexus-motion-speed: 100;
+  }
+}

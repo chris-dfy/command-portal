@@ -144,15 +144,17 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
 });
 
 test("NEXUS remains a Runtime-governed conversational copilot across every portal area", async () => {
-  const [app, copilot, hif, realtime, styles] = await Promise.all([
+  const [app, copilot, hif, realtime, styles, platformStyles] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/components/NexusCopilot.tsx"),
     read("../src/lib/hif-client.ts"),
     read("../src/lib/realtime-voice-client.ts"),
     read("../src/styles.css"),
+    read("../src/platform/nexus-platform.css"),
   ]);
   assert.match(app, /<NexusCopilot/);
-  assert.match(app, /className="nx-platform"/);
+  assert.match(app, /className="nx-app-shell nx-hosted-shell"/);
+  assert.doesNotMatch(app, /className="nx-platform"/);
   assert.match(app, /open=\{copilotOpen\}/);
   assert.match(copilot, /open: boolean/);
   assert.match(copilot, /Enterprise executive operating intelligence/);
@@ -168,8 +170,9 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.match(realtime, /RTCPeerConnection/);
   assert.doesNotMatch(app, /Begin Executive Briefing/);
   assert.match(styles, /Persistent NEXUS executive copilot/);
-  assert.match(styles, /\.nx-platform \{ min-height: 100vh; display: grid/);
-  assert.match(styles, /container-name: portal-main/);
+  assert.match(platformStyles, /Canonical hosted NEXUS Platform shell/);
+  assert.match(platformStyles, /\.nx-app-shell \{/);
+  assert.match(platformStyles, /container-name: portal-main/);
   assert.match(styles, /@container portal-main/);
   assert.match(styles, /Modules respond to the workspace width/);
   for (const source of [app, copilot, hif]) {
@@ -186,16 +189,28 @@ test("fixture mode and silent fixture fallback are absent", async () => {
 });
 
 test("responsive and accessible presentation contracts remain present", async () => {
-  const [styles, app] = await Promise.all([read("../src/styles.css"), read("../src/App.tsx")]);
-  assert.match(styles, /@media \(max-width: 820px\)/);
+  const [styles, app, executiveNavigation, rail, chrome, inspector, primitives, platformStyles, tokens] = await Promise.all([
+    read("../src/styles.css"),
+    read("../src/App.tsx"),
+    read("../src/platform/NexusExecutiveNavigation.tsx"),
+    read("../src/platform/NexusPlatformRail.tsx"),
+    read("../src/platform/NexusWorkspaceChrome.tsx"),
+    read("../src/platform/NexusContextInspector.tsx"),
+    read("../src/design-system/NexusPrimitives.tsx"),
+    read("../src/platform/nexus-platform.css"),
+    read("../src/design-system/nexus-tokens.css"),
+  ]);
+  assert.match(platformStyles, /@media \(max-width: 820px\)/);
   assert.match(styles, /@media \(max-width: 580px\)/);
-  assert.match(styles, /prefers-reduced-motion/);
-  assert.match(styles, /prefers-contrast/);
+  assert.match(platformStyles, /prefers-reduced-motion/);
+  assert.match(tokens, /prefers-contrast/);
   assert.match(app, /Skip to workspace/);
-  assert.match(app, /aria-label="Open navigation"/);
-  assert.match(app, /aria-current=\{active === area\.id \? "page" : undefined\}/);
-  assert.match(app, /aria-label="Search platform workspaces"/);
-  assert.match(app, /inspectorOpen && <aside id="context-inspector"/);
+  assert.match(chrome, /label="Open navigation"/);
+  assert.match(primitives, /aria-label=\{label\}/);
+  assert.match(executiveNavigation, /aria-current=\{active === item\.id \? "page" : undefined\}/);
+  assert.match(rail, /aria-label="Search platform workspaces"/);
+  assert.match(app, /inspectorOpen && <NexusContextInspector/);
+  assert.match(inspector, /<aside id="context-inspector"/);
   assert.doesNotMatch(app, /behavior: "smooth"/);
 });
 
@@ -210,18 +225,29 @@ test("canonical shell bootstraps the hosted operational session before mounting 
 });
 
 test("canonical consolidation exposes every permanent platform workspace", async () => {
-  const [app, navigation, missions, replay, knowledge, conclave, styles] = await Promise.all([
+  const [app, navigation, missions, replay, knowledge, conclave, platformStyles, workspaceFrame, appearance] = await Promise.all([
     read("../src/App.tsx"), read("../src/platform/navigation.ts"), read("../src/components/MissionDashboard.tsx"),
     read("../src/components/OperationalReplay.tsx"), read("../src/components/KnowledgeWorkspace.tsx"),
-    read("../src/components/ConclaveWorkspace.tsx"), read("../src/styles.css")
+    read("../src/components/ConclaveWorkspace.tsx"), read("../src/platform/nexus-platform.css"),
+    read("../src/platform/NexusWorkspaceFrame.tsx"), read("../src/appearance/AppearanceWorkspace.tsx")
   ]);
   for (const label of ["Dashboard", "Missions", "Operational Replay", "Conclave", "Knowledge", "Edge Runtime", "Mission Control", "Settings"]) assert.match(navigation, new RegExp(`label: "${label}"`));
   for (const label of ["Active Missions", "Blocked Missions", "Completed Missions", "Mission Health", "Mission Executor", "Mission receipts"]) assert.match(missions, new RegExp(label, "i"));
   for (const label of ["Replay pipeline visualization", "Stage Inspector", "Explain This Step", "Executive Mode", "Engineering Mode", "Failure Replay", "Export"]) assert.match(replay, new RegExp(label, "i"));
   for (const label of ["Mission Store", "Knowledge Store", "Knowledge Promotion Engine", "Promotion Receipts"]) assert.match(knowledge, new RegExp(label, "i"));
   for (const label of ["Mission", "Objectives", "Knowledge", "Unknowns", "Task Graph", "Specialists", "Evidence", "Knowledge Graph", "Operational Replay", "Executive Conclusions"]) assert.match(conclave, new RegExp(label));
-  assert.match(styles, /Canonical NEXUS Platform application shell/);
+  for (const component of ["NexusExecutiveNavigation", "NexusPlatformRail", "NexusWorkspaceCommandBar", "NexusWorkspaceFrame", "NexusActivityStream", "NexusContextInspector"]) assert.match(app, new RegExp(`<${component}`));
+  assert.match(workspaceFrame, /<NexusPageHeader/);
+  assert.match(app, /useAppearanceSettings\(\)/);
+  assert.match(app, /<AppearanceWorkspace appearance=\{appearance\}/);
+  assert.match(appearance, /NEXUS_THEMES\.map/);
+  assert.match(platformStyles, /Canonical hosted NEXUS Platform shell/);
+  const tokenImport = app.indexOf('import "./design-system/nexus-tokens.css"');
+  const foundationImport = app.indexOf('import "./design-system/nexus-foundation.css"');
+  const shellImport = app.indexOf('import "./platform/nexus-platform.css"');
+  assert.equal(tokenImport >= 0 && tokenImport < foundationImport && foundationImport < shellImport, true);
   assert.doesNotMatch(app, /className=\{`portal-shell/);
+  assert.doesNotMatch(app, /className="nx-platform"/);
 });
 
 test("Operational Replay surfaces Runtime-owned stage playback with truthful boundaries", async () => {
