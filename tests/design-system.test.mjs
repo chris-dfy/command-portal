@@ -96,6 +96,7 @@ test("canonical primitives expose reusable controls, surfaces, states, and keybo
   assert.match(styles, /data-nx-state-change="success"/);
   assert.match(styles, /data-nx-state-change="attention"/);
   assert.match(styles, /data-nx-state-change="critical"/);
+  assert.match(styles, /\.nx-status \{[\s\S]*?overflow-wrap: anywhere;[\s\S]*?white-space: normal;/);
   assert.match(styles, /@keyframes nx-state-success/);
   assert.match(styles, /@keyframes nx-skeleton-scan/);
 });
