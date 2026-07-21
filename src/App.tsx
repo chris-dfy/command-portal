@@ -157,7 +157,12 @@ export function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); focusPlatformSearch(); }
-      if (event.key === "Escape") setMenuOpen(false);
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        setInspectorOpen(false);
+        setCopilotOpen(false);
+        setCopilotExpanded(false);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -173,9 +178,29 @@ export function App() {
   const proofId = list(snapshot.proofs?.data).map((proof) => proof.id).find(Boolean);
   const receiptId = list(snapshot.receipts?.data).map((receipt) => receipt.id).find(Boolean);
   const activityTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const sidePanel = copilotOpen ? "copilot" : inspectorOpen ? "inspector" : "closed";
 
   function navigate(id: AreaId) { window.location.hash = `/${id}`; setActive(id); setMenuOpen(false); window.scrollTo({ top: 0 }); }
   function openReplay(missionId?: string) { setReplayMissionId(missionId); navigate("replay"); }
+  function toggleCopilot() {
+    const next = !copilotOpen;
+    setCopilotOpen(next);
+    if (next) setInspectorOpen(false);
+    else setCopilotExpanded(false);
+  }
+  function toggleInspector() {
+    const next = !inspectorOpen;
+    setInspectorOpen(next);
+    if (next) {
+      setCopilotOpen(false);
+      setCopilotExpanded(false);
+    }
+  }
+  function setCopilotPanelOpen(open: boolean) {
+    setCopilotOpen(open);
+    if (open) setInspectorOpen(false);
+    else setCopilotExpanded(false);
+  }
 
   const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length) ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section> : <>
     {active === "dashboard" && <><ExecutiveStatusBar snapshot={snapshot} connectionState={state} /><OperationsCenter assessment={eox ?? null} /></>}
@@ -193,7 +218,13 @@ export function App() {
     {active === "evidence" && <Evidence snapshot={snapshot} />}
   </>;
 
-  return <div className="nx-app-shell nx-hosted-shell" data-inspector={inspectorOpen ? "open" : "closed"}>
+  return <div
+    className="nx-app-shell nx-hosted-shell"
+    data-inspector={inspectorOpen ? "open" : "closed"}
+    data-side-panel={sidePanel}
+    data-copilot-expanded={copilotExpanded ? "true" : "false"}
+    data-navigation={menuOpen ? "open" : "closed"}
+  >
     <a className="skip-link" href="#main-content">Skip to workspace</a>
     <NexusExecutiveNavigation
       items={EXECUTIVE_AREAS}
@@ -225,8 +256,8 @@ export function App() {
           inspectorOpen={inspectorOpen}
           onOpenNavigation={() => setMenuOpen(true)}
           onRefresh={() => refresh(true)}
-          onToggleCopilot={() => setCopilotOpen((value) => !value)}
-          onToggleInspector={() => setInspectorOpen((value) => !value)}
+          onToggleCopilot={toggleCopilot}
+          onToggleInspector={toggleInspector}
         />
         {failures.length > 0 && <section className="nx-runtime-alert" role="alert" data-tone={connectionTone}><Activity size={17} /><div><strong>{state}</strong><span>{failures[0]?.error?.message ?? "One or more Runtime signals are unavailable."}</span></div></section>}
         <main id="main-content" className="nx-primary-workspace">
@@ -257,8 +288,16 @@ export function App() {
         receiptId={receiptId ? String(receiptId) : undefined}
         onClose={() => setInspectorOpen(false)}
       />}
+      <NexusCopilot
+        activeArea={PLATFORM_TO_COPILOT[active]}
+        activeLabel={current.label}
+        runtimeState={state}
+        onNavigate={(area) => navigate(COPILOT_TO_PLATFORM[area])}
+        open={copilotOpen}
+        expanded={copilotExpanded}
+        onOpenChange={setCopilotPanelOpen}
+        onExpandedChange={setCopilotExpanded}
+      />
     </div>
-    {menuOpen && <button className="nx-platform-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation" />}
-    <NexusCopilot activeArea={PLATFORM_TO_COPILOT[active]} activeLabel={current.label} runtimeState={state} onNavigate={(area) => navigate(COPILOT_TO_PLATFORM[area])} open={copilotOpen} expanded={copilotExpanded} onOpenChange={setCopilotOpen} onExpandedChange={setCopilotExpanded} />
   </div>;
 }

@@ -128,11 +128,11 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     void ask(skill.prompt);
   }
 
-  if (!open) return <button className="nexus-copilot-launcher" onClick={() => onOpenChange(true)}><Sparkles size={20} /><span>Open NEXUS</span></button>;
+  if (!open) return null;
 
   const voiceConnected = !["idle", "error"].includes(voiceState);
   return <>
-    <aside className={`nexus-copilot${expanded ? " is-expanded" : ""}`} aria-label="NEXUS executive copilot">
+    <aside id="nexus-copilot" className={`nexus-copilot${expanded ? " is-expanded" : ""}`} aria-label="NEXUS executive copilot">
       <audio ref={audio} autoPlay muted={nexusMuted} className="voice-audio" aria-hidden="true" />
       <header className="nexus-copilot__header">
         <div className="nexus-copilot__mark"><Bot size={23} /></div>

@@ -42,6 +42,7 @@ export function NexusWorkspaceCommandBar({
         <NexusIconButton
           label={copilotOpen ? "Close NEXUS interaction panel" : "Open NEXUS interaction panel"}
           onClick={onToggleCopilot}
+          aria-controls="nexus-copilot"
           aria-expanded={copilotOpen}
         ><Sparkles aria-hidden="true" /></NexusIconButton>
         <NexusIconButton
