@@ -506,70 +506,148 @@ test("operational parity routes are explicit, validated, and remain Runtime-owne
   assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/work-sessions/WORK-1");
 });
 
-test("Runtime Coordination node routes are exact and reject secret-shaped registration payloads", async () => {
+test("Conclave workspace routes use the operational gateway and preserve evidence validation", async () => {
+  const observed = [];
+  const base = await start(async () => runtimeResponse({}), {
+    localCapabilitiesEnabled: true
+  }, async (url, options) => {
+    observed.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    return localResponse({
+      recordType: "nexus_conclave_workspace", missionId: "conclave-001",
+      workspaceId: "conclave-001", status: "investigation_running", tasks: [],
+      specialistRegistry: [], evidence: [], operationalReplay: { stageCount: 21 },
+      executionAuthorized: false, externalExecutionPerformed: false, secretValuesExposed: false
+    });
+  });
+
+  const created = await fetch(`${base}/api/local/conclave/workspaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": "conclave-create-0001" },
+    body: JSON.stringify({ proposal: "Investigate an unfamiliar operational asset without control." })
+  });
+  assert.equal(created.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/conclave/workspaces");
+  assert.deepEqual(observed.at(-1).body, { proposal: "Investigate an unfamiliar operational asset without control." });
+  assert.equal((await created.json()).data.executionAuthorized, false);
+
+  assert.equal((await fetch(`${base}/api/local/conclave/workspaces/conclave-001`)).status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/conclave/workspaces/conclave-001");
+
+  const evidence = await fetch(`${base}/api/local/conclave/workspaces/conclave-001/tasks/task-001/evidence`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      origin: "edge-runtime://node-1/observation-1", sourceClassification: "runtime_evidence",
+      collector: "node-1", confidence: 0.9, claim: "A bounded observation was admitted.",
+      supportingArtifacts: ["observation-1"], relationships: ["observed_on"],
+      operationalContext: { controlAttempted: false }, completeTask: true
+    })
+  });
+  assert.equal(evidence.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/conclave/workspaces/conclave-001/tasks/task-001/evidence");
+  assert.equal(observed.at(-1).body.sourceClassification, "runtime_evidence");
+  const beforeInvalid = observed.length;
+  assert.equal((await fetch(`${base}/api/local/conclave/workspaces/conclave-001/tasks/task-001/evidence`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ origin: "x", sourceClassification: "unclassified", confidence: 2, claim: "x" })
+  })).status, 400);
+  assert.equal(observed.length, beforeInvalid);
+});
+
+test("Runtime Coordination exposes fleet reads and exact governed admission routes only", async () => {
   const observed = [];
   const base = await start(async () => runtimeResponse({}), { localCapabilitiesEnabled: true }, async (url, options) => {
     observed.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
-    if (options.method === "GET") return localResponse({
+    if (url.endsWith("/runtime-coordination/nodes")) return localResponse({
       recordType: "runtime_node_fleet",
-      nodes: [], summary: { registered: 0 }, limitations: [], secretValuesExposed: false
+      nodes: [{ nodeId: "NEXUS-EDGE-0002", enrollment: { status: "pending", challengeId: "raw-one-time-value" }, credentialRef: "must-not-reach-browser" }],
+      summary: { total: 1 }, secretValuesExposed: false
     });
-    return localResponse({
-      recordType: "runtime_node_registration",
-      node: { nodeId: "NEXUS-EDGE-0002", displayName: "Plant gateway east" },
-      receipt: { receiptId: "NODE-REC-1" }, coordinationEvent: { eventId: "COORD-NODE-1" }, secretValuesExposed: false
-    });
+    return localResponse({ recordType: "runtime_projection", secretValuesExposed: false });
   });
 
   const listed = await fetch(`${base}/api/local/runtime-coordination/nodes`);
   assert.equal(listed.status, 200);
   assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/runtime-coordination/nodes");
   assert.equal(observed.at(-1).options.method, "GET");
+  const listedText = await listed.text();
+  assert.equal(listedText.includes("raw-one-time-value"), false);
+  assert.equal(listedText.includes("must-not-reach-browser"), false);
+  assert.equal((await fetch(`${base}/api/local/runtime-coordination/nodes/NEXUS-EDGE-0002`)).status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/runtime-coordination/nodes/NEXUS-EDGE-0002");
 
-  const registration = {
-    displayName: "Plant gateway east",
-    hostname: "edge-gateway-east-01",
-    role: "Operational Edge Runtime",
-    generation: "arm64-industrial-v1",
-    environment: "production",
-    expectedRuntimeVersion: "1.9.0",
-    expectedCapabilities: ["nexus.edge.runtime.host", "nexus.edge.runtime.heartbeat"],
-    credentialRef: "vault:nexus/runtime-nodes/edge-gateway-east-01",
-    idempotencyKey: "node-create:edge-gateway-east-01"
+  assert.equal((await fetch(`${base}/api/local/runtime-coordination/admissions`)).status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/runtime-coordination/admissions");
+
+  const admissionIntent = {
+    missionId: "MISSION-EDGE-001",
+    intent: {
+      displayName: "Plant gateway east",
+      nodeClass: "edge_runtime_node",
+      requestedCapabilities: ["nexus.edge.runtime.host", "nexus.edge.runtime.heartbeat"],
+      operationalPurpose: "Provide governed Runtime Coordination at the east plant.",
+      location: "East plant",
+      deploymentMetadata: { profile: "raspberry-pi" },
+      evidenceRefs: ["EVIDENCE-EDGE-001"]
+    }
   };
-  const created = await fetch(`${base}/api/local/runtime-coordination/nodes`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(registration)
+  const idempotencyKey = "edge-admission:request-001";
+  const created = await fetch(`${base}/api/local/runtime-coordination/admissions`, {
+    method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(admissionIntent)
   });
   assert.equal(created.status, 200);
-  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/runtime-coordination/nodes");
-  assert.deepEqual(observed.at(-1).body, registration);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/runtime-coordination/admissions");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], idempotencyKey);
+  assert.deepEqual(observed.at(-1).body, admissionIntent);
   assert.equal((await created.json()).truth.enterpriseReady, false);
 
-  const challengeRequest = {
-    idempotencyKey: "node-challenge:edge-gateway-east-01",
-    reason: "Issue a fresh deployment challenge",
-  };
-  const challenge = await fetch(`${base}/api/local/runtime-coordination/nodes/NEXUS-EDGE-0002/enrollment-challenge`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(challengeRequest)
-  });
-  assert.equal(challenge.status, 200);
-  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/runtime-coordination/nodes/NEXUS-EDGE-0002/enrollment-challenge");
-  assert.deepEqual(observed.at(-1).body, challengeRequest);
-
-  const callsBeforeRejectedPayloads = observed.length;
-  for (const payload of [
-    { ...registration, credentialRef: "actual-secret-value" },
-    { ...registration, environment: "production-east" },
-    { ...registration, expectedRuntimeVersion: "latest" },
-    { ...registration, expectedCapabilities: ["vendor.device.control"] },
-    { ...registration, secretValue: "must-not-pass" }
+  for (const [route, method] of [
+    ["/api/local/runtime-coordination/admissions/ADMISSION-001", "GET"],
+    ["/api/local/runtime-coordination/admissions/ADMISSION-001/receipt", "GET"],
+    ["/api/local/runtime-coordination/admissions/ADMISSION-001/replay", "GET"],
   ]) {
-    const response = await fetch(`${base}/api/local/runtime-coordination/nodes`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+    assert.equal((await fetch(`${base}${route}`, { method })).status, 200);
+  }
+
+  for (const action of ["cancel", "challenge/reissue"]) {
+    const key = `edge-admission:${action.replace("/", "-")}-001`;
+    const expectedVersion = action === "cancel" ? 7 : 8;
+    const response = await fetch(`${base}/api/local/runtime-coordination/admissions/ADMISSION-001/${action}`, {
+      method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+      body: JSON.stringify({ expectedVersion, reason: `Operator requested ${action}` })
+    });
+    assert.equal(response.status, 200);
+    assert.equal(observed.at(-1).url, `http://127.0.0.1:8765/runtime-coordination/admissions/ADMISSION-001/${action}`);
+    assert.equal(observed.at(-1).options.headers["Idempotency-Key"], key);
+    assert.deepEqual(observed.at(-1).body, { expectedVersion, reason: `Operator requested ${action}` });
+  }
+
+  const callsBeforeRejectedRequests = observed.length;
+  for (const payload of [
+    { ...admissionIntent, tenantId: "browser-tenant" },
+    { ...admissionIntent, workspaceId: "browser-workspace" },
+    { ...admissionIntent, requestingPrincipalId: "browser-principal" },
+    { ...admissionIntent, authorityGrantId: "browser-authority" },
+    { ...admissionIntent, nodeId: "NEXUS-EDGE-BROWSER" },
+    { ...admissionIntent, intent: { ...admissionIntent.intent, verificationState: "verified" } },
+    { ...admissionIntent, intent: { ...admissionIntent.intent, deploymentMetadata: { tenantId: "browser-tenant" } } },
+    { ...admissionIntent, intent: { ...admissionIntent.intent, requestedCapabilities: ["vendor.device.control"] } },
+  ]) {
+    const response = await fetch(`${base}/api/local/runtime-coordination/admissions`, {
+      method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload)
     });
     assert.equal(response.status, 400);
   }
-  assert.equal(observed.length, callsBeforeRejectedPayloads);
+  const mismatched = await fetch(`${base}/api/local/runtime-coordination/admissions`, {
+    method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ ...admissionIntent, idempotencyKey: "edge-admission:different" })
+  });
+  assert.equal(mismatched.status, 400);
+  assert.equal((await fetch(`${base}/api/local/runtime-coordination/nodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 405);
+  assert.equal((await fetch(`${base}/api/local/runtime-coordination/admissions/ADMISSION-001/claim`)).status, 404);
+  assert.equal((await fetch(`${base}/api/local/runtime-coordination/admissions/ADMISSION-001/proof`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 404);
+  assert.equal((await fetch(`${base}/api/local/runtime-coordination/nodes/NEXUS-EDGE-0002/enrollment-challenge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 404);
+  assert.equal(observed.length, callsBeforeRejectedRequests);
   assert.equal((await fetch(`${base}/api/local/runtime-coordination/nodes`, { method: "DELETE" })).status, 405);
   assert.equal((await fetch(`${base}/api/local/runtime-coordination/nodes?tenant=other`)).status, 400);
 });
@@ -721,9 +799,20 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   const body = await mutation.json();
   assert.equal(body.operational.productionMultiTenantReady, false);
   assert.equal(JSON.stringify(body).includes(config.operationalRuntimeToken), false);
+
+  const conclaveMutation = await fetch(`${base}/api/operations/conclave/workspaces`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken, "Idempotency-Key": "conclave-operation-12345" },
+    body: JSON.stringify({ proposal: "Investigate an unfamiliar asset through an Edge Runtime." })
+  });
+  assert.equal(conclaveMutation.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/conclave/workspaces");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "conclave-operation-12345");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { proposal: "Investigate an unfamiliar asset through an Edge Runtime." });
 });
 
-test("hosted Runtime Coordination is tenant-bound and node creation requires write permission", async () => {
+test("hosted Runtime Coordination keeps fleet reads and requires the admission request scope", async () => {
   const observed = [];
   const config = {
     operationalEnabled: true,
@@ -755,14 +844,90 @@ test("hosted Runtime Coordination is tenant-bound and node creation requires wri
   assert.equal(observed[0].options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
   assert.equal(observed[0].options.headers["X-NEXUS-Role"], "admin");
   assert.equal(observed[0].options.headers["X-NEXUS-Scopes"], "operations:read");
-  const denied = await fetch(`${base}/api/operations/runtime-coordination/nodes`, {
+  const denied = await fetch(`${base}/api/operations/runtime-coordination/admissions`, {
     method: "POST",
-    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "node-register-001" },
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "edge-admission:request-001" },
     body: JSON.stringify({})
   });
   assert.equal(denied.status, 403);
   assert.equal((await denied.json()).error.code, "scope_denied");
   assert.equal(observed.length, 1);
+});
+
+test("hosted admission proxy derives identity, preserves one idempotency key, and excludes node proof ingress", async () => {
+  const observed = [];
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "edge:node_admission:request"],
+    operationalCookieSecure: false
+  };
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), async (url, options) => {
+    observed.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    return localResponse({
+      recordType: "nexus_edge_node_admission", admissionRequestId: "ADMISSION-001", missionId: "MISSION-EDGE-001",
+      intent: { displayName: "Plant gateway east", nodeClass: "edge_runtime_node", requestedCapabilities: ["nexus.edge.runtime.host"], operationalPurpose: "Governed operations" },
+      lifecycleState: "CHALLENGE_ISSUED", challenge: { state: "issued", challengeId: "raw-one-time-value" },
+      credentialRef: "must-not-reach-browser", secretValuesExposed: false
+    });
+  });
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey })
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const key = "edge-admission:request-001";
+  const intent = {
+    missionId: "MISSION-EDGE-001",
+    intent: {
+      displayName: "Plant gateway east", nodeClass: "edge_runtime_node",
+      requestedCapabilities: ["nexus.edge.runtime.host"], operationalPurpose: "Governed operations",
+      evidenceRefs: []
+    },
+    idempotencyKey: key
+  };
+  const created = await fetch(`${base}/api/operations/runtime-coordination/admissions`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": key },
+    body: JSON.stringify(intent)
+  });
+  assert.equal(created.status, 200);
+  const createdText = await created.text();
+  assert.equal(createdText.includes("raw-one-time-value"), false);
+  assert.equal(createdText.includes("must-not-reach-browser"), false);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/runtime-coordination/admissions");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], key);
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-User-ID"], "operator-1");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
+  assert.equal("idempotencyKey" in observed.at(-1).body, false);
+  assert.deepEqual(observed.at(-1).body, { missionId: intent.missionId, intent: intent.intent });
+
+  const callCount = observed.length;
+  const trusted = await fetch(`${base}/api/operations/runtime-coordination/admissions`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": key },
+    body: JSON.stringify({ ...intent, tenantId: "browser-tenant" })
+  });
+  assert.equal(trusted.status, 400);
+  const mismatch = await fetch(`${base}/api/operations/runtime-coordination/admissions`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": key },
+    body: JSON.stringify({ ...intent, idempotencyKey: "edge-admission:different" })
+  });
+  assert.equal(mismatch.status, 400);
+  assert.equal((await fetch(`${base}/api/operations/runtime-coordination/admissions/ADMISSION-001/claim`, { headers: { Cookie: cookie } })).status, 404);
+  assert.equal((await fetch(`${base}/api/operations/runtime-coordination/admissions/ADMISSION-001/proof`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "edge-admission:proof-001" }, body: "{}"
+  })).status, 404);
+  assert.equal(observed.length, callCount);
 });
 
 test("hosted operational gateway is disabled by default and rejects arbitrary forwarding", async () => {

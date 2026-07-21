@@ -68,6 +68,7 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/client-capabilities": { method: "GET", runtimePath: "/client-capabilities" },
   "/api/local/missions": { method: "GET", runtimePath: "/missions/history?limit=8" },
   "/api/local/missions/plan": { method: "POST", runtimePath: "/missions/plan" },
+  "/api/local/conclave/workspaces": { method: "GET", runtimePath: "/conclave/workspaces" },
   "/api/local/work-sessions": { method: "GET", runtimePath: "/work-sessions?limit=8" },
   "/api/local/work-sessions/plan": { method: "POST", runtimePath: "/work-sessions/plan" },
   "/api/local/work-sessions/start": { method: "POST", runtimePath: "/work-sessions/start" },
@@ -100,10 +101,20 @@ export const REPLAY_ROUTES = Object.freeze({
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,160}$/;
 const PROJECT_READ_ACTIONS = new Set(["sources", "evidence", "scope", "estimate", "planning-model", "artifacts"]);
 const PROJECT_ARTIFACT_TYPES = new Set(["roadmap", "project_plan", "scope_of_work", "proposal", "backlog", "risk_register", "status_report", "executive_briefing"]);
-const RUNTIME_NODE_HOSTNAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$/;
-const RUNTIME_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+const ADMISSION_ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const RUNTIME_CAPABILITY_PATTERN = /^nexus\.[A-Za-z0-9][A-Za-z0-9._:-]{0,158}$/;
-const CREDENTIAL_REFERENCE_PATTERN = /^[a-z][a-z0-9+.-]{1,31}:[A-Za-z0-9][A-Za-z0-9._/:-]{0,222}$/;
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:@-]{8,160}$/;
+const RESERVED_ADMISSION_METADATA_KEYS = new Set([
+  "tenantid", "workspaceid", "principalid", "requestingprincipalid", "authoritygrantid",
+  "decisionid", "accountabilityid", "nodeid", "operationalassetid", "verificationstate",
+  "approvalstate", "approved", "truststate", "lifecyclestate", "credential", "credentialref",
+  "challenge", "proof", "receipt", "replay",
+]);
+const RUNTIME_COORDINATION_SECRET_FIELDS = new Set([
+  "challengeid", "challengevalue", "rawchallenge", "challengesecret", "challengehash",
+  "challengeverifier", "credential", "credentialref", "credentialvalue", "privatekey",
+  "authoritytoken", "sessionsecret",
+]);
 
 const CACHEABLE_ROUTES = new Set([
   "/api/runtime/status",
@@ -244,7 +255,7 @@ export function loadConfig(overrides = {}) {
   const operationalApiBaseUrl = safeOperationalApiUrl(String(
     overrides.operationalApiBaseUrl ?? process.env.COMMAND_PORTAL_OPERATIONAL_API_BASE_URL ?? "https://nexus-operations.invalid"
   ));
-  const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,actions:simulate,actions:execute,approvals:decide,evidence:write")
+  const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,actions:simulate,actions:execute,approvals:decide,evidence:write,edge:node_admission:request")
     .split(",").map((item) => item.trim()).filter(Boolean);
   return Object.freeze({
     port: integer(overrides.port ?? process.env.PORT, 4173, 0),
@@ -421,19 +432,54 @@ function operationalFailure(config, route, code, message, status = "Unavailable"
 
 function resolveLocalCapability(pathname, method) {
   if (pathname === "/api/local/runtime-coordination/nodes") {
-    if (["GET", "POST"].includes(method)) return { method, runtimePath: "/runtime-coordination/nodes" };
-    return { methodMismatch: true, allowed: "GET, POST" };
+    return method === "GET"
+      ? { method, runtimePath: "/runtime-coordination/nodes" }
+      : { methodMismatch: true, allowed: "GET" };
   }
-  const enrollmentChallenge = pathname.match(/^\/api\/local\/runtime-coordination\/nodes\/([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)\/enrollment-challenge$/);
-  if (enrollmentChallenge) {
-    return method === "POST"
-      ? { method, runtimePath: `/runtime-coordination/nodes/${enrollmentChallenge[1]}/enrollment-challenge` }
-      : { methodMismatch: true, allowed: "POST" };
+  const runtimeNode = pathname.match(/^\/api\/local\/runtime-coordination\/nodes\/([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)$/);
+  if (runtimeNode) {
+    return method === "GET"
+      ? { method, runtimePath: `/runtime-coordination/nodes/${runtimeNode[1]}` }
+      : { methodMismatch: true, allowed: "GET" };
+  }
+  if (pathname === "/api/local/runtime-coordination/admissions") {
+    return ["GET", "POST"].includes(method)
+      ? { method, runtimePath: "/runtime-coordination/admissions" }
+      : { methodMismatch: true, allowed: "GET, POST" };
+  }
+  const admission = pathname.match(/^\/api\/local\/runtime-coordination\/admissions\/([^/]+)(?:\/(cancel|challenge\/reissue|receipt|replay))?$/);
+  if (admission) {
+    let admissionRequestId;
+    try { admissionRequestId = decodeURIComponent(admission[1]); } catch { return null; }
+    if (!ADMISSION_ID_PATTERN.test(admissionRequestId)) return null;
+    const action = admission[2] ?? "read";
+    const expectedMethod = ["read", "receipt", "replay"].includes(action) ? "GET" : "POST";
+    if (method !== expectedMethod) return { methodMismatch: true, allowed: expectedMethod };
+    const encodedId = encodeURIComponent(admissionRequestId);
+    return {
+      method,
+      runtimePath: `/runtime-coordination/admissions/${encodedId}${action === "read" ? "" : `/${action}`}`,
+    };
   }
   const direct = LOCAL_CAPABILITY_ROUTES[pathname];
+  if (pathname === "/api/local/conclave/workspaces" && method === "POST") {
+    return { method, runtimePath: "/conclave/workspaces" };
+  }
   if (direct) return direct.method === method ? direct : { methodMismatch: true, allowed: direct.method };
   const match = pathname.match(/^\/api\/local\/projects\/([A-Za-z0-9_.:-]{1,160})\/(sources|evidence|scope|estimate|planning-model|artifacts|compile)$/);
   if (!match) {
+    const conclaveWorkspace = pathname.match(/^\/api\/local\/conclave\/workspaces\/([A-Za-z0-9_.:-]{1,160})$/);
+    if (conclaveWorkspace) {
+      return method === "GET"
+        ? { method, runtimePath: `/conclave/workspaces/${conclaveWorkspace[1]}` }
+        : { methodMismatch: true, allowed: "GET" };
+    }
+    const conclaveEvidence = pathname.match(/^\/api\/local\/conclave\/workspaces\/([A-Za-z0-9_.:-]{1,160})\/tasks\/([A-Za-z0-9_.:-]{1,160})\/evidence$/);
+    if (conclaveEvidence) {
+      return method === "POST"
+        ? { method, runtimePath: `/conclave/workspaces/${conclaveEvidence[1]}/tasks/${conclaveEvidence[2]}/evidence` }
+        : { methodMismatch: true, allowed: "POST" };
+    }
     const interaction = pathname.match(/^\/api\/local\/interactions\/([A-Z0-9-]+)\/(events|interrupt|presentation-complete)$/);
     if (interaction) {
       const expectedMethod = interaction[2] === "events" ? "GET" : "POST";
@@ -517,58 +563,133 @@ function boundedText(value, field, maximum, required = true) {
   return text || undefined;
 }
 
+function idempotencyKey(value) {
+  const key = boundedText(value, "idempotencyKey", 160);
+  if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
+    throw new GatewayFailure("request_invalid", "idempotencyKey is invalid.", "Unknown", 400);
+  }
+  return key;
+}
+
+function sanitizedMutationPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || !("idempotencyKey" in payload)) return payload;
+  const { idempotencyKey: _idempotencyKey, ...sanitized } = payload;
+  return sanitized;
+}
+
+function sanitizeRuntimeCoordinationResponse(runtimePath, value) {
+  if (!runtimePath.startsWith("/runtime-coordination/")) return value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeRuntimeCoordinationResponse(runtimePath, item));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).flatMap(([key, item]) => {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return RUNTIME_COORDINATION_SECRET_FIELDS.has(normalized)
+      ? []
+      : [[key, sanitizeRuntimeCoordinationResponse(runtimePath, item)]];
+  }));
+}
+
 function validateLocalPayload(runtimePath, payload, maximumBytes) {
-  if (runtimePath === "/runtime-coordination/nodes") {
+  if (runtimePath === "/conclave/workspaces") {
+    strictKeys(payload, new Set(["proposal"]));
+    return { proposal: boundedText(payload.proposal, "proposal", 8_000) };
+  }
+  if (/^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/tasks\/[A-Za-z0-9_.:-]+\/evidence$/.test(runtimePath)) {
     strictKeys(payload, new Set([
-      "displayName", "hostname", "role", "generation", "environment",
-      "expectedRuntimeVersion", "expectedCapabilities", "credentialRef", "idempotencyKey"
+      "origin", "sourceClassification", "collector", "confidence", "claim",
+      "supportingArtifacts", "relationships", "operationalContext", "completeTask",
     ]));
-    const hostname = boundedText(payload.hostname, "hostname", 253);
-    if (!RUNTIME_NODE_HOSTNAME_PATTERN.test(hostname)) throw new GatewayFailure("request_invalid", "hostname is invalid.", "Unknown", 400);
-    const expectedRuntimeVersion = boundedText(payload.expectedRuntimeVersion, "expectedRuntimeVersion", 80);
-    if (!RUNTIME_VERSION_PATTERN.test(expectedRuntimeVersion)) throw new GatewayFailure("request_invalid", "expectedRuntimeVersion must use major.minor.patch.", "Unknown", 400);
-    if (!Array.isArray(payload.expectedCapabilities) || !payload.expectedCapabilities.length || payload.expectedCapabilities.length > 64) {
-      throw new GatewayFailure("request_invalid", "expectedCapabilities must contain between 1 and 64 registered capability identifiers.", "Unknown", 400);
+    const sourceClassification = boundedText(payload.sourceClassification, "sourceClassification", 80);
+    if (!["model_native", "platform_knowledge", "tenant_knowledge", "retrieved_evidence", "live_external_source", "runtime_evidence"].includes(sourceClassification)) {
+      throw new GatewayFailure("request_invalid", "sourceClassification is not registered.", "Unknown", 400);
     }
-    const expectedCapabilities = payload.expectedCapabilities.map((item) => boundedText(item, "expectedCapability", 160));
-    if (expectedCapabilities.some((item) => !RUNTIME_CAPABILITY_PATTERN.test(item)) || new Set(expectedCapabilities).size !== expectedCapabilities.length) {
-      throw new GatewayFailure("request_invalid", "expectedCapabilities must be unique NEXUS capability identifiers.", "Unknown", 400);
+    const confidence = Number(payload.confidence);
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      throw new GatewayFailure("request_invalid", "confidence must be between zero and one.", "Unknown", 400);
     }
-    const credentialRef = boundedText(payload.credentialRef, "credentialRef", 255);
-    if (!CREDENTIAL_REFERENCE_PATTERN.test(credentialRef)) {
-      throw new GatewayFailure("request_invalid", "credentialRef must be an opaque credential-store reference, never a secret value.", "Unknown", 400);
+    const supportingArtifacts = payload.supportingArtifacts ?? [];
+    const relationships = payload.relationships ?? [];
+    if (!Array.isArray(supportingArtifacts) || supportingArtifacts.length > 100 || supportingArtifacts.some((item) => typeof item !== "string" || item.length > 2_000)) {
+      throw new GatewayFailure("request_invalid", "supportingArtifacts is invalid.", "Unknown", 400);
     }
-    const idempotencyKey = boundedText(payload.idempotencyKey, "idempotencyKey", 160);
-    if (!/^[A-Za-z0-9._:@-]{1,160}$/.test(idempotencyKey)) {
-      throw new GatewayFailure("request_invalid", "idempotencyKey is invalid.", "Unknown", 400);
+    if (!Array.isArray(relationships) || relationships.length > 100 || relationships.some((item) => typeof item !== "string" || item.length > 500)) {
+      throw new GatewayFailure("request_invalid", "relationships is invalid.", "Unknown", 400);
+    }
+    const operationalContext = payload.operationalContext ?? {};
+    if (!operationalContext || typeof operationalContext !== "object" || Array.isArray(operationalContext) || Object.keys(operationalContext).length > 100) {
+      throw new GatewayFailure("request_invalid", "operationalContext is invalid.", "Unknown", 400);
     }
     return {
-      displayName: boundedText(payload.displayName, "displayName", 120),
-      hostname,
-      role: boundedText(payload.role, "role", 120),
-      generation: boundedText(payload.generation, "generation", 80),
-      environment: (() => {
-        const environment = boundedText(payload.environment, "environment", 40);
-        if (!["development", "test", "proving_ground", "pilot", "production"].includes(environment)) {
-          throw new GatewayFailure("request_invalid", "environment is not a supported deployment identity.", "Unknown", 400);
-        }
-        return environment;
-      })(),
-      expectedRuntimeVersion,
-      expectedCapabilities,
-      credentialRef,
-      idempotencyKey
+      origin: boundedText(payload.origin, "origin", 2_000),
+      sourceClassification,
+      collector: boundedText(payload.collector, "collector", 240, false),
+      confidence,
+      claim: boundedText(payload.claim, "claim", 8_000),
+      supportingArtifacts,
+      relationships,
+      operationalContext,
+      completeTask: payload.completeTask === true,
     };
   }
-  if (/^\/runtime-coordination\/nodes\/[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\/enrollment-challenge$/.test(runtimePath)) {
-    strictKeys(payload, new Set(["idempotencyKey", "reason"]));
-    const idempotencyKey = boundedText(payload.idempotencyKey, "idempotencyKey", 160);
-    if (!/^[A-Za-z0-9._:@-]{1,160}$/.test(idempotencyKey)) {
-      throw new GatewayFailure("request_invalid", "idempotencyKey is invalid.", "Unknown", 400);
+  if (runtimePath === "/runtime-coordination/admissions") {
+    strictKeys(payload, new Set(["missionId", "intent", "idempotencyKey"]));
+    const missionId = boundedText(payload.missionId, "missionId", 160);
+    if (!PROJECT_ID_PATTERN.test(missionId)) throw new GatewayFailure("request_invalid", "missionId is invalid.", "Unknown", 400);
+    const intent = payload.intent && typeof payload.intent === "object" && !Array.isArray(payload.intent) ? payload.intent : null;
+    if (!intent) throw new GatewayFailure("request_invalid", "intent is invalid.", "Unknown", 400);
+    strictKeys(intent, new Set([
+      "displayName", "nodeClass", "requestedCapabilities", "operationalPurpose",
+      "location", "deploymentMetadata", "evidenceRefs",
+    ]));
+    if (!Array.isArray(intent.requestedCapabilities) || !intent.requestedCapabilities.length || intent.requestedCapabilities.length > 64) {
+      throw new GatewayFailure("request_invalid", "requestedCapabilities must contain between 1 and 64 registered capability identifiers.", "Unknown", 400);
+    }
+    const requestedCapabilities = intent.requestedCapabilities.map((item) => boundedText(item, "requestedCapability", 160));
+    if (requestedCapabilities.some((item) => !RUNTIME_CAPABILITY_PATTERN.test(item)) || new Set(requestedCapabilities).size !== requestedCapabilities.length) {
+      throw new GatewayFailure("request_invalid", "requestedCapabilities must be unique NEXUS capability identifiers.", "Unknown", 400);
+    }
+    const evidenceRefs = intent.evidenceRefs === undefined ? [] : intent.evidenceRefs;
+    if (!Array.isArray(evidenceRefs) || evidenceRefs.length > 64) throw new GatewayFailure("request_invalid", "evidenceRefs is invalid.", "Unknown", 400);
+    const sanitizedEvidenceRefs = evidenceRefs.map((item) => boundedText(item, "evidenceRef", 160));
+    if (sanitizedEvidenceRefs.some((item) => !PROJECT_ID_PATTERN.test(item)) || new Set(sanitizedEvidenceRefs).size !== sanitizedEvidenceRefs.length) {
+      throw new GatewayFailure("request_invalid", "evidenceRefs must contain unique reference identifiers.", "Unknown", 400);
+    }
+    const metadata = intent.deploymentMetadata === undefined ? undefined : intent.deploymentMetadata;
+    if (metadata !== undefined && (!metadata || typeof metadata !== "object" || Array.isArray(metadata) || Object.keys(metadata).length > 24)) {
+      throw new GatewayFailure("request_invalid", "deploymentMetadata is invalid.", "Unknown", 400);
+    }
+    const deploymentMetadata = metadata === undefined ? undefined : Object.fromEntries(Object.entries(metadata).map(([key, value]) => {
+      const safeKey = boundedText(key, "deploymentMetadata key", 80);
+      const normalizedKey = safeKey.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!/^[A-Za-z0-9_.:-]+$/.test(safeKey) || RESERVED_ADMISSION_METADATA_KEYS.has(normalizedKey) || !["string", "number", "boolean"].includes(typeof value) && value !== null) {
+        throw new GatewayFailure("request_invalid", "deploymentMetadata contains an invalid entry.", "Unknown", 400);
+      }
+      if (typeof value === "string" && value.length > 500) throw new GatewayFailure("request_invalid", "deploymentMetadata contains an invalid entry.", "Unknown", 400);
+      return [safeKey, value];
+    }));
+    return {
+      missionId,
+      intent: {
+        displayName: boundedText(intent.displayName, "displayName", 120),
+        nodeClass: boundedText(intent.nodeClass, "nodeClass", 80),
+        requestedCapabilities,
+        operationalPurpose: boundedText(intent.operationalPurpose, "operationalPurpose", 1_000),
+        ...(intent.location ? { location: boundedText(intent.location, "location", 240) } : {}),
+        ...(deploymentMetadata ? { deploymentMetadata } : {}),
+        evidenceRefs: sanitizedEvidenceRefs,
+      },
+      ...(payload.idempotencyKey !== undefined ? { idempotencyKey: idempotencyKey(payload.idempotencyKey) } : {}),
+    };
+  }
+  if (/^\/runtime-coordination\/admissions\/[A-Za-z0-9_.%:@-]+\/(cancel|challenge\/reissue)$/.test(runtimePath)) {
+    strictKeys(payload, new Set(["idempotencyKey", "expectedVersion", "reason"]));
+    if (!Number.isInteger(payload.expectedVersion) || payload.expectedVersion < 1) {
+      throw new GatewayFailure("request_invalid", "expectedVersion must be a positive integer.", "Unknown", 400);
     }
     return {
-      idempotencyKey,
+      expectedVersion: payload.expectedVersion,
       reason: boundedText(payload.reason, "reason", 500),
+      ...(payload.idempotencyKey !== undefined ? { idempotencyKey: idempotencyKey(payload.idempotencyKey) } : {}),
     };
   }
   if (runtimePath === "/intake/upload") {
@@ -659,17 +780,22 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
   throw new GatewayFailure("route_not_allowlisted", "This local capability route is not allowlisted.", "Unknown", 404);
 }
 
-async function fetchLocalCapability(resolved, payload, config, localFetch) {
+async function fetchLocalCapability(resolved, payload, request, config, localFetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.localTimeoutMs);
   try {
     let response;
     try {
       const baseUrl = resolved.target === "platform" ? config.platformRuntimeBaseUrl : config.localApiBaseUrl;
+      const forwardedPayload = sanitizedMutationPayload(payload);
       response = await localFetch(`${baseUrl}${resolved.runtimePath}`, {
         method: resolved.method,
-        headers: { Accept: "application/json", ...(resolved.method === "POST" ? { "Content-Type": "application/json" } : {}) },
-        ...(resolved.method === "POST" ? { body: JSON.stringify(payload) } : {}),
+        headers: {
+          Accept: "application/json",
+          ...(resolved.method === "POST" ? { "Content-Type": "application/json" } : {}),
+          ...(resolved.method === "POST" && request.headers["idempotency-key"] ? { "Idempotency-Key": String(request.headers["idempotency-key"]) } : {}),
+        },
+        ...(resolved.method === "POST" ? { body: JSON.stringify(forwardedPayload) } : {}),
         signal: controller.signal,
         redirect: "error"
       });
@@ -683,7 +809,7 @@ async function fetchLocalCapability(resolved, payload, config, localFetch) {
     try {
       const body = JSON.parse(raw.toString("utf8"));
       if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("not_object");
-      return body;
+      return sanitizeRuntimeCoordinationResponse(resolved.runtimePath, body);
     } catch {
       throw new GatewayFailure("local_response_invalid", "Local Runtime returned invalid JSON.", "Unknown", 502);
     }
@@ -706,13 +832,13 @@ async function fetchOperationalCapability(resolved, payload, claims, request, co
     };
     if (resolved.method === "POST") {
       headers["Content-Type"] = "application/json";
-      headers["Idempotency-Key"] = String(request.headers["idempotency-key"] ?? "");
+      headers["Idempotency-Key"] = String(payload?.idempotencyKey ?? request.headers["idempotency-key"] ?? "");
     }
     let response;
     try {
       response = await operationalFetch(`${config.operationalApiBaseUrl}${resolved.runtimePath}`, {
         method: resolved.method, headers,
-        ...(resolved.method === "POST" ? { body: JSON.stringify(payload) } : {}),
+        ...(resolved.method === "POST" ? { body: JSON.stringify(sanitizedMutationPayload(payload)) } : {}),
         signal: controller.signal, redirect: "error"
       });
     } catch (error) {
@@ -725,7 +851,7 @@ async function fetchOperationalCapability(resolved, payload, claims, request, co
     if (raw.byteLength > config.localMaxResponseBytes) throw new GatewayFailure("operational_response_too_large", "Hosted Runtime response exceeded the gateway limit.", "Unknown", 502);
     const body = JSON.parse(raw.toString("utf8"));
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("not_object");
-    return body;
+    return sanitizeRuntimeCoordinationResponse(resolved.runtimePath, body);
   } catch (error) {
     if (error instanceof GatewayFailure) throw error;
     throw new GatewayFailure("operational_response_invalid", "Hosted Runtime returned invalid JSON.", "Unknown", 502);
@@ -767,11 +893,14 @@ async function handleOperationalApi(request, response, config, operationalFetch,
   if (!claims.scopes.includes(scope)) return sendJson(response, 403, operationalFailure(config, url.pathname, "scope_denied", `Session lacks required scope: ${scope}.`, "Unauthorized"));
   if (resolved.method === "POST") {
     if (!sessionAuthority.csrfValid(request, claims)) return sendJson(response, 403, operationalFailure(config, url.pathname, "csrf_invalid", "CSRF verification failed.", "Unauthorized"));
-    if (!/^[A-Za-z0-9._:-]{8,160}$/.test(String(request.headers["idempotency-key"] ?? ""))) return sendJson(response, 400, operationalFailure(config, url.pathname, "idempotency_key_required", "A valid Idempotency-Key is required for hosted mutations."));
+    if (!IDEMPOTENCY_KEY_PATTERN.test(String(request.headers["idempotency-key"] ?? ""))) return sendJson(response, 400, operationalFailure(config, url.pathname, "idempotency_key_required", "A valid Idempotency-Key is required for hosted mutations."));
   }
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
     const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
+    if (resolved.method === "POST" && payload?.idempotencyKey && payload.idempotencyKey !== request.headers["idempotency-key"]) {
+      throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match the request body.", "Unknown", 400);
+    }
     const data = await fetchOperationalCapability(resolved, payload, claims, request, config, operationalFetch);
     structuredLog("experience_gateway_hosted_operation", { route: url.pathname, runtimePath: resolved.runtimePath, method: resolved.method, userId: claims.sub, tenantId: claims.tenantId, workspaceId: claims.workspaceId, scope, status: 200 });
     return sendJson(response, 200, operationalEnvelope(config, url.pathname, data, claims));
@@ -796,7 +925,12 @@ async function handleLocalApi(request, response, config, localFetch) {
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
     const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
-    const data = await fetchLocalCapability(resolved, payload, config, localFetch);
+    if (resolved.method === "POST" && /^\/runtime-coordination\/admissions(?:\/[^/]+\/(?:cancel|challenge\/reissue))?$/.test(resolved.runtimePath)) {
+      const requestKey = String(request.headers["idempotency-key"] ?? "");
+      if (!IDEMPOTENCY_KEY_PATTERN.test(requestKey)) throw new GatewayFailure("idempotency_key_required", "A valid Idempotency-Key is required for admission mutations.", "Unknown", 400);
+      if (payload?.idempotencyKey && payload.idempotencyKey !== requestKey) throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match the request body.", "Unknown", 400);
+    }
+    const data = await fetchLocalCapability(resolved, payload, request, config, localFetch);
     structuredLog("experience_gateway_local_capability", { route: url.pathname, runtimePath: resolved.runtimePath, method: resolved.method, status: 200 });
     const runtimeUrl = new URL(resolved.target === "platform" ? config.platformRuntimeBaseUrl : config.localApiBaseUrl).origin;
     return sendJson(response, 200, localEnvelope(config, url.pathname, data, { connectionState: "Healthy", runtimeUrl }));

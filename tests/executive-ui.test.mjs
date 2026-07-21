@@ -328,7 +328,7 @@ test("Operational Replay surfaces Runtime-owned stage playback with truthful bou
 });
 
 test("new portal destinations render Runtime-backed dashboards without client-side cognition", async () => {
-  const [app, navigation, client, missions, knowledge, edge, fleet, styles] = await Promise.all([
+  const [app, navigation, client, missions, knowledge, edge, fleet, admission, styles] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/platform/navigation.ts"),
     read("../src/lib/local-client.ts"),
@@ -336,6 +336,7 @@ test("new portal destinations render Runtime-backed dashboards without client-si
     read("../src/components/KnowledgeWorkspace.tsx"),
     read("../src/components/EdgeRuntime.tsx"),
     read("../src/components/EdgeNodeFleet.tsx"),
+    read("../src/components/EdgeAdmissionWorkspace.tsx"),
     read("../src/styles.css")
   ]);
   for (const label of ["Missions", "Knowledge", "Edge Runtime"]) assert.match(navigation, new RegExp(`label: "${label}"`));
@@ -346,25 +347,44 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(edge, /<EdgeNodeFleet/);
   assert.match(client, /missions: \(\) => request<Record<string, unknown>>\("\/missions"\)/);
   assert.match(client, /runtimeNodes: \(\) => request<RuntimeNodeFleet>\("\/runtime-coordination\/nodes"\)/);
-  assert.match(client, /createRuntimeNode: \(node: CreateRuntimeNodeRequest\) => post<CreateRuntimeNodeResult>\("\/runtime-coordination\/nodes", node\)/);
+  for (const path of [
+    "/runtime-coordination/admissions",
+    "/cancel",
+    "/challenge/reissue",
+    "/receipt",
+    "/replay",
+  ]) assert.match(client, new RegExp(path.replaceAll("/", "\\/")));
+  assert.match(client, /createRuntimeAdmission/);
+  assert.match(client, /runtimeAdmissionReceipt/);
+  assert.match(client, /runtimeAdmissionReplay/);
   assert.match(knowledge, /Mission Store/);
   assert.match(knowledge, /Knowledge Store/);
   assert.match(edge, /Edge status is unavailable/);
   assert.match(edge, /Array\.isArray\(capabilityData\)/);
   assert.match(edge, /EDGE_CAPABILITY_IDS/);
-  for (const label of ["Edge node ecosystem", "Authorized scope only", "Create a Runtime node", "Credential reference", "Observed manifest", "Evidence, journal, and Replay"]) assert.match(fleet, new RegExp(label));
+  for (const label of ["Edge node ecosystem", "Authorized scope only", "Observed manifest", "Evidence, journal, and Replay"]) assert.match(fleet, new RegExp(label));
   for (const dimension of ["stateVector", "trust", "freshness", "lastHeartbeatAt", "evidenceRefs", "receiptRefs", "replayRefs"]) assert.match(fleet, new RegExp(dimension));
-  assert.match(fleet, /role="tabpanel"/);
   assert.match(fleet, /<caption className="sr-only">Runtime-reported node state dimensions<\/caption>/);
-  assert.match(fleet, /Production ready: false · Enterprise ready: false/);
-  assert.match(fleet, /credentialRef/);
+  for (const label of [
+    "Governed node admission", "Owning Mission", "Node display name", "Operational asset class",
+    "Operational purpose", "Requested capabilities", "Existing Evidence references", "Request governed admission",
+    "Mission task graph", "Policy", "Conclave", "Approval", "Decision", "Authority", "Challenge",
+    "Verification", "Asset contract", "First heartbeat", "Receipt", "Operational Replay",
+  ]) assert.match(admission, new RegExp(label));
+  assert.match(admission, /edge:node_admission:request/);
+  assert.match(admission, /capability\?\.available === true/);
+  assert.match(admission, /dependenciesReady/);
+  assert.match(admission, /operationAllowed/);
+  assert.doesNotMatch(client + fleet + admission, /credentialRef|challengeId|createRuntimeNode|enrollment-challenge/);
   assert.doesNotMatch(
-    fleet,
+    fleet + admission,
     /\bcredentialValue\b|\bsecretValue\b|name=["'](?:password|token|secret)["']|type="password"/,
   );
   assert.match(styles, /\.edge-fleet-layout/);
+  assert.match(styles, /\.edge-admission-stages/);
+  assert.match(styles, /\.edge-admission-lineage/);
   assert.match(styles, /@container portal-main \(max-width: 900px\)/);
-  for (const source of [missions, knowledge, edge, fleet]) {
+  for (const source of [missions, knowledge, edge, fleet, admission]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
     assert.equal(source.includes("Authorization"), false);
   }

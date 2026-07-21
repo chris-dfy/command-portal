@@ -41,3 +41,24 @@ export async function runConclaveReview(proposal: string): Promise<ConclaveRevie
   }
   return gateway.data.review;
 }
+
+export type ConclaveRun = {
+  workspace: ConclaveWorkspaceRecord;
+  preflightReview: ConclaveReview | null;
+  preflightUnavailableReason: string | null;
+};
+
+export async function startConclaveInvestigation(proposal: string): Promise<ConclaveRun> {
+  const idempotencyKey = `conclave-${globalThis.crypto.randomUUID()}`;
+  const workspace = await localNexusClient.createConclaveWorkspace(proposal, idempotencyKey);
+  try {
+    return { workspace, preflightReview: await runConclaveReview(proposal), preflightUnavailableReason: null };
+  } catch (error) {
+    return {
+      workspace,
+      preflightReview: null,
+      preflightUnavailableReason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+import { localNexusClient, type ConclaveWorkspaceRecord } from "./local-client";
