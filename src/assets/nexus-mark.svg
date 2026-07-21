@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">NEXUS particle mark</title>
+  <desc id="desc">Nested open hexagonal particle geometry derived from the project owner's supplied official NEXUS intro sequence.</desc>
+  <g fill="none" stroke="#fff" stroke-linecap="round">
+    <path stroke-width="1.25" stroke-dasharray="0.12 2.65" d="M128 16 225 72v91l-97 77-97-56V72z"/>
+    <path stroke-width="1.15" stroke-dasharray="0.1 2.35" d="M128 48 197 88v58l-69 55-69-40V88z"/>
+    <path stroke-width="1.05" stroke-dasharray="0.09 2.05" d="M128 79 169 103v33l-41 33-41-24v-42z"/>
+    <path stroke-width=".9" stroke-dasharray="0.08 1.8" opacity=".72" d="M128 103 148 115v13l-20 17-20-12v-18z"/>
+    <path stroke-width=".55" stroke-dasharray="0.06 3.1" opacity=".38" d="M128 27 214 77v79l-86 68-86-50V77z"/>
+    <path stroke-width=".5" stroke-dasharray="0.05 2.8" opacity=".28" d="M128 59 187 93v49l-59 47-59-34V93z"/>
+  </g>
+</svg>

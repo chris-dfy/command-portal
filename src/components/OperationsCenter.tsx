@@ -1,4 +1,5 @@
 import { Activity, BookOpenCheck, Brain, FileClock, Lightbulb, ShieldCheck, Sparkles, Target, TriangleAlert } from "lucide-react";
+import { NexusPanel, NexusStateView, NexusStatus } from "../design-system/NexusPrimitives";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 import type { EoxAssessment, WhyThisMatters } from "../lib/eox-client";
@@ -8,13 +9,12 @@ function Why({ value }: { value: WhyThisMatters }) {
 }
 
 export function OperationsCenter({ assessment }: { assessment: EoxAssessment | null }) {
-  if (!assessment) return <section className="operations-center eox-unavailable"><TriangleAlert /><h3>Operational assessment unavailable</h3><p>The Runtime has not supplied an Executive Operating Loop contract. NEXUS will not fabricate one in the client.</p></section>;
+  if (!assessment) return <NexusStateView state="empty" title="Operational assessment unavailable" detail="The Runtime has not supplied an Executive Operating Loop contract. NEXUS will not fabricate one in the client." />;
 
-  return <section className="operations-center" aria-labelledby="operations-center-heading">
-    <header className="eox-hero" id="executive-narrative">
-      <div><span>Executive Operational Experience</span><h2 id="operations-center-heading">Operations Center</h2><p>{assessment.executiveNarrative.text}</p></div>
-      <aside><span>Executive state</span><strong>{assessment.executiveState.active}</strong><small>{assessment.executiveState.reason}</small></aside>
-    </header>
+  return <section className="operations-center" aria-label="Operations Center">
+    <NexusPanel className="nx-command-brief" eyebrow="Executive operational experience" title="Operations Center" actions={<NexusStatus tone="info">{assessment.executiveState.active}</NexusStatus>}>
+      <div className="nx-command-brief__body" id="executive-narrative"><p>{assessment.executiveNarrative.text}</p><aside><span>Executive state</span><strong>{assessment.executiveState.active}</strong><small>{assessment.executiveState.reason}</small></aside></div>
+    </NexusPanel>
 
     <div className="operating-loop" aria-label="Executive Operating Loop">{assessment.loop.map((stage, index) => <div key={stage.stage}><article data-active={stage.active}><span>{index + 1}</span><strong>{stage.stage}</strong><small>{stage.status.replaceAll("_", " ")}</small></article><b aria-hidden="true">→</b></div>)}</div>
 

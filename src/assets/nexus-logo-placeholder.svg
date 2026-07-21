@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">NEXUS logo placeholder</title>
+  <desc id="desc">Temporary geometric NEXUS mark. Replace this local file with the approved official NEXUS logo asset.</desc>
+  <path fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" d="M50 186V70l78 116V70l78 116V70"/>
+  <path fill="none" stroke="currentColor" stroke-width="3" opacity=".45" d="M128 18 223 73v110l-95 55-95-55V73z"/>
+  <circle cx="128" cy="128" r="116" fill="none" stroke="currentColor" stroke-width="2" opacity=".2" stroke-dasharray="5 12"/>
+</svg>
