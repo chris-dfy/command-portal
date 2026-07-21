@@ -4,10 +4,18 @@ import { StatusPill } from "./StatusPill";
 import type { RuntimeSnapshot } from "../lib/types";
 
 const asRecord = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+const EDGE_CAPABILITY_IDS = new Set(["edge", "edge-runtime", "edge_runtime", "nexus-edge-runtime", "nexus_edge_runtime"]);
 
 export function EdgeRuntime({ snapshot }: { snapshot: RuntimeSnapshot }) {
-  const capabilities = asRecord(snapshot.capabilities?.data);
-  const edge = asRecord(capabilities?.edgeRuntime) ?? asRecord(capabilities?.edge_runtime) ?? asRecord(capabilities?.edge);
+  const capabilityData = snapshot.capabilities?.data;
+  const capabilityList = Array.isArray(capabilityData)
+    ? capabilityData.map(asRecord).filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+  const capabilityMap = asRecord(capabilityData);
+  const edge = capabilityList.find((capability) => {
+    const id = String(capability.id ?? capability.capabilityId ?? "").trim().toLowerCase();
+    return EDGE_CAPABILITY_IDS.has(id);
+  }) ?? asRecord(capabilityMap?.edgeRuntime) ?? asRecord(capabilityMap?.edge_runtime) ?? asRecord(capabilityMap?.edge);
   const environment = asRecord(snapshot.environment?.data);
 
   return <div className="experience-grid">

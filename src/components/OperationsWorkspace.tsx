@@ -132,7 +132,7 @@ export function OperationsWorkspace() {
       {result && <pre className="operation-result">{JSON.stringify(result, null, 2)}</pre>}
     </DataPanel>
 
-    <DataPanel eyebrow="Integration Layer" title="Connector readiness" icon={<Network size={18} />} className="span-2">
+    <DataPanel eyebrow="Operational Observation" title="Connector readiness" icon={<Network size={18} />} className="span-2">
       <div className="compact-records connector-records">{connectors.length ? connectors.map((connector) => <article key={text(connector.connectorId ?? connector.id)}><strong>{text(connector.name ?? connector.connectorId ?? connector.id, "Connector")}</strong><StatusPill value={text(connector.status ?? connector.state, "registered")} /><span>{text(connector.limitation ?? connector.message, "Runtime-registered connector")}</span></article>) : <EmptyRecord>No connectors are registered or the local Runtime is unavailable.</EmptyRecord>}</div>
     </DataPanel>
   </div>;

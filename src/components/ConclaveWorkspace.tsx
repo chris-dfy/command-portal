@@ -33,6 +33,19 @@ export function ConclaveWorkspace({ status }: { status?: Record<string, unknown>
       {error && <p className="conclave-error" role="alert">{error}</p>}
     </DataPanel>
 
+    <section className="conclave-context-grid" aria-label="Conclave mission workspace">
+      <article><span>Mission</span><strong>{review?.reviewId ?? "Review not started"}</strong><p>{proposal || "Frame a governed mission decision above."}</p></article>
+      <article><span>Objectives</span><strong>Challenge before progression</strong><p>Identify missing authority, evidence, constraints, and rollback expectations.</p></article>
+      <article><span>Knowledge</span><strong>{review?.provenanceCount ?? 0} provenance records</strong><p>Only registered Runtime context contributes to synthesis.</p></article>
+      <article><span>Unknowns</span><strong>{review?.missingContextDomains.length ?? 0} open domains</strong><p>{review?.missingContextDomains.join(", ") || "Unknowns populate after review."}</p></article>
+      <article><span>Task Graph</span><strong>{review ? "Review → Challenge → Synthesis" : "Awaiting proposal"}</strong><p>Conclave does not execute the resulting mission graph.</p></article>
+      <article><span>Specialists</span><strong>{review?.perspectives.length ?? 0} assigned perspectives</strong><p>{review?.perspectives.map((item) => item.name).join(", ") || "Specialists populate from the governed review."}</p></article>
+      <article><span>Evidence</span><strong>{review?.proofIds.length ?? 0} proof references</strong><p>{review?.proofIds.join(", ") || "No review evidence is selected."}</p></article>
+      <article><span>Knowledge Graph</span><strong>{review ? "Context relationships established" : "Not established"}</strong><p>Provenance, dissent, missing domains, and conclusions remain linked.</p></article>
+      <article><span>Operational Replay</span><strong>{review ? "Review replay available" : "No replay"}</strong><p>Review stages remain inspectable through the permanent Replay workspace.</p></article>
+      <article><span>Executive Conclusions</span><strong>{review ? displayLabel(review.outcome) : "Pending"}</strong><p>{review?.synthesis ?? "Run a review to establish a bounded conclusion."}</p></article>
+    </section>
+
     {review ? <>
       <section className="conclave-summary" data-outcome={review.outcome}>
         <div><span>Conclave synthesis</span><h3>{displayLabel(review.outcome)}</h3><p>{review.synthesis}</p></div>

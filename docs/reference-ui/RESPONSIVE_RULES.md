@@ -1,6 +1,6 @@
 # Responsive Rules
 
-This Experience Layer guidance follows the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
+This Operational Engagement presentation guidance follows the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
 
 - Above 1100px: navigation, the main workspace, and the persistent NEXUS copilot use three non-overlapping application columns.
 - 821–1100px: navigation becomes off-canvas so the main workspace and NEXUS retain separate columns.

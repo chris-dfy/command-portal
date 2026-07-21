@@ -1,6 +1,6 @@
 # Local-First Web Capability Parity
 
-The NEXUS web app is an Experience Layer client of the same private Runtime used by Desktop NEXUS Command. It does not maintain a second operational model.
+The NEXUS web app is an Operational Engagement client of the same private Runtime used by Desktop NEXUS Command. It does not maintain a second operational model.
 
 ## Capability ownership
 
