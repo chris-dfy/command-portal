@@ -171,6 +171,8 @@ export type RuntimeAdmissionCapability = {
   available: boolean;
   reason?: string;
   dependencies?: AdmissionDependency[] | Record<string, AdmissionDependency | boolean | string>;
+  environmentAvailability?: Record<string, boolean>;
+  conditionalDependencies?: Record<string, Record<string, boolean>>;
   constitutionalRequirements?: string[];
   knownLimitations?: string[];
   clientAccess?: { authenticated?: boolean; requestPermissionGranted?: boolean; allowed?: boolean; reason?: string };
