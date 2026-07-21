@@ -2,6 +2,7 @@ import { Cpu, Network, ShieldCheck } from "lucide-react";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 import type { RuntimeSnapshot } from "../lib/types";
+import { EdgeNodeFleet } from "./EdgeNodeFleet";
 
 const asRecord = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const EDGE_CAPABILITY_IDS = new Set(["edge", "edge-runtime", "edge_runtime", "nexus-edge-runtime", "nexus_edge_runtime"]);
@@ -19,6 +20,7 @@ export function EdgeRuntime({ snapshot }: { snapshot: RuntimeSnapshot }) {
   const environment = asRecord(snapshot.environment?.data);
 
   return <div className="experience-grid">
+    <EdgeNodeFleet />
     <DataPanel eyebrow="Edge Runtime" title="Edge capability surface" icon={<Cpu size={18} />} className="span-2">
       {edge ? <div className="replay-event-detail">
           {Object.entries(edge).slice(0, 12).map(([key, value]) => <div className="replay-event-field" key={key}>

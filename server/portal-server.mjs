@@ -100,6 +100,10 @@ export const REPLAY_ROUTES = Object.freeze({
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,160}$/;
 const PROJECT_READ_ACTIONS = new Set(["sources", "evidence", "scope", "estimate", "planning-model", "artifacts"]);
 const PROJECT_ARTIFACT_TYPES = new Set(["roadmap", "project_plan", "scope_of_work", "proposal", "backlog", "risk_register", "status_report", "executive_briefing"]);
+const RUNTIME_NODE_HOSTNAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$/;
+const RUNTIME_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+const RUNTIME_CAPABILITY_PATTERN = /^nexus\.[A-Za-z0-9][A-Za-z0-9._:-]{0,158}$/;
+const CREDENTIAL_REFERENCE_PATTERN = /^[a-z][a-z0-9+.-]{1,31}:[A-Za-z0-9][A-Za-z0-9._/:-]{0,222}$/;
 
 const CACHEABLE_ROUTES = new Set([
   "/api/runtime/status",
@@ -416,6 +420,16 @@ function operationalFailure(config, route, code, message, status = "Unavailable"
 }
 
 function resolveLocalCapability(pathname, method) {
+  if (pathname === "/api/local/runtime-coordination/nodes") {
+    if (["GET", "POST"].includes(method)) return { method, runtimePath: "/runtime-coordination/nodes" };
+    return { methodMismatch: true, allowed: "GET, POST" };
+  }
+  const enrollmentChallenge = pathname.match(/^\/api\/local\/runtime-coordination\/nodes\/([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)\/enrollment-challenge$/);
+  if (enrollmentChallenge) {
+    return method === "POST"
+      ? { method, runtimePath: `/runtime-coordination/nodes/${enrollmentChallenge[1]}/enrollment-challenge` }
+      : { methodMismatch: true, allowed: "POST" };
+  }
   const direct = LOCAL_CAPABILITY_ROUTES[pathname];
   if (direct) return direct.method === method ? direct : { methodMismatch: true, allowed: direct.method };
   const match = pathname.match(/^\/api\/local\/projects\/([A-Za-z0-9_.:-]{1,160})\/(sources|evidence|scope|estimate|planning-model|artifacts|compile)$/);
@@ -504,6 +518,59 @@ function boundedText(value, field, maximum, required = true) {
 }
 
 function validateLocalPayload(runtimePath, payload, maximumBytes) {
+  if (runtimePath === "/runtime-coordination/nodes") {
+    strictKeys(payload, new Set([
+      "displayName", "hostname", "role", "generation", "environment",
+      "expectedRuntimeVersion", "expectedCapabilities", "credentialRef", "idempotencyKey"
+    ]));
+    const hostname = boundedText(payload.hostname, "hostname", 253);
+    if (!RUNTIME_NODE_HOSTNAME_PATTERN.test(hostname)) throw new GatewayFailure("request_invalid", "hostname is invalid.", "Unknown", 400);
+    const expectedRuntimeVersion = boundedText(payload.expectedRuntimeVersion, "expectedRuntimeVersion", 80);
+    if (!RUNTIME_VERSION_PATTERN.test(expectedRuntimeVersion)) throw new GatewayFailure("request_invalid", "expectedRuntimeVersion must use major.minor.patch.", "Unknown", 400);
+    if (!Array.isArray(payload.expectedCapabilities) || !payload.expectedCapabilities.length || payload.expectedCapabilities.length > 64) {
+      throw new GatewayFailure("request_invalid", "expectedCapabilities must contain between 1 and 64 registered capability identifiers.", "Unknown", 400);
+    }
+    const expectedCapabilities = payload.expectedCapabilities.map((item) => boundedText(item, "expectedCapability", 160));
+    if (expectedCapabilities.some((item) => !RUNTIME_CAPABILITY_PATTERN.test(item)) || new Set(expectedCapabilities).size !== expectedCapabilities.length) {
+      throw new GatewayFailure("request_invalid", "expectedCapabilities must be unique NEXUS capability identifiers.", "Unknown", 400);
+    }
+    const credentialRef = boundedText(payload.credentialRef, "credentialRef", 255);
+    if (!CREDENTIAL_REFERENCE_PATTERN.test(credentialRef)) {
+      throw new GatewayFailure("request_invalid", "credentialRef must be an opaque credential-store reference, never a secret value.", "Unknown", 400);
+    }
+    const idempotencyKey = boundedText(payload.idempotencyKey, "idempotencyKey", 160);
+    if (!/^[A-Za-z0-9._:@-]{1,160}$/.test(idempotencyKey)) {
+      throw new GatewayFailure("request_invalid", "idempotencyKey is invalid.", "Unknown", 400);
+    }
+    return {
+      displayName: boundedText(payload.displayName, "displayName", 120),
+      hostname,
+      role: boundedText(payload.role, "role", 120),
+      generation: boundedText(payload.generation, "generation", 80),
+      environment: (() => {
+        const environment = boundedText(payload.environment, "environment", 40);
+        if (!["development", "test", "proving_ground", "pilot", "production"].includes(environment)) {
+          throw new GatewayFailure("request_invalid", "environment is not a supported deployment identity.", "Unknown", 400);
+        }
+        return environment;
+      })(),
+      expectedRuntimeVersion,
+      expectedCapabilities,
+      credentialRef,
+      idempotencyKey
+    };
+  }
+  if (/^\/runtime-coordination\/nodes\/[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\/enrollment-challenge$/.test(runtimePath)) {
+    strictKeys(payload, new Set(["idempotencyKey", "reason"]));
+    const idempotencyKey = boundedText(payload.idempotencyKey, "idempotencyKey", 160);
+    if (!/^[A-Za-z0-9._:@-]{1,160}$/.test(idempotencyKey)) {
+      throw new GatewayFailure("request_invalid", "idempotencyKey is invalid.", "Unknown", 400);
+    }
+    return {
+      idempotencyKey,
+      reason: boundedText(payload.reason, "reason", 500),
+    };
+  }
   if (runtimePath === "/intake/upload") {
     strictKeys(payload, new Set(["filename", "contentBase64", "projectId"]));
     const filename = boundedText(payload.filename, "filename", 240);

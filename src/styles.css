@@ -708,6 +708,68 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 @media (max-width: 820px) { .mission-inspector { grid-column: 1 / -1; }.replay-inspection-grid { grid-template-columns: 1fr; }.replay-controls { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 520px) { .mission-inspector { grid-column: auto; }.replay-state-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }.replay-runbar, .replay-runbar label { grid-template-columns: 1fr; grid-column: auto; }.mission-task-graph article footer button { width: 100%; margin-left: 0; } }
 
+/* Runtime Coordination node fleet */
+.edge-node-fleet > .nx-panel__body { display: grid; gap: var(--nx-space-4); }
+.edge-fleet-boundary { display: flex; align-items: flex-start; gap: var(--nx-space-3); padding: var(--nx-space-4); border: 1px solid var(--nx-border-subtle); border-radius: var(--nx-radius-md); color: var(--nx-text-muted); background: color-mix(in srgb, var(--nx-info) 6%, var(--nx-surface-2)); }
+.edge-fleet-boundary > svg { flex: 0 0 auto; width: 1rem; color: var(--nx-info); }
+.edge-fleet-boundary p { margin: 0; font-size: var(--nx-type-sm); line-height: var(--nx-leading-copy); }
+.edge-fleet-boundary strong { color: var(--nx-text-strong); }
+.edge-fleet-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; }
+.edge-fleet-tabs { justify-self: start; }
+.edge-fleet-panel, .edge-create-panel { min-width: 0; }
+.edge-fleet-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, .65fr); align-items: start; gap: var(--nx-space-4); }
+.edge-fleet-roster, .edge-node-inspector, .edge-create-panel > form { min-width: 0; border: 1px solid var(--nx-border-subtle); border-radius: var(--nx-radius-lg); background: var(--nx-surface-1); }
+.edge-fleet-roster > header, .edge-node-inspector > header, .edge-create-panel form > header { display: flex; align-items: center; justify-content: space-between; gap: var(--nx-space-4); padding: var(--nx-space-4); border-bottom: 1px solid var(--nx-border-subtle); }
+.edge-fleet-roster h3, .edge-node-inspector h3, .edge-create-panel h3 { margin: var(--nx-space-1) 0 0; font-family: var(--nx-font-display); font-size: var(--nx-type-lg); font-weight: 520; }
+.edge-fleet-roster > header label { width: min(320px, 48%); }
+.edge-fleet-roster input, .edge-create-grid input, .edge-create-grid select, .edge-create-grid textarea { width: 100%; border: 1px solid var(--nx-border-subtle); border-radius: var(--nx-radius-sm); color: var(--nx-text-strong); background: color-mix(in srgb, var(--nx-surface-0) 76%, transparent); font: inherit; }
+.edge-fleet-roster input { min-height: var(--nx-control-md); padding: 0 var(--nx-space-3); }
+.edge-fleet-roster input:focus, .edge-create-grid input:focus, .edge-create-grid select:focus, .edge-create-grid textarea:focus { border-color: var(--nx-border-strong); outline: 0; box-shadow: var(--nx-focus-ring); }
+.edge-fleet-table-wrap { min-width: 0; overflow-x: auto; }
+.edge-fleet-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.edge-fleet-table th, .edge-fleet-table td { padding: var(--nx-space-3); border-bottom: 1px solid var(--nx-border-subtle); color: var(--nx-text-muted); text-align: left; vertical-align: middle; font-size: var(--nx-type-xs); }
+.edge-fleet-table thead th { color: var(--nx-text-subtle); background: var(--nx-canvas-subtle); font-size: var(--nx-type-2xs); font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.edge-fleet-table tbody tr:last-child > * { border-bottom: 0; }
+.edge-fleet-table tbody tr[data-selected="true"] { background: var(--nx-accent-softer); box-shadow: inset 2px 0 var(--nx-accent); }
+.edge-fleet-table tbody th { min-width: 180px; }
+.edge-fleet-table tbody th button { display: grid; gap: var(--nx-space-1); width: 100%; padding: 0; border: 0; color: inherit; text-align: left; background: transparent; }
+.edge-fleet-table tbody th button:focus-visible { border-radius: var(--nx-radius-xs); outline: 0; box-shadow: var(--nx-focus-ring); }
+.edge-fleet-table tbody th strong { color: var(--nx-text-strong); font-size: var(--nx-type-sm); font-weight: 560; }
+.edge-fleet-table tbody th small, .edge-fleet-table td small { display: block; margin-top: var(--nx-space-1); color: var(--nx-text-subtle); font-size: var(--nx-type-2xs); }
+.edge-node-inspector { position: sticky; top: calc(var(--nx-topbar-height) + 64px); overflow: hidden; }
+.edge-node-inspector > header { align-items: flex-start; }
+.edge-node-inspector > header code { display: block; margin-top: var(--nx-space-2); color: var(--nx-text-muted); font-size: var(--nx-type-2xs); overflow-wrap: anywhere; }
+.edge-node-state-vector { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-bottom: 1px solid var(--nx-border-subtle); }
+.edge-node-state-vector > div { display: grid; gap: var(--nx-space-2); padding: var(--nx-space-3) var(--nx-space-4); border-right: 1px solid var(--nx-border-subtle); border-bottom: 1px solid var(--nx-border-subtle); }
+.edge-node-state-vector > div:nth-child(even) { border-right: 0; }
+.edge-node-state-vector dt { display: flex; align-items: center; gap: var(--nx-space-2); color: var(--nx-text-subtle); font-size: var(--nx-type-2xs); text-transform: uppercase; }
+.edge-node-state-vector dd, .edge-node-inspector dl { margin: 0; }
+.edge-node-inspector > section { display: grid; gap: var(--nx-space-3); padding: var(--nx-space-4); border-bottom: 1px solid var(--nx-border-subtle); }
+.edge-node-inspector > section:last-child { border-bottom: 0; }
+.edge-node-inspector h4 { display: flex; align-items: center; gap: var(--nx-space-2); margin: 0; font-size: var(--nx-type-xs); letter-spacing: .06em; text-transform: uppercase; }
+.edge-node-inspector section dl { display: grid; gap: var(--nx-space-2); }
+.edge-node-inspector section dl > div { display: grid; grid-template-columns: minmax(90px, .65fr) minmax(0, 1fr); gap: var(--nx-space-3); }
+.edge-node-inspector section dt { color: var(--nx-text-subtle); font-size: var(--nx-type-2xs); }
+.edge-node-inspector section dd { min-width: 0; color: var(--nx-text-muted); font-size: var(--nx-type-xs); overflow-wrap: anywhere; }
+.edge-node-inspector ul, .edge-fleet-limitations ul { margin: 0; padding-left: 1.1rem; color: var(--nx-text-muted); font-size: var(--nx-type-xs); line-height: var(--nx-leading-copy); }
+.edge-node-references { display: grid; gap: var(--nx-space-2); }
+.edge-node-references p { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--nx-space-2); margin: 0; }
+.edge-node-references span { color: var(--nx-text-subtle); font-size: var(--nx-type-2xs); text-transform: uppercase; }
+.edge-node-references code { min-width: 0; color: var(--nx-text-muted); font-size: var(--nx-type-2xs); overflow-wrap: anywhere; }
+.edge-create-panel form > header { align-items: flex-start; flex-direction: column; }
+.edge-create-panel form > header p { max-width: 72ch; margin: var(--nx-space-2) 0 0; color: var(--nx-text-muted); font-size: var(--nx-type-sm); }
+.edge-create-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--nx-space-4); padding: var(--nx-space-5); }
+.edge-create-grid label { display: grid; align-content: start; gap: var(--nx-space-2); color: var(--nx-text-muted); font-size: var(--nx-type-xs); }
+.edge-create-grid label > span { color: var(--nx-text-strong); font-weight: 560; }
+.edge-create-grid label > small { color: var(--nx-text-subtle); line-height: var(--nx-leading-copy); }
+.edge-create-grid input, .edge-create-grid select, .edge-create-grid textarea { min-height: var(--nx-control-md); padding: var(--nx-space-3); }
+.edge-create-grid textarea { min-height: 92px; resize: vertical; }
+.edge-create-wide { grid-column: 1 / -1; }
+.edge-create-panel form > footer { display: flex; align-items: center; justify-content: space-between; gap: var(--nx-space-4); padding: var(--nx-space-4) var(--nx-space-5); border-top: 1px solid var(--nx-border-subtle); }
+.edge-create-panel form > footer p { margin: 0; color: var(--nx-text-subtle); font-size: var(--nx-type-2xs); }
+.edge-fleet-limitations { display: grid; gap: var(--nx-space-2); padding: var(--nx-space-4); border-top: 1px solid var(--nx-border-subtle); }
+.edge-fleet-limitations strong { font-size: var(--nx-type-xs); }
+
 /* Canonical Platform Design System adapters for Runtime-backed route content. */
 .operations-center { display: grid; gap: var(--nx-space-4); min-width: 0; }
 .experience-grid, .area-grid { gap: var(--nx-space-4); animation: nx-content-enter var(--nx-duration-state) var(--nx-ease-standard) both; }
@@ -892,6 +954,8 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
   .replay-stage { border-right: 0; border-bottom: 1px solid var(--border); }
   .knowledge-flow { grid-template-columns: 1fr; }
   .knowledge-flow__arrow { justify-self: center; transform: rotate(90deg); }
+  .edge-fleet-layout { grid-template-columns: 1fr; }
+  .edge-node-inspector { position: relative; top: auto; }
 }
 
 @container portal-main (max-width: 680px) {
@@ -911,6 +975,11 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
   .replay-controls { align-items: flex-start; flex-direction: column; }
   .replay-controls > div { flex-wrap: wrap; }
   .conclave-context-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .edge-fleet-roster > header { align-items: flex-start; flex-direction: column; }
+  .edge-fleet-roster > header label { width: 100%; }
+  .edge-create-grid { grid-template-columns: 1fr; padding: var(--nx-space-4); }
+  .edge-create-wide { grid-column: auto; }
+  .edge-create-panel form > footer { align-items: flex-start; flex-direction: column; padding: var(--nx-space-4); }
 }
 
 @container portal-main (max-width: 460px) {
@@ -918,4 +987,6 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
   .replay-runbar, .replay-runbar label { grid-template-columns: 1fr; grid-column: auto; }
   .replay-toolbar > div:first-child { grid-template-columns: 1fr; }
   .conclave-context-grid { grid-template-columns: 1fr; }
+  .edge-node-state-vector { grid-template-columns: 1fr; }
+  .edge-node-state-vector > div { border-right: 0; }
 }

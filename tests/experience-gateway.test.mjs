@@ -506,6 +506,74 @@ test("operational parity routes are explicit, validated, and remain Runtime-owne
   assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/work-sessions/WORK-1");
 });
 
+test("Runtime Coordination node routes are exact and reject secret-shaped registration payloads", async () => {
+  const observed = [];
+  const base = await start(async () => runtimeResponse({}), { localCapabilitiesEnabled: true }, async (url, options) => {
+    observed.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    if (options.method === "GET") return localResponse({
+      recordType: "runtime_node_fleet",
+      nodes: [], summary: { registered: 0 }, limitations: [], secretValuesExposed: false
+    });
+    return localResponse({
+      recordType: "runtime_node_registration",
+      node: { nodeId: "NEXUS-EDGE-0002", displayName: "Plant gateway east" },
+      receipt: { receiptId: "NODE-REC-1" }, coordinationEvent: { eventId: "COORD-NODE-1" }, secretValuesExposed: false
+    });
+  });
+
+  const listed = await fetch(`${base}/api/local/runtime-coordination/nodes`);
+  assert.equal(listed.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/runtime-coordination/nodes");
+  assert.equal(observed.at(-1).options.method, "GET");
+
+  const registration = {
+    displayName: "Plant gateway east",
+    hostname: "edge-gateway-east-01",
+    role: "Operational Edge Runtime",
+    generation: "arm64-industrial-v1",
+    environment: "production",
+    expectedRuntimeVersion: "1.9.0",
+    expectedCapabilities: ["nexus.edge.runtime.host", "nexus.edge.runtime.heartbeat"],
+    credentialRef: "vault:nexus/runtime-nodes/edge-gateway-east-01",
+    idempotencyKey: "node-create:edge-gateway-east-01"
+  };
+  const created = await fetch(`${base}/api/local/runtime-coordination/nodes`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(registration)
+  });
+  assert.equal(created.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/runtime-coordination/nodes");
+  assert.deepEqual(observed.at(-1).body, registration);
+  assert.equal((await created.json()).truth.enterpriseReady, false);
+
+  const challengeRequest = {
+    idempotencyKey: "node-challenge:edge-gateway-east-01",
+    reason: "Issue a fresh deployment challenge",
+  };
+  const challenge = await fetch(`${base}/api/local/runtime-coordination/nodes/NEXUS-EDGE-0002/enrollment-challenge`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(challengeRequest)
+  });
+  assert.equal(challenge.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/runtime-coordination/nodes/NEXUS-EDGE-0002/enrollment-challenge");
+  assert.deepEqual(observed.at(-1).body, challengeRequest);
+
+  const callsBeforeRejectedPayloads = observed.length;
+  for (const payload of [
+    { ...registration, credentialRef: "actual-secret-value" },
+    { ...registration, environment: "production-east" },
+    { ...registration, expectedRuntimeVersion: "latest" },
+    { ...registration, expectedCapabilities: ["vendor.device.control"] },
+    { ...registration, secretValue: "must-not-pass" }
+  ]) {
+    const response = await fetch(`${base}/api/local/runtime-coordination/nodes`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+    });
+    assert.equal(response.status, 400);
+  }
+  assert.equal(observed.length, callsBeforeRejectedPayloads);
+  assert.equal((await fetch(`${base}/api/local/runtime-coordination/nodes`, { method: "DELETE" })).status, 405);
+  assert.equal((await fetch(`${base}/api/local/runtime-coordination/nodes?tenant=other`)).status, 400);
+});
+
 test("operational payloads cannot smuggle client-side governance decisions", async () => {
   let calls = 0;
   const base = await start(async () => runtimeResponse({}), { localCapabilitiesEnabled: true }, async () => { calls += 1; return localResponse({}); });
@@ -611,6 +679,7 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
     operationalWorkspaceId: "workspace-alpha",
     operationalUserId: "operator-1",
     operationalRole: "admin",
+    operationalScopes: ["operations:read", "operations:write", "actions:simulate"],
     operationalCookieSecure: false,
     localCapabilitiesEnabled: false
   };
@@ -624,10 +693,19 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   assert.equal(loginBody.session.authenticated, true);
   assert.equal(loginBody.session.tenantId, "tenant-alpha");
   const cookie = login.headers.get("set-cookie").split(";")[0];
-  assert.equal((await fetch(`${base}/api/operations/missions`, { headers: { Cookie: cookie } })).status, 200);
+  assert.equal((await fetch(`${base}/api/operations/missions`, { headers: {
+    Cookie: cookie,
+    "X-NEXUS-User-ID": "browser-controlled-identity",
+    "X-NEXUS-Role": "observer",
+    "X-NEXUS-Scopes": "operations:write"
+  } })).status, 200);
   assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/missions/history?limit=8");
   assert.equal(observed.at(-1).options.headers.Authorization, `Bearer ${config.operationalRuntimeToken}`);
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-User-ID"], "operator-1");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Role"], "admin");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,actions:simulate");
   assert.equal((await fetch(`${base}/api/operations/missions/plan`, {
     method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ objective: "Plan alpha" })
   })).status, 403);
@@ -643,6 +721,48 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   const body = await mutation.json();
   assert.equal(body.operational.productionMultiTenantReady, false);
   assert.equal(JSON.stringify(body).includes(config.operationalRuntimeToken), false);
+});
+
+test("hosted Runtime Coordination is tenant-bound and node creation requires write permission", async () => {
+  const observed = [];
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read"],
+    operationalCookieSecure: false
+  };
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), async (url, options) => {
+    observed.push({ url, options });
+    return localResponse({ recordType: "runtime_node_fleet", nodes: [], summary: {}, limitations: [], secretValuesExposed: false });
+  });
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey })
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const listed = await fetch(`${base}/api/operations/runtime-coordination/nodes`, { headers: { Cookie: cookie } });
+  assert.equal(listed.status, 200);
+  assert.equal(observed[0].url, "http://127.0.0.1:9876/runtime-coordination/nodes");
+  assert.equal(observed[0].options.headers["X-NEXUS-User-ID"], "operator-1");
+  assert.equal(observed[0].options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
+  assert.equal(observed[0].options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
+  assert.equal(observed[0].options.headers["X-NEXUS-Role"], "admin");
+  assert.equal(observed[0].options.headers["X-NEXUS-Scopes"], "operations:read");
+  const denied = await fetch(`${base}/api/operations/runtime-coordination/nodes`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "node-register-001" },
+    body: JSON.stringify({})
+  });
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error.code, "scope_denied");
+  assert.equal(observed.length, 1);
 });
 
 test("hosted operational gateway is disabled by default and rejects arbitrary forwarding", async () => {

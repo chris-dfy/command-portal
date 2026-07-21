@@ -126,6 +126,72 @@ export type ClientCapabilityContract = {
   truth: { source: string; localRuntimeRequired: boolean; hostedExecutionAvailable: boolean; hostedExecutionMode: "single_workspace_alpha" | "disabled"; productionMultiTenantReady: false; remainingNativeSurfaces: string[]; secretValuesExposed: false };
 };
 
+export type RuntimeCoordinationNode = {
+  nodeId: string;
+  displayName: string;
+  tenantId?: string;
+  workspaceId?: string;
+  desiredConfiguration?: Record<string, unknown>;
+  observedManifest?: Record<string, unknown> | null;
+  stateVector?: Record<string, unknown>;
+  trust?: string | Record<string, unknown>;
+  freshness?: string | Record<string, unknown>;
+  healthDimensions?: Record<string, unknown> | null;
+  stateDivergence?: Record<string, unknown>;
+  posture?: string;
+  lastHeartbeatAt?: string | null;
+  evidenceRefs?: string[];
+  receiptRefs?: string[];
+  replayRefs?: string[];
+  coordinationEventRefs?: string[];
+  enrollment?: {
+    challengeId?: string;
+    issuedAt?: string;
+    expiresAt?: string;
+    credentialVersion?: number;
+    status?: string;
+  };
+  limitations?: string[];
+};
+
+export type RuntimeNodeFleet = {
+  recordType: string;
+  nodes: RuntimeCoordinationNode[];
+  summary?: Record<string, number>;
+  administration?: {
+    state: string;
+    nodeCreateAvailable: boolean;
+    challengeReissueAvailable: boolean;
+    governedExecutionAvailable: boolean;
+    reason: string;
+    requiredPrerequisites: string[];
+    operational: false;
+    secretValuesExposed: false;
+  };
+  limitations?: string[];
+  secretValuesExposed: false;
+};
+
+export type CreateRuntimeNodeRequest = {
+  displayName: string;
+  hostname: string;
+  role: string;
+  generation: string;
+  environment: string;
+  expectedRuntimeVersion: string;
+  expectedCapabilities: string[];
+  credentialRef: string;
+  idempotencyKey: string;
+};
+
+export type CreateRuntimeNodeResult = {
+  recordType: string;
+  node: RuntimeCoordinationNode;
+  receipt?: Record<string, unknown>;
+  coordinationEvent?: Record<string, unknown>;
+  secretValuesExposed: false;
+};
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const hosted = capabilityTransport.mode === "hosted";
   const response = await fetch(`${hosted ? "/api/operations" : "/api/local"}${path}`, {
@@ -212,6 +278,15 @@ export const localNexusClient = Object.freeze({
   executeAction: (action: string) => post<Record<string, unknown>>("/actions/execute", { action, explicitRequest: true }),
   connectors: () => request<Record<string, unknown>>("/connectors"),
   connectorHealth: () => request<Record<string, unknown>>("/connectors/health"),
+  runtimeNodes: () => request<RuntimeNodeFleet>("/runtime-coordination/nodes"),
+  createRuntimeNode: (node: CreateRuntimeNodeRequest) => post<CreateRuntimeNodeResult>("/runtime-coordination/nodes", node),
+  reissueRuntimeNodeEnrollmentChallenge: (
+    nodeId: string,
+    payload: { idempotencyKey: string; reason: string },
+  ) => post<CreateRuntimeNodeResult>(
+    `/runtime-coordination/nodes/${encodeURIComponent(nodeId)}/enrollment-challenge`,
+    payload,
+  ),
   proofs: () => request<Record<string, unknown>>("/proofs"),
   receipts: () => request<Record<string, unknown>>("/receipts")
 });
