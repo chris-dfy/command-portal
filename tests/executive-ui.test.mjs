@@ -27,6 +27,7 @@ test("connection lifecycle renders every required state", async () => {
   for (const state of ["Connecting", "Healthy", "Degraded", "Unavailable", "Retrying", "Timed Out", "Version Mismatch", "Schema Mismatch", "Unauthorized", "Unknown"]) {
     assert.match(source, new RegExp(`\"${state}\"`));
   }
+  assert.match(app, /if \(!Object\.keys\(snapshot\)\.length\) return loading \? "Connecting" : "Unavailable"/);
   assert.match(app, /if \(loading\) return "Retrying"/);
 });
 
@@ -50,6 +51,9 @@ test("browser uses only same-origin allowlisted runtime routes and no token", as
     assert.equal(source.includes("COMMAND_PORTAL_RUNTIME_READ_TOKEN"), false);
     assert.equal(source.includes("Authorization"), false);
   }
+  assert.match(client, /unavailableEnvelope/);
+  assert.match(client, /code: "gateway_unreachable"/);
+  assert.match(client, /failures\.push\(envelope\)/);
   assert.equal(types.includes("runtimeToken"), false);
   assert.equal(/VITE_.*TOKEN/.test(env), false);
 });
@@ -64,7 +68,7 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
     read("../src/lib/local-client.ts"),
     read("../src/lib/hif-client.ts"),
   ]);
-  for (const label of ["Document Intelligence", "Nexicron Projects", "Voice Operator"]) assert.match(app, new RegExp(label));
+  for (const label of ["Document Intelligence", "Projects", "Voice Operations"]) assert.match(app, new RegExp(label));
   for (const contract of ["/intake/upload", "/intake/query", "/projects", "/scope", "/estimate", "/planning-model", "/compile", "/voice-operator/route-transcript"]) assert.match(client, new RegExp(contract));
   assert.match(intake, /FileReader/);
   assert.match(intake, /projectId/);
@@ -109,7 +113,8 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
   const [app, center, contract, portalClient] = await Promise.all([
     read("../src/App.tsx"), read("../src/components/OperationsCenter.tsx"), read("../src/lib/eox-client.ts"), read("../src/lib/portal-client.ts")
   ]);
-  assert.match(app, /useState<AreaId>\("center"\)/);
+  assert.match(app, /return AREAS\.some\(\(area\) => area\.id === value\) \? value : "dashboard"/);
+  assert.match(app, /active === "dashboard"/);
   for (const label of ["Operations Center", "Executive Brief", "Operational Health", "Attention Queue", "Recommended Actions", "Operational Understanding", "Mission Timeline", "Executive state"]) assert.match(center, new RegExp(label));
   assert.match(center, /assessment\.loop\.map/);
   assert.match(center, /Executive Operating Loop/);
@@ -122,11 +127,11 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
 });
 
 test("Conclave is a visible Runtime-owned decision challenge capability", async () => {
-  const [app, conclave, client, styles] = await Promise.all([
-    read("../src/App.tsx"), read("../src/components/ConclaveWorkspace.tsx"),
-    read("../src/lib/conclave-client.ts"), read("../src/styles.css")
+  const [app, navigation, conclave, client, styles] = await Promise.all([
+    read("../src/App.tsx"), read("../src/platform/navigation.ts"),
+    read("../src/components/ConclaveWorkspace.tsx"), read("../src/lib/conclave-client.ts"), read("../src/styles.css")
   ]);
-  assert.match(app, /label: "Conclave"/);
+  assert.match(navigation, /label: "Conclave"/);
   assert.match(app, /<ConclaveWorkspace/);
   for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
   assert.match(client, /\/api\/runtime\/conclave\/reviews/);
@@ -147,7 +152,7 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
     read("../src/styles.css"),
   ]);
   assert.match(app, /<NexusCopilot/);
-  assert.match(app, /portal-shell.*has-copilot/);
+  assert.match(app, /className="nx-platform"/);
   assert.match(app, /open=\{copilotOpen\}/);
   assert.match(copilot, /open: boolean/);
   assert.match(copilot, /Enterprise executive operating intelligence/);
@@ -163,7 +168,7 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.match(realtime, /RTCPeerConnection/);
   assert.doesNotMatch(app, /Begin Executive Briefing/);
   assert.match(styles, /Persistent NEXUS executive copilot/);
-  assert.match(styles, /portal-shell\.has-copilot \{ grid-template-columns/);
+  assert.match(styles, /\.nx-platform \{ min-height: 100vh; display: grid/);
   assert.match(styles, /container-name: portal-main/);
   assert.match(styles, /@container portal-main/);
   assert.match(styles, /Modules respond to the workspace width/);
@@ -186,17 +191,47 @@ test("responsive and accessible presentation contracts remain present", async ()
   assert.match(styles, /@media \(max-width: 580px\)/);
   assert.match(styles, /prefers-reduced-motion/);
   assert.match(styles, /prefers-contrast/);
-  assert.match(app, /Skip to portal content/);
-  assert.match(app, /aria-label="Toggle navigation"/);
+  assert.match(app, /Skip to workspace/);
+  assert.match(app, /aria-label="Open navigation"/);
+  assert.match(app, /aria-current=\{active === area\.id \? "page" : undefined\}/);
+  assert.match(app, /aria-label="Search platform workspaces"/);
+  assert.match(app, /inspectorOpen && <aside id="context-inspector"/);
+  assert.doesNotMatch(app, /behavior: "smooth"/);
+});
+
+test("canonical shell bootstraps the hosted operational session before mounting workspaces", async () => {
+  const app = await read("../src/App.tsx");
+  assert.match(app, /operationalSessionClient\.status\(\)/);
+  assert.match(app, /operationalSessionClient\.use\(session\)/);
+  assert.match(app, /operationalSessionClient\.use\(\{ authenticated: false \}\)/);
+  assert.match(app, /!sessionBootstrapComplete \|\| \(loading && !Object\.keys\(snapshot\)\.length\)/);
+  for (const mapping of ['replay: "replay"', 'missions: "missions"', 'knowledge: "knowledge"', 'edge: "edge"']) assert.match(app, new RegExp(mapping));
+  assert.doesNotMatch(app, /as never/);
+});
+
+test("canonical consolidation exposes every permanent platform workspace", async () => {
+  const [app, navigation, missions, replay, knowledge, conclave, styles] = await Promise.all([
+    read("../src/App.tsx"), read("../src/platform/navigation.ts"), read("../src/components/MissionDashboard.tsx"),
+    read("../src/components/OperationalReplay.tsx"), read("../src/components/KnowledgeWorkspace.tsx"),
+    read("../src/components/ConclaveWorkspace.tsx"), read("../src/styles.css")
+  ]);
+  for (const label of ["Dashboard", "Missions", "Operational Replay", "Conclave", "Knowledge", "Edge Runtime", "Mission Control", "Settings"]) assert.match(navigation, new RegExp(`label: "${label}"`));
+  for (const label of ["Active Missions", "Blocked Missions", "Completed Missions", "Mission Health", "Mission Executor", "Mission receipts"]) assert.match(missions, new RegExp(label, "i"));
+  for (const label of ["Replay pipeline visualization", "Stage Inspector", "Explain This Step", "Executive Mode", "Engineering Mode", "Failure Replay", "Export"]) assert.match(replay, new RegExp(label, "i"));
+  for (const label of ["Mission Store", "Knowledge Store", "Knowledge Promotion Engine", "Promotion Receipts"]) assert.match(knowledge, new RegExp(label, "i"));
+  for (const label of ["Mission", "Objectives", "Knowledge", "Unknowns", "Task Graph", "Specialists", "Evidence", "Knowledge Graph", "Operational Replay", "Executive Conclusions"]) assert.match(conclave, new RegExp(label));
+  assert.match(styles, /Canonical NEXUS Platform application shell/);
+  assert.doesNotMatch(app, /className=\{`portal-shell/);
 });
 
 test("Operational Replay surfaces Runtime-owned stage playback with truthful boundaries", async () => {
-  const [app, replay, client] = await Promise.all([
+  const [app, navigation, replay, client] = await Promise.all([
     read("../src/App.tsx"),
+    read("../src/platform/navigation.ts"),
     read("../src/components/OperationalReplay.tsx"),
     read("../src/lib/replay-client.ts")
   ]);
-  assert.match(app, /label: "Operational Replay"/);
+  assert.match(navigation, /label: "Operational Replay"/);
   assert.match(app, /<OperationalReplay/);
   for (const stage of ["Observation", "Evidence", "Representation", "Conclave", "Authority", "Decision", "Receipt"]) {
     assert.match(replay, new RegExp(`label: "${stage}"`));
@@ -214,22 +249,25 @@ test("Operational Replay surfaces Runtime-owned stage playback with truthful bou
 });
 
 test("new portal destinations render Runtime-backed dashboards without client-side cognition", async () => {
-  const [app, missions, knowledge, edge] = await Promise.all([
+  const [app, navigation, client, missions, knowledge, edge] = await Promise.all([
     read("../src/App.tsx"),
+    read("../src/platform/navigation.ts"),
+    read("../src/lib/local-client.ts"),
     read("../src/components/MissionDashboard.tsx"),
     read("../src/components/KnowledgeWorkspace.tsx"),
     read("../src/components/EdgeRuntime.tsx")
   ]);
-  for (const label of ["Mission Dashboard", "Knowledge Stores", "Edge Runtime"]) assert.match(app, new RegExp(`label: "${label}"`));
+  for (const label of ["Missions", "Knowledge", "Edge Runtime"]) assert.match(navigation, new RegExp(`label: "${label}"`));
   assert.match(app, /<MissionDashboard/);
   assert.match(app, /<KnowledgeWorkspace/);
   assert.match(app, /<EdgeRuntime/);
-  assert.match(missions, /\/api\/local\/missions/);
-  assert.match(missions, /Mission status is unavailable/);
+  assert.match(app, /<RuntimeTopology/);
+  assert.match(client, /missions: \(\) => request<Record<string, unknown>>\("\/missions"\)/);
   assert.match(knowledge, /Mission Store/);
   assert.match(knowledge, /Knowledge Store/);
-  assert.match(knowledge, /only inside NEXUS Runtime with verified evidence/);
   assert.match(edge, /Edge status is unavailable/);
+  assert.match(edge, /Array\.isArray\(capabilityData\)/);
+  assert.match(edge, /EDGE_CAPABILITY_IDS/);
   for (const source of [missions, knowledge, edge]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
     assert.equal(source.includes("Authorization"), false);

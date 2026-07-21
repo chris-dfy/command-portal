@@ -5,6 +5,39 @@ export const RUNTIME_ROUTES: RuntimeRoute[] = [
   "proofs", "receipts", "environment", "diagnostics", "governance", "connectors", "eox", "conclave"
 ];
 
+function unavailableEnvelope(route: RuntimeRoute): GatewayEnvelope {
+  return {
+    ok: false,
+    data: null,
+    runtime: null,
+    gateway: {
+      status: "Degraded",
+      connectionState: "Unavailable",
+      route: `/api/runtime/${route}`,
+      runtimeUrl: "",
+      lastSuccessfulConnection: null,
+      lastSuccessfulRefresh: null,
+      cache: { lastRefresh: null, age: null, stale: false, expires: null, cached: false },
+      readOnly: true,
+      secretValuesExposed: false,
+    },
+    truth: {
+      productionReady: false,
+      enterpriseReady: false,
+      cloudPrimary: false,
+      localSourceOfTruth: true,
+      defaultProvider: "mock_model",
+      conclave: "available_bounded_review",
+      actualTrainedSLMs: 0,
+      secretValuesExposed: false,
+    },
+    error: {
+      code: "gateway_unreachable",
+      message: `The Experience Gateway did not return a valid ${route} response.`,
+    },
+  };
+}
+
 async function get<T>(route: RuntimeRoute, forceRefresh = false): Promise<GatewayEnvelope<T>> {
   const response = await fetch(`/api/runtime/${route}`, {
     method: "GET",
@@ -27,11 +60,9 @@ async function snapshot(forceRefresh = false): Promise<{ data: RuntimeSnapshot; 
     const route = RUNTIME_ROUTES[index];
     if (result.status === "fulfilled") data[route] = result.value;
     else {
-      const envelope = (result.reason as { envelope?: GatewayEnvelope }).envelope;
-      if (envelope) {
-        data[route] = envelope;
-        failures.push(envelope);
-      }
+      const envelope = (result.reason as { envelope?: GatewayEnvelope }).envelope ?? unavailableEnvelope(route);
+      data[route] = envelope;
+      failures.push(envelope);
     }
   });
   return { data, failures };

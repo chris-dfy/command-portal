@@ -1,6 +1,6 @@
 # Application Shell
 
-This Experience Layer guidance follows the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
+This Operational Engagement presentation guidance follows the [NEXUS Platform Constitution](../architecture/NEXUS_Platform_Constitution.md).
 
 The shell has five durable regions:
 

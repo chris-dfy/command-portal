@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { afterEach, test } from "node:test";
-import { createPortalServer, LOCAL_CAPABILITY_ROUTES, RUNTIME_MUTATION_ROUTES, RUNTIME_ROUTES } from "../server/portal-server.mjs";
+import { createPortalServer, LOCAL_CAPABILITY_ROUTES, REPLAY_ROUTES, RUNTIME_MUTATION_ROUTES, RUNTIME_ROUTES } from "../server/portal-server.mjs";
 
 const servers = [];
 afterEach(async () => Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve)))));
@@ -26,7 +26,7 @@ function runtimeResponse(data, options = {}) {
   });
 }
 
-async function start(runtimeFetch, config = {}, localFetch = runtimeFetch, operationalFetch = localFetch) {
+async function start(runtimeFetch, config = {}, localFetch = runtimeFetch, operationalFetch = localFetch, replayFetch = operationalFetch) {
   const server = createPortalServer({
     config: {
       port: 0,
@@ -40,7 +40,8 @@ async function start(runtimeFetch, config = {}, localFetch = runtimeFetch, opera
     },
     runtimeFetch,
     localFetch,
-    operationalFetch
+    operationalFetch,
+    replayFetch
   });
   servers.push(server);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -388,6 +389,61 @@ test("local capability mode is explicit and disabled by default", async () => {
   assert.equal(body.error.code, "local_capabilities_disabled");
   assert.equal(body.local.enabled, false);
   assert.equal(calls, 0);
+});
+
+test("Operational Replay is a bounded same-origin passive projection", async () => {
+  const observed = [];
+  const projection = { run_id: "RUN-1", status: "COMPLETE", metrics: { stage_count: 1 }, stages: [{ stage_id: "stage-1" }] };
+  const replayFetch = async (url, options) => {
+    observed.push({ url, options });
+    return new Response(JSON.stringify(projection), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  };
+  const base = await start(async () => runtimeResponse({}), {
+    replayEnabled: true,
+    replayBaseUrl: "http://127.0.0.1:4317"
+  }, async () => localResponse({}), async () => localResponse({}), replayFetch);
+  const response = await fetch(`${base}/api/replay/replay.json`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), projection);
+  assert.equal(observed[0].url, "http://127.0.0.1:4317/replay.json");
+  assert.equal(observed[0].options.method, "GET");
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal((await fetch(`${base}/api/replay/replay.json`, { method: "POST" })).status, 405);
+  assert.equal((await fetch(`${base}/api/replay/private`)).status, 404);
+  assert.equal((await fetch(`${base}/api/replay/replay.json?path=/etc/passwd`)).status, 400);
+  assert.deepEqual(Object.keys(REPLAY_ROUTES).sort(), [
+    "/api/replay/events",
+    "/api/replay/export/audit-package.zip",
+    "/api/replay/export/replay-package.zip",
+    "/api/replay/export/replay-receipt.json",
+    "/api/replay/export/replay.json",
+    "/api/replay/export/replay.pdf",
+    "/api/replay/replay.json"
+  ]);
+});
+
+test("Operational Replay is disabled unless the deployment explicitly enables it", async () => {
+  let calls = 0;
+  const base = await start(async () => runtimeResponse({}), {}, undefined, undefined, async () => { calls += 1; return localResponse({}); });
+  const response = await fetch(`${base}/api/replay/replay.json`);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "replay_gateway_disabled");
+  assert.equal(calls, 0);
+});
+
+test("enabling local capabilities does not implicitly expose Operational Replay exports", async () => {
+  let replayCalls = 0;
+  const base = await start(
+    async () => runtimeResponse({}),
+    { localCapabilitiesEnabled: true },
+    async () => localResponse({}),
+    async () => localResponse({}),
+    async () => { replayCalls += 1; return localResponse({}); }
+  );
+  const response = await fetch(`${base}/api/replay/replay.json`);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "replay_gateway_disabled");
+  assert.equal(replayCalls, 0);
 });
 
 test("local capability allowlist maps only literal governed Runtime operations", async () => {
