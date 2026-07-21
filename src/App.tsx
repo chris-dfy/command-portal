@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, BookOpen, Bot, BrainCircuit, ChevronRight, CircleGauge, Database, FileCheck2, Files, FolderKanban, History, Menu, Mic2, Network, PanelRightClose, PanelRightOpen, RefreshCw, Search, ServerCog, Settings2, ShieldCheck, Sparkles, Waypoints, X, type LucideIcon } from "lucide-react";
-import { portalBrand } from "./brand";
+import { useEffect, useState } from "react";
+import { Activity, BookOpen, Bot, BrainCircuit, CircleGauge, FileCheck2, Files, FolderKanban, History, Mic2, Network, ServerCog, Settings2, ShieldCheck, Waypoints, type LucideIcon } from "lucide-react";
 import { ConclaveWorkspace } from "./components/ConclaveWorkspace";
 import { DataPanel, EmptyRecord } from "./components/DataPanel";
 import { DocumentIntake } from "./components/DocumentIntake";
@@ -18,12 +17,23 @@ import { RuntimeInformation } from "./components/RuntimeInformation";
 import { RuntimeTopology } from "./components/RuntimeTopology";
 import { StatusPill } from "./components/StatusPill";
 import { VoiceWorkspace } from "./components/VoiceWorkspace";
+import { AppearanceWorkspace } from "./appearance/AppearanceWorkspace";
+import { useAppearanceSettings } from "./appearance/useAppearanceSettings";
 import type { EoxAssessment } from "./lib/eox-client";
 import { operationalSessionClient } from "./lib/local-client";
 import { portalClient } from "./lib/portal-client";
-import { displayLabel, statusTone } from "./lib/presentation";
+import { displayLabel } from "./lib/presentation";
 import type { ConnectionState, GatewayEnvelope, ProviderRecord, RuntimeSnapshot } from "./lib/types";
+import { NexusContextInspector } from "./platform/NexusContextInspector";
+import { NexusExecutiveNavigation } from "./platform/NexusExecutiveNavigation";
+import { NexusPlatformRail, type PlatformRailGroup } from "./platform/NexusPlatformRail";
+import { NexusActivityStream, NexusWorkspaceCommandBar } from "./platform/NexusWorkspaceChrome";
+import { NexusWorkspaceFrame } from "./platform/NexusWorkspaceFrame";
 import { NEXUS_PLATFORM_NAVIGATION, type NexusPlatformAreaId } from "./platform/navigation";
+import "./design-system/nexus-tokens.css";
+import "./design-system/nexus-foundation.css";
+import "./appearance/appearance-workspace.css";
+import "./platform/nexus-platform.css";
 
 type AreaId = NexusPlatformAreaId | "documents" | "projects" | "voice" | "providers" | "evidence";
 type Area = { id: AreaId; label: string; detail: string; icon: LucideIcon; group: "Platform" | "Capabilities" };
@@ -49,6 +59,15 @@ const AREAS: Area[] = [
   { id: "evidence", label: "Evidence Center", detail: "Proofs and receipts", icon: FileCheck2, group: "Capabilities" },
 ];
 
+const EXECUTIVE_AREAS = AREAS.filter((area) => area.group === "Platform");
+const RAIL_GROUPS: PlatformRailGroup[] = (["Platform", "Capabilities"] as const).map((group) => ({
+  label: group,
+  items: AREAS.filter((area) => area.group === group).map((area) => ({
+    ...area,
+    live: area.id === "replay",
+  })),
+}));
+
 const record = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const list = (value: unknown) => Array.isArray(value) ? value as Record<string, unknown>[] : [];
 const STATE_PRIORITY: ConnectionState[] = ["Unauthorized", "Schema Mismatch", "Version Mismatch", "Timed Out", "Unavailable", "Unknown", "Degraded", "Retrying", "Connecting", "Healthy"];
@@ -70,6 +89,13 @@ function connectionState(snapshot: RuntimeSnapshot, failures: GatewayEnvelope[],
   if (loading) return "Retrying";
   const states = [...failures, ...Object.values(snapshot)].map((item) => item?.gateway.connectionState).filter(Boolean) as ConnectionState[];
   return STATE_PRIORITY.find((state) => states.includes(state)) ?? (failures.length ? "Unavailable" : "Healthy");
+}
+
+function nexusTone(state: ConnectionState): "neutral" | "info" | "success" | "attention" | "critical" {
+  if (state === "Healthy") return "success";
+  if (state === "Connecting" || state === "Retrying") return "info";
+  if (state === "Degraded" || state === "Unknown") return "attention";
+  return "critical";
 }
 
 function Providers({ snapshot }: { snapshot: RuntimeSnapshot }) {
@@ -97,11 +123,8 @@ function Evidence({ snapshot }: { snapshot: RuntimeSnapshot }) {
   </div>;
 }
 
-function WorkspaceFrame({ area, state, children }: { area: Area; state: ConnectionState; children: ReactNode }) {
-  return <><header className="nx-route-header"><div><span>Local-first Experience Gateway</span><h1>{area.label}</h1><p>{area.detail}</p></div><StatusPill value={state} tone={statusTone(state)} /></header>{children}</>;
-}
-
 export function App() {
+  const appearance = useAppearanceSettings();
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>({});
   const [failures, setFailures] = useState<GatewayEnvelope[]>([]);
   const [active, setActive] = useState<AreaId>(routeFromHash);
@@ -115,6 +138,11 @@ export function App() {
   const [sessionBootstrapComplete, setSessionBootstrapComplete] = useState(false);
 
   const refresh = (forceRefresh = false) => { setLoading(true); portalClient.snapshot(forceRefresh).then((result) => { setSnapshot((current) => ({ ...current, ...result.data })); setFailures(result.failures); }).catch(() => { setSnapshot({}); setFailures([]); }).finally(() => setLoading(false)); };
+  function focusPlatformSearch() {
+    if (window.matchMedia("(max-width: 820px)").matches) setMenuOpen(true);
+    window.requestAnimationFrame(() => document.getElementById("platform-search")?.focus());
+  }
+
   useEffect(() => refresh(false), []);
   useEffect(() => {
     let active = true;
@@ -126,14 +154,25 @@ export function App() {
   }, []);
   useEffect(() => { const timer = window.setInterval(() => refresh(false), 30_000); return () => window.clearInterval(timer); }, []);
   useEffect(() => { const sync = () => setActive(routeFromHash()); window.addEventListener("hashchange", sync); return () => window.removeEventListener("hashchange", sync); }, []);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); focusPlatformSearch(); }
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const state = connectionState(snapshot, failures, loading);
-  const visibleAreas = useMemo(() => AREAS.filter((area) => `${area.label} ${area.detail}`.toLowerCase().includes(query.toLowerCase())), [query]);
+  const connectionTone = nexusTone(state);
   const current = AREAS.find((area) => area.id === active) ?? AREAS[0];
   const status = record(snapshot.status?.data);
   const environment = String(status.environment ?? record(snapshot.environment?.data).environment ?? "Unavailable");
   const runtimeVersion = snapshot.version?.runtime?.runtimeVersion ?? "Unavailable";
   const eox = snapshot.eox?.data as EoxAssessment | null | undefined;
+  const proofId = list(snapshot.proofs?.data).map((proof) => proof.id).find(Boolean);
+  const receiptId = list(snapshot.receipts?.data).map((receipt) => receipt.id).find(Boolean);
+  const activityTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   function navigate(id: AreaId) { window.location.hash = `/${id}`; setActive(id); setMenuOpen(false); window.scrollTo({ top: 0 }); }
   function openReplay(missionId?: string) { setReplayMissionId(missionId); navigate("replay"); }
@@ -146,7 +185,7 @@ export function App() {
     {active === "knowledge" && <KnowledgeWorkspace snapshot={snapshot} />}
     {active === "edge" && <><EdgeRuntime snapshot={snapshot} /><RuntimeTopology snapshot={snapshot} /></>}
     {active === "mission-control" && <OperationsWorkspace />}
-    {active === "settings" && <div className="settings-workspaces"><RuntimeInformation snapshot={snapshot} connectionState={state} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
+    {active === "settings" && <div className="settings-workspaces"><AppearanceWorkspace appearance={appearance} /><RuntimeInformation snapshot={snapshot} connectionState={state} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
     {active === "documents" && <DocumentIntake />}
     {active === "projects" && <ProjectStudio />}
     {active === "voice" && <VoiceWorkspace />}
@@ -154,25 +193,72 @@ export function App() {
     {active === "evidence" && <Evidence snapshot={snapshot} />}
   </>;
 
-  const navigation = (["Platform", "Capabilities"] as const).map((group) => <section key={group}><h2>{group}</h2>{visibleAreas.filter((area) => area.group === group).map((area) => { const Icon = area.icon; return <button key={area.id} data-active={active === area.id} aria-current={active === area.id ? "page" : undefined} onClick={() => navigate(area.id)}><Icon size={16} /><span>{area.label}</span>{area.id === "replay" && <i>LIVE</i>}</button>; })}</section>);
-
-  return <div className="nx-platform" data-inspector={inspectorOpen ? "open" : "closed"}>
+  return <div className="nx-app-shell nx-hosted-shell" data-inspector={inspectorOpen ? "open" : "closed"}>
     <a className="skip-link" href="#main-content">Skip to workspace</a>
-    <aside id="platform-navigation" className={`nx-sidebar${menuOpen ? " is-open" : ""}`} aria-label="NEXUS platform navigation">
-      <header><div className="nx-brand-mark">N</div><div><strong>{portalBrand.displayName}</strong><span>Enterprise Executive OS</span></div><button onClick={() => setMenuOpen(false)} aria-label="Close navigation"><X size={16} /></button></header>
-      <section className="nx-sidebar-context"><span>Active workspace</span><strong>Replit NEXUS</strong><small>Hosted Experience Gateway</small></section>
-      <label className="nx-nav-search"><Search size={14} /><input aria-label="Search platform workspaces" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a workspace" /></label>
-      <nav>{navigation}</nav>
-      <footer><StatusPill value={state} tone={statusTone(state)} /><small>No browser-held Runtime credential</small></footer>
-    </aside>
-    <section className="nx-stage">
-      <header className="nx-topbar"><div><button className="nx-menu-button" onClick={() => setMenuOpen(true)} aria-label="Open navigation" aria-controls="platform-navigation" aria-expanded={menuOpen}><Menu size={17} /></button><span>Replit NEXUS</span><ChevronRight size={13} /><strong>{current.label}</strong></div><div><StatusPill value={state} tone={statusTone(state)} /><button onClick={() => refresh(true)} disabled={loading}><RefreshCw size={14} className={loading ? "spin" : ""} />Refresh</button><button onClick={() => setCopilotOpen((value) => !value)} aria-label="Toggle NEXUS interaction panel" aria-expanded={copilotOpen}><Sparkles size={15} /></button><button onClick={() => setInspectorOpen((value) => !value)} aria-label="Toggle context inspector" aria-controls="context-inspector" aria-expanded={inspectorOpen}>{inspectorOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}</button></div></header>
-      {failures.length > 0 && <section className="runtime-alert" role="alert" data-tone={statusTone(state)}><Activity size={17} /><div><strong>{state}</strong><span>{failures[0]?.error?.message ?? "One or more Runtime signals are unavailable."}</span></div></section>}
-      <main id="main-content" className="nx-workspace"><WorkspaceFrame area={current} state={state}>{content}</WorkspaceFrame></main>
-      <footer className="nx-activity-stream"><span><Activity size={13} />Activity</span><p>{state === "Healthy" ? "Experience Gateway connected. Operational claims still require Runtime evidence." : "Presentation available; live operational state is not established."}</p><time>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></footer>
-    </section>
-    {inspectorOpen && <aside id="context-inspector" className="nx-inspector" aria-label="Context inspector"><header><div><span>Context Inspector</span><strong>{current.label}</strong></div><button onClick={() => setInspectorOpen(false)} aria-label="Close context inspector"><X size={15} /></button></header><section><h2>Operational context</h2><dl><div><dt>Route</dt><dd>/{active}</dd></div><div><dt>Environment</dt><dd>{environment}</dd></div><div><dt>Runtime</dt><dd>{state}</dd></div><div><dt>Version</dt><dd>{runtimeVersion}</dd></div><div><dt>Knowledge</dt><dd>runtime evidence</dd></div></dl></section><section><h2>Platform contract</h2><ul><li>Shared canonical shell</li><li>Runtime-owned execution</li><li>Independent mission evidence</li><li>Explicit knowledge promotion</li><li>Replayable outcomes</li></ul></section><footer><Database size={16} /><p><strong>Boundary</strong>Hosted presentation never converts model output or UI state into authoritative operational fact.</p></footer></aside>}
-    {menuOpen && <button className="nx-sidebar-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation" />}
+    <NexusExecutiveNavigation
+      items={EXECUTIVE_AREAS}
+      active={active}
+      connectionLabel={state}
+      connectionTone={connectionTone}
+      alertCount={failures.length}
+      onNavigate={(id) => navigate(id as AreaId)}
+      onSearch={focusPlatformSearch}
+    />
+    <div className="nx-app-shell__body">
+      <NexusPlatformRail
+        groups={RAIL_GROUPS}
+        active={active}
+        open={menuOpen}
+        query={query}
+        connectionLabel={state}
+        connectionTone={connectionTone}
+        onQueryChange={setQuery}
+        onNavigate={(id) => navigate(id as AreaId)}
+        onClose={() => setMenuOpen(false)}
+      />
+      <section className="nx-platform-stage">
+        <NexusWorkspaceCommandBar
+          activeLabel={current.label}
+          loading={loading}
+          navigationOpen={menuOpen}
+          copilotOpen={copilotOpen}
+          inspectorOpen={inspectorOpen}
+          onOpenNavigation={() => setMenuOpen(true)}
+          onRefresh={() => refresh(true)}
+          onToggleCopilot={() => setCopilotOpen((value) => !value)}
+          onToggleInspector={() => setInspectorOpen((value) => !value)}
+        />
+        {failures.length > 0 && <section className="nx-runtime-alert" role="alert" data-tone={connectionTone}><Activity size={17} /><div><strong>{state}</strong><span>{failures[0]?.error?.message ?? "One or more Runtime signals are unavailable."}</span></div></section>}
+        <main id="main-content" className="nx-primary-workspace">
+          <NexusWorkspaceFrame
+            eyebrow={current.group === "Platform" ? "Hosted Experience Gateway" : "Platform capability"}
+            title={current.label}
+            description={current.detail}
+            icon={current.icon}
+            connectionLabel={state}
+            connectionTone={connectionTone}
+          >{content}</NexusWorkspaceFrame>
+        </main>
+        <NexusActivityStream
+          message={state === "Healthy" ? "Experience Gateway connected. Operational claims still require Runtime Evidence and postcondition verification." : "Presentation available; live operational state is not established."}
+          timestamp={activityTimestamp}
+        />
+      </section>
+      {inspectorOpen && <NexusContextInspector
+        featureLabel={current.label}
+        routePath={`/${active}`}
+        sourceClass="runtime_evidence"
+        connectionLabel={state}
+        connectionTone={connectionTone}
+        environment={environment}
+        runtimeVersion={runtimeVersion}
+        failureCount={failures.length}
+        proofId={proofId ? String(proofId) : undefined}
+        receiptId={receiptId ? String(receiptId) : undefined}
+        onClose={() => setInspectorOpen(false)}
+      />}
+    </div>
+    {menuOpen && <button className="nx-platform-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation" />}
     <NexusCopilot activeArea={PLATFORM_TO_COPILOT[active]} activeLabel={current.label} runtimeState={state} onNavigate={(area) => navigate(COPILOT_TO_PLATFORM[area])} open={copilotOpen} expanded={copilotExpanded} onOpenChange={setCopilotOpen} onExpandedChange={setCopilotExpanded} />
   </div>;
 }
