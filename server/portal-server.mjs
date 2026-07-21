@@ -28,8 +28,23 @@ export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/connectors": "/runtime/connectors",
   "/api/runtime/realtime-voice": "/runtime/voice/realtime/status",
   "/api/runtime/conclave": "/runtime/conclave/status",
-  "/api/runtime/eox": "/runtime/executive-operating-loop"
+  "/api/runtime/eox": "/runtime/executive-operating-loop",
+  "/api/runtime/replay": "/runtime/replay"
 });
+
+const REPLAY_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,160}$/;
+const REPLAY_STAGES = new Set(["observation", "evidence", "representation", "conclave", "authority", "decision", "receipt"]);
+
+export function resolveRuntimeReadRoute(pathname) {
+  if (RUNTIME_ROUTES[pathname]) return RUNTIME_ROUTES[pathname];
+  const detail = pathname.match(/^\/api\/runtime\/replay\/([^/]+)$/);
+  if (detail) return REPLAY_ID_PATTERN.test(detail[1]) ? `/runtime/replay/${detail[1]}` : null;
+  const events = pathname.match(/^\/api\/runtime\/replay\/([^/]+)\/events$/);
+  if (events) return REPLAY_ID_PATTERN.test(events[1]) ? `/runtime/replay/${events[1]}/events` : null;
+  const explain = pathname.match(/^\/api\/runtime\/replay\/([^/]+)\/stages\/([^/]+)\/explain$/);
+  if (explain) return REPLAY_ID_PATTERN.test(explain[1]) && REPLAY_STAGES.has(explain[2]) ? `/runtime/replay/${explain[1]}/stages/${explain[2]}/explain` : null;
+  return null;
+}
 
 export const RUNTIME_MUTATION_ROUTES = Object.freeze({
   "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing",
@@ -992,7 +1007,7 @@ async function handleApi(request, response, config, runtimeFetch, cache, tracker
   if (url.search) {
     return sendJson(response, 400, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("query_not_allowed", "Runtime gateway routes do not accept query parameters.", "Unknown", 400)));
   }
-  const runtimePath = RUNTIME_ROUTES[url.pathname];
+  const runtimePath = resolveRuntimeReadRoute(url.pathname);
   if (!runtimePath) {
     return sendJson(response, 404, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("route_not_allowlisted", "This Experience Gateway route is not allowlisted.", "Unknown", 404)));
   }

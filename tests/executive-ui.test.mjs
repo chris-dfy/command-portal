@@ -189,3 +189,49 @@ test("responsive and accessible presentation contracts remain present", async ()
   assert.match(app, /Skip to portal content/);
   assert.match(app, /aria-label="Toggle navigation"/);
 });
+
+test("Operational Replay surfaces Runtime-owned stage playback with truthful boundaries", async () => {
+  const [app, replay, client] = await Promise.all([
+    read("../src/App.tsx"),
+    read("../src/components/OperationalReplay.tsx"),
+    read("../src/lib/replay-client.ts")
+  ]);
+  assert.match(app, /label: "Operational Replay"/);
+  assert.match(app, /<OperationalReplay/);
+  for (const stage of ["Observation", "Evidence", "Representation", "Conclave", "Authority", "Decision", "Receipt"]) {
+    assert.match(replay, new RegExp(`label: "${stage}"`));
+  }
+  for (const control of ["Restart", "Previous", "Play", "Pause", "Next"]) {
+    assert.match(replay, new RegExp(`<span>${control}</span>`));
+  }
+  assert.match(replay, /Explain This Step/);
+  assert.match(replay, /Runtime supplied no explanation for this stage\./);
+  assert.match(replay, /STAGE_INTERVAL_BASE_MS \/ speed/);
+  assert.match(client, /\/api\/runtime\/replay/);
+  assert.equal(client.includes("COMMAND_PORTAL_RUNTIME_READ_TOKEN"), false);
+  assert.equal(client.includes("Authorization"), false);
+  assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(replay + client), false);
+});
+
+test("new portal destinations render Runtime-backed dashboards without client-side cognition", async () => {
+  const [app, missions, knowledge, edge] = await Promise.all([
+    read("../src/App.tsx"),
+    read("../src/components/MissionDashboard.tsx"),
+    read("../src/components/KnowledgeWorkspace.tsx"),
+    read("../src/components/EdgeRuntime.tsx")
+  ]);
+  for (const label of ["Mission Dashboard", "Knowledge Stores", "Edge Runtime"]) assert.match(app, new RegExp(`label: "${label}"`));
+  assert.match(app, /<MissionDashboard/);
+  assert.match(app, /<KnowledgeWorkspace/);
+  assert.match(app, /<EdgeRuntime/);
+  assert.match(missions, /\/api\/local\/missions/);
+  assert.match(missions, /Mission status is unavailable/);
+  assert.match(knowledge, /Mission Store/);
+  assert.match(knowledge, /Knowledge Store/);
+  assert.match(knowledge, /only inside NEXUS Runtime with verified evidence/);
+  assert.match(edge, /Edge status is unavailable/);
+  for (const source of [missions, knowledge, edge]) {
+    assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
+    assert.equal(source.includes("Authorization"), false);
+  }
+});

@@ -4,7 +4,7 @@ import { hifClient } from "../lib/hif-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
 
 type Message = { speaker: "operator" | "nexus"; text: string; limitation?: string };
-type AreaId = "center" | "intake" | "projects" | "voice" | "operations" | "conclave" | "information" | "health" | "topology" | "providers" | "evidence";
+type AreaId = "center" | "intake" | "projects" | "voice" | "operations" | "replay" | "missions" | "knowledge" | "edge" | "conclave" | "information" | "health" | "topology" | "providers" | "evidence";
 
 const SKILLS: Array<{ label: string; prompt: string; area: AreaId }> = [
   { label: "Summarize operational readiness", prompt: "Summarize operational readiness and identify the highest-priority constraint.", area: "center" },

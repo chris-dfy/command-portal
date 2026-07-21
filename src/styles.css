@@ -761,3 +761,46 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
   .eox-hero, .conclave-hero { padding: 18px; }
   .eox-hero h2, .conclave-hero h2 { font-size: 1.65rem; }
 }
+
+/* Operational Replay */
+.replay-layout { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
+.replay-workspace { display: grid; gap: 18px; }
+.replay-loading { color: var(--text-muted, #8b93a7); font-size: 0.8rem; }
+.replay-session-list { display: grid; gap: 8px; }
+.replay-session-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid rgba(140, 152, 180, 0.25); border-radius: 10px; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.replay-session-item.active { border-color: rgba(102, 140, 255, 0.7); background: rgba(102, 140, 255, 0.08); }
+.replay-session-label { font-size: 0.8rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.replay-refresh-list { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 6px 10px; font-size: 0.72rem; border: 1px solid rgba(140, 152, 180, 0.3); border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
+.replay-timeline-panel { display: grid; gap: 14px; padding: 16px; border: 1px solid rgba(140, 152, 180, 0.25); border-radius: 14px; }
+.replay-timeline { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.replay-stage-marker { display: grid; gap: 4px; justify-items: center; padding: 10px 4px; border: 1px solid rgba(140, 152, 180, 0.25); border-radius: 10px; background: transparent; color: inherit; cursor: pointer; }
+.replay-stage-marker.active { border-color: rgba(102, 140, 255, 0.8); background: rgba(102, 140, 255, 0.12); }
+.replay-stage-marker.completed { border-color: rgba(88, 190, 130, 0.5); background: rgba(88, 190, 130, 0.07); }
+.replay-stage-number { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid currentColor; font-size: 0.68rem; font-weight: 700; }
+.replay-stage-label { font-size: 0.64rem; font-weight: 600; text-align: center; }
+.replay-controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.replay-ctrl-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 0.75rem; font-weight: 600; border: 1px solid rgba(140, 152, 180, 0.3); border-radius: 9px; background: transparent; color: inherit; cursor: pointer; }
+.replay-ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.replay-play-btn { border-color: rgba(102, 140, 255, 0.7); background: rgba(102, 140, 255, 0.1); }
+.stage-description { font-size: 0.78rem; color: var(--text-muted, #8b93a7); margin: 0 0 12px; }
+.replay-event-detail { display: grid; gap: 8px; }
+.replay-event-field { display: grid; grid-template-columns: 140px 1fr; gap: 10px; font-size: 0.76rem; }
+.replay-event-field dt { font-weight: 600; opacity: 0.7; }
+.replay-event-field dd { margin: 0; word-break: break-word; }
+.replay-explain-row { margin-top: 14px; }
+.replay-explain-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 16px; font-size: 0.78rem; font-weight: 600; border: 1px solid rgba(180, 130, 255, 0.55); border-radius: 10px; background: rgba(180, 130, 255, 0.08); color: inherit; cursor: pointer; }
+.replay-explain-btn:disabled { opacity: 0.55; cursor: wait; }
+.replay-explain-panel { margin-top: 12px; padding: 12px 14px; border-left: 3px solid rgba(180, 130, 255, 0.7); border-radius: 6px; background: rgba(180, 130, 255, 0.06); font-size: 0.8rem; }
+.replay-explain-panel.unavailable { border-left-color: rgba(230, 170, 80, 0.8); background: rgba(230, 170, 80, 0.07); }
+.mission-list { display: grid; gap: 12px; }
+.mission-card { padding: 14px; border: 1px solid rgba(140, 152, 180, 0.25); border-radius: 12px; }
+.mission-card header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.mission-card dl { display: grid; gap: 5px; margin: 0; font-size: 0.74rem; }
+.mission-card dl div { display: flex; gap: 8px; }
+.mission-card dt { font-weight: 600; opacity: 0.7; }
+.mission-card dd { margin: 0; }
+.knowledge-split { align-items: stretch; }
+@media (max-width: 980px) {
+  .replay-layout { grid-template-columns: 1fr; }
+  .replay-timeline { grid-template-columns: repeat(4, 1fr); }
+}

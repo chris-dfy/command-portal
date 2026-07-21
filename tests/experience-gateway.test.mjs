@@ -604,3 +604,30 @@ test("hosted operational gateway is disabled by default and rejects arbitrary fo
   const cookie = login.headers.get("set-cookie").split(";")[0];
   assert.equal((await fetch(`${configured}/api/operations/arbitrary`, { headers: { Cookie: cookie } })).status, 404);
 });
+
+test("replay gateway routes resolve to allowlisted runtime paths with validated IDs and stages", async () => {
+  const observed = [];
+  const base = await start(async (url, options) => {
+    observed.push({ url, options });
+    return runtimeResponse({ replay: true });
+  });
+  const list = await fetch(`${base}/api/runtime/replay`, { headers: { "Cache-Control": "no-cache" } });
+  assert.equal(list.status, 200);
+  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/replay");
+  const detail = await fetch(`${base}/api/runtime/replay/REPLAY-001`);
+  assert.equal(detail.status, 200);
+  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/replay/REPLAY-001");
+  const events = await fetch(`${base}/api/runtime/replay/REPLAY-001/events`);
+  assert.equal(events.status, 200);
+  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/replay/REPLAY-001/events");
+  const explain = await fetch(`${base}/api/runtime/replay/REPLAY-001/stages/observation/explain`);
+  assert.equal(explain.status, 200);
+  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/replay/REPLAY-001/stages/observation/explain");
+  const priorCalls = observed.length;
+  assert.equal((await fetch(`${base}/api/runtime/replay/REPLAY-001/stages/invalid-stage/explain`)).status, 404);
+  assert.equal((await fetch(`${base}/api/runtime/replay/REPLAY-001/stages/observation/explain/extra`)).status, 404);
+  assert.equal((await fetch(`${base}/api/runtime/replay/bad%2F..%2Fpath`)).status, 404);
+  assert.equal((await fetch(`${base}/api/runtime/replay/REPLAY-001?limit=5`)).status, 400);
+  assert.equal((await fetch(`${base}/api/runtime/replay/REPLAY-001`, { method: "POST" })).status, 405);
+  assert.equal(observed.length, priorCalls);
+});
