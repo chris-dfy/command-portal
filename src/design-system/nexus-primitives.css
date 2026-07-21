@@ -263,18 +263,23 @@
 .nx-metric {
   --nx-metric-color: var(--nx-accent);
   display: grid;
+  min-width: 0;
+  height: 100%;
   align-content: start;
-  gap: 0.35rem;
+  gap: var(--nx-status-card-gap);
   min-height: 5.875rem;
-  padding: var(--nx-space-4);
+  padding: var(--nx-status-card-padding-block) var(--nx-status-card-padding-inline);
   border: 1px solid var(--nx-border-subtle);
   border-radius: var(--nx-radius-sm);
   background: var(--nx-surface-2);
   transition: border-color var(--nx-duration-state) var(--nx-ease-standard), background var(--nx-duration-state) var(--nx-ease-standard);
 }
 
-.nx-metric > span { color: var(--nx-text-muted); font-size: var(--nx-type-2xs); font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
-.nx-metric > strong { color: var(--nx-metric-color); font-family: var(--nx-font-display); font-size: var(--nx-type-xl); font-weight: 520; letter-spacing: var(--nx-tracking-tight); }
+.nx-metric > span,
+.nx-metric > strong,
+.nx-metric > small { min-width: 0; min-block-size: 2lh; overflow-wrap: anywhere; }
+.nx-metric > span { color: var(--nx-text-muted); font-size: var(--nx-type-2xs); font-weight: 650; letter-spacing: 0.08em; line-height: 1.25; text-transform: uppercase; }
+.nx-metric > strong { color: var(--nx-metric-color); font-family: var(--nx-font-display); font-size: var(--nx-type-xl); font-weight: 520; letter-spacing: var(--nx-tracking-tight); line-height: var(--nx-leading-tight); }
 .nx-metric > small { color: var(--nx-text-muted); font-size: var(--nx-type-xs); line-height: 1.45; }
 .nx-metric[data-tone="success"] { --nx-metric-color: var(--nx-success); border-color: rgba(var(--nx-success-rgb), 0.3); }
 .nx-metric[data-tone="attention"] { --nx-metric-color: var(--nx-attention); border-color: rgba(var(--nx-attention-rgb), 0.32); }
