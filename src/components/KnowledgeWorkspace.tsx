@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { localNexusClient, type IntakeSource } from "../lib/local-client";
 import type { RuntimeSnapshot } from "../lib/types";
+import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 
@@ -237,8 +238,13 @@ export function KnowledgeWorkspace({ snapshot }: { snapshot?: RuntimeSnapshot })
   const candidateCount = sourceState === "unavailable" || sourceState === "loading" ? null : candidates.length;
 
   return <div className="knowledge-workspace">
-    <section className="nx-workspace-hero"><div><span className="nx-eyebrow">Autonomous Knowledge Acquisition</span><h2>Separate temporary mission context from promoted operational knowledge.</h2><p>Mission Store remains mission-scoped. Only a Runtime-issued, evidence-lineaged Knowledge Receipt can place an item in the permanent Knowledge Store.</p></div><button className="nx-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} />Refresh sources</button></section>
-    <section className="nx-metrics"><article><span>Mission Store</span><strong>{missionStoreCount ?? "—"}</strong><small>Runtime-supplied temporary state</small></article><article><span>Promotion Candidates</span><strong>{candidateCount ?? "—"}</strong><small>Intake evidence, not authoritative</small></article><article><span>Knowledge Store</span><strong>{knowledgeStoreCount ?? "—"}</strong><small>Runtime-supplied permanent state</small></article><article><span>Promotion Receipts</span><strong>{promotionReceiptCount}</strong><small>Digest-bearing Runtime records</small></article></section>
+    <section className="nx-workspace-hero"><div><span className="nx-eyebrow">Autonomous Knowledge Acquisition</span><h2>Separate temporary mission context from promoted operational knowledge.</h2><p>Mission Store remains mission-scoped. Only a Runtime-issued, evidence-lineaged Knowledge Receipt can place an item in the permanent Knowledge Store.</p></div><NexusButton className="nx-action" size="sm" onClick={() => void refresh()} loading={busy}><RefreshCw size={14} />Refresh sources</NexusButton></section>
+    <section className="nx-metrics">
+      <NexusMetric label="Mission Store" value={missionStoreCount ?? "—"} detail="Runtime-supplied temporary state" />
+      <NexusMetric label="Promotion Candidates" value={candidateCount ?? "—"} detail="Intake evidence, not authoritative" />
+      <NexusMetric label="Knowledge Store" value={knowledgeStoreCount ?? "—"} detail="Runtime-supplied permanent state" />
+      <NexusMetric label="Promotion Receipts" value={promotionReceiptCount} detail="Digest-bearing Runtime records" tone={promotionReceiptCount ? "success" : "neutral"} />
+    </section>
     {error && <section className="operation-error" role="alert"><TriangleAlert size={18} /><span>{error}</span></section>}
     <div className="knowledge-flow">
       <DataPanel eyebrow="Temporary Mission Store" title="Mission-scoped context" icon={<Archive size={18} />}>

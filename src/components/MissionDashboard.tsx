@@ -16,6 +16,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { localNexusClient } from "../lib/local-client";
+import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 
@@ -194,8 +195,13 @@ export function MissionDashboard({ onReplay }: { onReplay?: (missionId?: string)
   const metric = (value: number) => missionState === "loading" || missionState === "unavailable" ? "—" : value;
 
   return <div className="mission-dashboard">
-    <section className="nx-workspace-hero"><div><span className="nx-eyebrow">Mission Dashboard</span><h2>Coordinate governed work across independent mission streams.</h2><p>Each mission retains its own objective, task graph, specialist context, replay stream, receipts, and verification boundary.</p></div><button className="nx-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} className={busy ? "spin" : ""} />Refresh</button></section>
-    <section className="nx-metrics"><article><span>Active Missions</span><strong>{metric(active.length)}</strong><small>{missionState === "unavailable" ? "Runtime mission history unavailable" : `${executableCount} bounded steps executable now`}</small></article><article><span>Blocked Missions</span><strong>{metric(blocked.length)}</strong><small>Recorded authority, capability, or evidence constraints</small></article><article><span>Completed Missions</span><strong>{metric(completed.length)}</strong><small>{receiptState === "unavailable" ? "Receipt linkage unavailable" : `${receiptBackedCompleted.length} with linked successful Runtime receipts`}</small></article><article><span>Mission Health</span><strong>{health}</strong><small>{selectedMission ? `${progress}% selected progress` : "No selected Runtime mission"}</small></article></section>
+    <section className="nx-workspace-hero"><div><span className="nx-eyebrow">Mission Dashboard</span><h2>Coordinate governed work across independent mission streams.</h2><p>Each mission retains its own objective, task graph, specialist context, replay stream, receipts, and verification boundary.</p></div><NexusButton className="nx-action" size="sm" onClick={() => void refresh()} loading={busy}><RefreshCw size={15} />Refresh</NexusButton></section>
+    <section className="nx-metrics">
+      <NexusMetric label="Active Missions" value={metric(active.length)} detail={missionState === "unavailable" ? "Runtime mission history unavailable" : `${executableCount} bounded steps executable now`} />
+      <NexusMetric label="Blocked Missions" value={metric(blocked.length)} detail="Recorded authority, capability, or evidence constraints" tone={blocked.length ? "attention" : "neutral"} />
+      <NexusMetric label="Completed Missions" value={metric(completed.length)} detail={receiptState === "unavailable" ? "Receipt linkage unavailable" : `${receiptBackedCompleted.length} with linked successful Runtime receipts`} />
+      <NexusMetric label="Mission Health" value={health} detail={selectedMission ? `${progress}% selected progress` : "No selected Runtime mission"} tone={health === "operational" || health === "stable" ? "success" : health === "attention" ? "attention" : "neutral"} />
+    </section>
     {error && <section className="operation-error" role="alert"><ShieldAlert size={18} /><span>{error}</span></section>}
     <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the governed outcome NEXUS should coordinate…" /></label><button onClick={() => void plan()} disabled={busy || !objective.trim()}><Network size={15} />Plan independent mission</button></div>
     <div className="mission-dashboard__grid">

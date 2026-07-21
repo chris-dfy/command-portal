@@ -214,6 +214,49 @@ test("responsive and accessible presentation contracts remain present", async ()
   assert.doesNotMatch(app, /behavior: "smooth"/);
 });
 
+test("navigation, Context Inspector, and NEXUS reflow without covering the workspace", async () => {
+  const [app, copilot, chrome, platformStyles, routeStyles, missions, knowledge] = await Promise.all([
+    read("../src/App.tsx"),
+    read("../src/components/NexusCopilot.tsx"),
+    read("../src/platform/NexusWorkspaceChrome.tsx"),
+    read("../src/platform/nexus-platform.css"),
+    read("../src/styles.css"),
+    read("../src/components/MissionDashboard.tsx"),
+    read("../src/components/KnowledgeWorkspace.tsx"),
+  ]);
+
+  assert.match(app, /const sidePanel = copilotOpen \? "copilot" : inspectorOpen \? "inspector" : "closed"/);
+  assert.match(app, /data-side-panel=\{sidePanel\}/);
+  assert.match(app, /data-navigation=\{menuOpen \? "open" : "closed"\}/);
+  assert.match(app, /if \(next\) setInspectorOpen\(false\)/);
+  assert.match(app, /setCopilotOpen\(false\);\s+setCopilotExpanded\(false\)/);
+  assert.doesNotMatch(app, /nx-platform-scrim/);
+
+  const bodyStart = app.indexOf('<div className="nx-app-shell__body">');
+  const copilotStart = app.indexOf("<NexusCopilot", bodyStart);
+  const bodyEnd = app.indexOf("</div>", copilotStart);
+  assert.ok(bodyStart >= 0 && copilotStart > bodyStart && bodyEnd > copilotStart);
+  assert.match(copilot, /if \(!open\) return null/);
+  assert.match(copilot, /id="nexus-copilot"/);
+  assert.match(chrome, /aria-controls="nexus-copilot"/);
+
+  assert.match(platformStyles, /grid-template-areas: "rail stage panel"/);
+  assert.match(platformStyles, /grid-area: panel;\s+position: sticky/);
+  assert.match(platformStyles, /grid-template-areas: "rail panel" "rail stage"/);
+  assert.match(platformStyles, /data-navigation="open".*\.nx-platform-rail \{ display: flex; \}/);
+  assert.doesNotMatch(platformStyles, /position:\s*fixed/);
+  assert.doesNotMatch(platformStyles, /nx-platform-scrim/);
+
+  for (const breakpoint of [1100, 900, 680, 460]) {
+    assert.match(routeStyles, new RegExp(`@container portal-main \\(max-width: ${breakpoint}px\\)`));
+  }
+  assert.match(routeStyles, /overflow-wrap: anywhere/);
+  for (const workspace of [missions, knowledge]) {
+    assert.match(workspace, /NexusButton/);
+    assert.match(workspace, /NexusMetric/);
+  }
+});
+
 test("canonical shell bootstraps the hosted operational session before mounting workspaces", async () => {
   const app = await read("../src/App.tsx");
   assert.match(app, /operationalSessionClient\.status\(\)/);
