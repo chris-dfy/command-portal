@@ -9,6 +9,13 @@ Follow the [NEXUS Platform Constitution](docs/architecture/NEXUS_Platform_Consti
 - Hosted Runtime access remains an observation surface. Local-first document, project, and voice capabilities may mutate only through explicitly allowlisted Experience Gateway routes backed by the authoritative local Runtime.
 - No client may assemble operational context, calculate project intelligence, determine authority, or manufacture proof. Every NEXUS client consumes the same Runtime contracts.
 
+## Canonical architecture
+
+- NEXUS is an Operational Understanding Platform, not a layered architecture. Follow the four domains defined in the Constitution: Runtime Foundation, Operational Understanding Loop, Operational Capabilities, and Operational Objects.
+- Use the canonical capabilities Operational Observation, Operational Understanding, Operational Validation, Operational Authority, Operational Orchestration, and Operational Engagement.
+- The Command Portal is an Operational Engagement client. Runtime owns semantic behavior and operational truth; the portal owns presentation, accessibility, navigation, and browser media controls.
+- Use historical layer terminology only for compatibility notes or unchanged technical identifiers. Do not rename existing APIs, routes, schemas, environment variables, or namespaces during terminology-only work.
+
 ## Identity
 
 - Product identity is loaded from `config/brand.json` and may be overridden only through safe, browser-visible brand configuration.

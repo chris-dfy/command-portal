@@ -72,6 +72,16 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/interactions": { method: "POST", runtimePath: "/runtime/interactions", target: "platform" }
 });
 
+export const REPLAY_ROUTES = Object.freeze({
+  "/api/replay/replay.json": "/replay.json",
+  "/api/replay/events": "/events",
+  "/api/replay/export/replay-package.zip": "/export/replay-package.zip",
+  "/api/replay/export/replay.pdf": "/export/replay.pdf",
+  "/api/replay/export/replay.json": "/export/replay.json",
+  "/api/replay/export/audit-package.zip": "/export/audit-package.zip",
+  "/api/replay/export/replay-receipt.json": "/export/replay-receipt.json"
+});
+
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,160}$/;
 const PROJECT_READ_ACTIONS = new Set(["sources", "evidence", "scope", "estimate", "planning-model", "artifacts"]);
 const PROJECT_ARTIFACT_TYPES = new Set(["roadmap", "project_plan", "scope_of_work", "proposal", "backlog", "risk_register", "status_report", "executive_briefing"]);
@@ -94,7 +104,9 @@ const CONTENT_TYPES = {
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",
-  ".ico": "image/x-icon"
+  ".ico": "image/x-icon",
+  ".pdf": "application/pdf",
+  ".zip": "application/zip"
 };
 
 const TRUTH = Object.freeze({
@@ -148,6 +160,16 @@ function safeOperationalApiUrl(value) {
   return parsed.href.replace(/\/$/, "");
 }
 
+function safeReplayApiUrl(value) {
+  const parsed = new URL(value);
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error("COMMAND_PORTAL_REPLAY_API_BASE_URL must be an HTTP(S) URL without credentials, query, or fragment.");
+  }
+  const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname.toLowerCase());
+  if (parsed.protocol !== "https:" && !loopback) throw new Error("Hosted Operational Replay traffic requires HTTPS.");
+  return parsed.href.replace(/\/$/, "");
+}
+
 function requiredSecret(value, name, minimum = 24) {
   const secret = String(value ?? "");
   if (secret.length < minimum) throw new Error(`${name} is required and must contain at least ${minimum} characters when hosted operations are enabled.`);
@@ -194,6 +216,11 @@ export function loadConfig(overrides = {}) {
   const platformRuntimeBaseUrl = safeLocalApiUrl(String(
     overrides.platformRuntimeBaseUrl ?? process.env.COMMAND_PORTAL_PLATFORM_RUNTIME_API_BASE_URL ?? "http://127.0.0.1:8080"
   ));
+  const localCapabilitiesEnabled = enabled(overrides.localCapabilitiesEnabled ?? process.env.COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED);
+  const replayEnabled = enabled(overrides.replayEnabled ?? process.env.COMMAND_PORTAL_REPLAY_ENABLED, localCapabilitiesEnabled);
+  const replayBaseUrl = safeReplayApiUrl(String(
+    overrides.replayBaseUrl ?? process.env.COMMAND_PORTAL_REPLAY_API_BASE_URL ?? "http://127.0.0.1:4317"
+  ));
   const operationalEnabled = enabled(overrides.operationalEnabled ?? process.env.COMMAND_PORTAL_OPERATIONAL_ENABLED);
   const operationalApiBaseUrl = safeOperationalApiUrl(String(
     overrides.operationalApiBaseUrl ?? process.env.COMMAND_PORTAL_OPERATIONAL_API_BASE_URL ?? "https://nexus-operations.invalid"
@@ -205,9 +232,12 @@ export function loadConfig(overrides = {}) {
     runtimeBaseUrl,
     runtimePublicUrl: new URL(runtimeBaseUrl).origin,
     runtimeToken,
-    localCapabilitiesEnabled: enabled(overrides.localCapabilitiesEnabled ?? process.env.COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED),
+    localCapabilitiesEnabled,
     localApiBaseUrl,
     platformRuntimeBaseUrl,
+    replayEnabled,
+    replayBaseUrl,
+    replayMaxResponseBytes: integer(overrides.replayMaxResponseBytes ?? process.env.COMMAND_PORTAL_REPLAY_MAX_RESPONSE_BYTES, 26_214_400),
     allowedOrigins: String(overrides.allowedOrigins ?? process.env.COMMAND_PORTAL_ALLOWED_ORIGINS ?? "")
       .split(",").map((item) => item.trim()).filter(Boolean),
     timeoutMs: integer(overrides.timeoutMs ?? process.env.COMMAND_PORTAL_REQUEST_TIMEOUT_MS, 8_000),
@@ -694,6 +724,64 @@ async function handleLocalApi(request, response, config, localFetch) {
   }
 }
 
+async function handleReplayApi(request, response, config, replayFetch) {
+  const url = new URL(request.url, "http://portal.invalid");
+  if (!requestOriginAllowed(request, config)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
+  if (!config.replayEnabled) return sendJson(response, 503, { ok: false, error: { code: "replay_gateway_disabled", message: "Runtime-owned Operational Replay is not configured for this deployment." }, truth: TRUTH });
+  if (url.search) return sendJson(response, 400, { ok: false, error: { code: "query_not_allowed", message: "Operational Replay routes do not accept browser query parameters." }, truth: TRUTH });
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, { Allow: "GET, OPTIONS", "Cache-Control": "no-store" });
+    return response.end();
+  }
+  if (request.method !== "GET") return sendJson(response, 405, { ok: false, error: { code: "method_not_allowed", message: "Operational Replay is a passive read-only surface." }, truth: TRUTH }, { Allow: "GET, OPTIONS" });
+  const replayPath = REPLAY_ROUTES[url.pathname];
+  if (!replayPath) return sendJson(response, 404, { ok: false, error: { code: "route_not_allowlisted", message: "This Operational Replay route is not allowlisted." }, truth: TRUTH });
+
+  const controller = new AbortController();
+  const streaming = replayPath === "/events";
+  const timer = streaming ? null : setTimeout(() => controller.abort(), config.localTimeoutMs);
+  response.on("close", () => controller.abort());
+  try {
+    const upstream = await replayFetch(`${config.replayBaseUrl}${replayPath}`, {
+      method: "GET",
+      headers: { Accept: streaming ? "text/event-stream" : "application/json, application/pdf, application/zip" },
+      signal: controller.signal,
+      redirect: "error",
+      cache: "no-store"
+    });
+    if (!upstream.ok || !upstream.body) {
+      return sendJson(response, upstream.status === 404 ? 404 : 503, { ok: false, error: { code: "replay_unavailable", message: `Operational Replay returned status ${upstream.status}.` }, truth: TRUTH });
+    }
+    const declaredLength = Number(upstream.headers.get("content-length") ?? 0);
+    if (!streaming && declaredLength > config.replayMaxResponseBytes) {
+      return sendJson(response, 502, { ok: false, error: { code: "replay_response_too_large", message: "Operational Replay response exceeded the gateway size limit." }, truth: TRUTH });
+    }
+    const headers = {
+      "Content-Type": upstream.headers.get("content-type") ?? (streaming ? "text/event-stream; charset=utf-8" : "application/octet-stream"),
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      ...(streaming ? { Connection: "keep-alive", "X-Accel-Buffering": "no" } : {}),
+      ...(upstream.headers.get("content-disposition") ? { "Content-Disposition": upstream.headers.get("content-disposition") } : {}),
+      ...(!streaming && declaredLength ? { "Content-Length": declaredLength } : {})
+    };
+    response.writeHead(200, headers);
+    let received = 0;
+    for await (const chunk of upstream.body) {
+      received += chunk.byteLength;
+      if (!streaming && received > config.replayMaxResponseBytes) throw new GatewayFailure("replay_response_too_large", "Operational Replay response exceeded the gateway size limit.", "Unknown", 502);
+      response.write(Buffer.from(chunk));
+    }
+    structuredLog("experience_gateway_operational_replay", { route: url.pathname, replayPath, streaming, status: 200 });
+    return response.end();
+  } catch (error) {
+    if (response.headersSent) return response.end();
+    const timedOut = error?.name === "AbortError" && !response.destroyed;
+    return sendJson(response, timedOut ? 504 : 503, { ok: false, error: { code: timedOut ? "replay_timed_out" : "replay_unavailable", message: timedOut ? "Operational Replay timed out." : "Operational Replay is unavailable." }, truth: TRUTH });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function validateRuntimeEnvelope(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new GatewayFailure("runtime_response_invalid", "Runtime response was not a JSON object.", "Unknown", 502);
@@ -1032,6 +1120,7 @@ export function createPortalServer(options = {}) {
   const runtimeFetch = options.runtimeFetch ?? globalThis.fetch;
   const localFetch = options.localFetch ?? globalThis.fetch;
   const operationalFetch = options.operationalFetch ?? globalThis.fetch;
+  const replayFetch = options.replayFetch ?? globalThis.fetch;
   const sessionAuthority = createSessionAuthority(config, options.clock);
   const cache = new Map();
   const tracker = { lastSuccessfulConnection: null, lastSuccessfulRefresh: null };
@@ -1057,6 +1146,9 @@ export function createPortalServer(options = {}) {
     } else if (request.url?.startsWith("/api/local")) {
       handleLocalApi(request, response, config, localFetch)
         .catch(() => sendJson(response, 500, localFailure(config, request.url, "local_gateway_error", "The local capability request failed safely.", "Unknown")));
+    } else if (request.url?.startsWith("/api/replay")) {
+      handleReplayApi(request, response, config, replayFetch)
+        .catch(() => sendJson(response, 500, { ok: false, error: { code: "replay_gateway_error", message: "Operational Replay failed safely." }, truth: TRUTH }));
     } else {
       serveStatic(request, response);
     }

@@ -2,7 +2,7 @@
 
 This component definition is governed by the [NEXUS Platform Constitution](NEXUS_Platform_Constitution.md).
 
-The NEXUS Experience Gateway is the official server-side boundary between NEXUS clients and the NEXUS Runtime Gateway. It belongs to the Experience Layer and is the only runtime communication path available to a browser or other client.
+The NEXUS Experience Gateway is the official server-side boundary between NEXUS clients and the NEXUS Runtime Gateway. It supports Operational Engagement and is the only runtime communication path available to a browser or other client.
 
 ## Communication flow
 

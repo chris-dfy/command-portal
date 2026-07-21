@@ -6,7 +6,20 @@ This Constitution is the canonical and authoritative architectural reference for
 
 NEXUS is a platform: the Enterprise eXecutive Unified System. It is not a web application, portal, desktop application, runtime, gateway, API, or mobile application. Those are independent, loosely coupled platform components.
 
-The NEXUS Runtime is authoritative. The Experience Layer is presentational.
+The NEXUS Runtime is authoritative. Operational Engagement clients are presentational.
+
+## Canonical architecture
+
+NEXUS is an Operational Understanding Platform composed of four architectural domains:
+
+1. **Runtime Foundation** — the shared substrate of host, registries, eventing, scheduling, identity, security, configuration, health, plugins, providers, memory, and APIs. It is not an operational capability.
+2. **Operational Understanding Loop** — Observe, Interpret, Correlate, Understand, Validate, Authorize, Coordinate, Communicate, Learn, then Observe again.
+3. **Operational Capabilities** — Operational Observation, Operational Understanding, Operational Validation, Operational Authority, Operational Orchestration, and Operational Engagement.
+4. **Operational Objects** — Signals, Entities, Context, Situations, Assessments, Decisions, Actions, and Learning.
+
+No single component owns the complete loop. Runtime capabilities contribute to it through governed Operational Objects. The Executive Operating Loop is the executive-facing visualization of the broader Operational Understanding Loop, and the Executive Operational Experience is its client presentation.
+
+The former six-layer architecture is historical terminology. Existing implementation names and contracts may retain legacy identifiers for compatibility, but new architecture documentation and planning use the canonical model.
 
 ## Official platform stack
 
@@ -130,6 +143,17 @@ Do not use informal substitutes such as the legacy browser-server acronym, front
 
 Do not introduce additional gateway names.
 
+Use Operational Understanding rather than static “intelligence” terminology when describing dynamic interpretation. Knowledge means static facts with explicit source classification; understanding means a time-bounded interpretation assembled from registered context and evidence.
+
+The six Operational Capabilities own these primary questions:
+
+- Operational Observation: “What is happening?”
+- Operational Understanding: “What does it mean?”
+- Operational Validation: “How certain are we?”
+- Operational Authority: “What are we allowed to do?”
+- Operational Orchestration: “What should happen next?”
+- Operational Engagement: “How should this be communicated?”
+
 ## Truth principles
 
 - The Runtime owns truth.
@@ -168,6 +192,8 @@ Authoritative assets and capabilities must be present, registered, configured, a
 ## Repository stability
 
 Repository names, Fly applications, Docker images, Runtime endpoints, environment variables, and deployment artifacts retain their established names. Implementation files are renamed only when the consistency benefit is significant and risk is low. Avoid unnecessary Git churn.
+
+Legacy layer names in existing APIs, database schemas, namespaces, persisted identifiers, or source files remain compatibility identifiers until a separately versioned migration is approved. Their presence does not make the historical layered model canonical.
 
 ## Change boundaries
 

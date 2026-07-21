@@ -1,10 +1,12 @@
 # NEXUS Command Portal
 
-The standalone NEXUS Experience Layer for observing a hosted Runtime and using governed capabilities from the authoritative local NEXUS Runtime through the NEXUS Experience Gateway.
+The standalone NEXUS Operational Engagement client for observing a hosted Runtime and using governed capabilities from the authoritative local NEXUS Runtime through the NEXUS Experience Gateway.
 
 The [NEXUS Platform Constitution](docs/architecture/NEXUS_Platform_Constitution.md) is the canonical architectural reference for this repository.
 
 ## Architecture
+
+NEXUS is an [Operational Understanding Platform](docs/architecture/Operational_Understanding_Platform.md) composed of a Runtime Foundation, the continuous Operational Understanding Loop, six Operational Capabilities, and shared Operational Objects. The portal presents the Executive Operational Experience; it does not own operational understanding, authority, or context assembly.
 
 ```text
 Executive User
@@ -86,3 +88,5 @@ Only capabilities reported as implemented by Runtime are presented as executable
 The portal preserves `productionReady=false`, `enterpriseReady=false`, `cloudPrimary=false`, `localSourceOfTruth=true`, `defaultProvider=mock_model`, `conclave=available_bounded_review`, and `actualTrainedSLMs=0`. Conclave is a structured Runtime review that preserves dissent but does not claim independent model participants or authorize execution. Provider configuration never proves reachability or live inference.
 
 See [HostedOperationalGateway.md](docs/HostedOperationalGateway.md), [ClientParityContract.md](docs/ClientParityContract.md), [LocalFirstParity.md](docs/LocalFirstParity.md), [ExperienceGateway.md](docs/architecture/ExperienceGateway.md), [RuntimeConnection.md](docs/RuntimeConnection.md), [FailureModes.md](docs/FailureModes.md), [Caching.md](docs/Caching.md), and [VersionNegotiation.md](docs/VersionNegotiation.md).
+
+The architecture transition and compatibility policy are documented in [ADR-0004](docs/adr/ADR-0004-operational-understanding-platform.md).
