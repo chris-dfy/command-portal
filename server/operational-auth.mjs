@@ -57,6 +57,7 @@ export function createSessionAuthority(config, clock = () => Date.now()) {
 
 export function requiredScope(runtimePath, method) {
   if (method === "GET") return "operations:read";
+  if (/^\/runtime-coordination\/admissions(?:\/[A-Za-z0-9_.%:@-]+\/(?:cancel|challenge\/reissue))?$/.test(runtimePath)) return "edge:node_admission:request";
   if (/^\/approvals\/.+\/(approve|deny)$/.test(runtimePath)) return "approvals:decide";
   if (runtimePath === "/actions/execute") return "actions:execute";
   if (runtimePath === "/actions/dry-run") return "actions:simulate";

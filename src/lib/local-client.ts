@@ -126,14 +126,263 @@ export type ClientCapabilityContract = {
   truth: { source: string; localRuntimeRequired: boolean; hostedExecutionAvailable: boolean; hostedExecutionMode: "single_workspace_alpha" | "disabled"; productionMultiTenantReady: false; remainingNativeSurfaces: string[]; secretValuesExposed: false };
 };
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export type RuntimeCoordinationNode = {
+  nodeId: string;
+  displayName: string;
+  tenantId?: string;
+  workspaceId?: string;
+  desiredConfiguration?: Record<string, unknown>;
+  observedManifest?: Record<string, unknown> | null;
+  stateVector?: Record<string, unknown>;
+  trust?: string | Record<string, unknown>;
+  freshness?: string | Record<string, unknown>;
+  healthDimensions?: Record<string, unknown> | null;
+  stateDivergence?: Record<string, unknown>;
+  posture?: string;
+  lastHeartbeatAt?: string | null;
+  evidenceRefs?: string[];
+  receiptRefs?: string[];
+  replayRefs?: string[];
+  coordinationEventRefs?: string[];
+  enrollment?: {
+    issuedAt?: string;
+    expiresAt?: string;
+    credentialVersion?: number;
+    status?: string;
+  };
+  limitations?: string[];
+};
+
+export type AdmissionDependency = {
+  dependencyId?: string;
+  capabilityId?: string;
+  id?: string;
+  name?: string;
+  state?: string;
+  available?: boolean;
+  healthy?: boolean;
+  reason?: string;
+};
+
+export type RuntimeAdmissionCapability = {
+  capabilityId?: string;
+  version?: string;
+  availability?: string;
+  available: boolean;
+  reason?: string;
+  dependencies?: AdmissionDependency[] | Record<string, AdmissionDependency | boolean | string>;
+  environmentAvailability?: Record<string, boolean>;
+  conditionalDependencies?: Record<string, Record<string, boolean>>;
+  constitutionalRequirements?: string[];
+  knownLimitations?: string[];
+  clientAccess?: { authenticated?: boolean; requestPermissionGranted?: boolean; allowed?: boolean; reason?: string };
+  session?: { authenticated?: boolean; reason?: string };
+  permission?: { allowed?: boolean; granted?: boolean; reason?: string };
+  authenticated?: boolean;
+  requestPermissionGranted?: boolean;
+  secretValuesExposed?: false;
+};
+
+export type RuntimeNodeFleet = {
+  recordType: string;
+  nodes: RuntimeCoordinationNode[];
+  summary?: Record<string, number>;
+  admissionCapability?: RuntimeAdmissionCapability;
+  limitations?: string[];
+  secretValuesExposed: false;
+};
+
+export type RuntimeAdmissionIntentRequest = {
+  missionId: string;
+  intent: {
+    displayName: string;
+    nodeClass: string;
+    requestedCapabilities: string[];
+    operationalPurpose: string;
+    location?: string;
+    deploymentMetadata?: Record<string, string | number | boolean | null>;
+    evidenceRefs?: string[];
+  };
+};
+
+export type RuntimeAdmission = {
+  admissionRequestId: string;
+  version?: string | number;
+  tenantId?: string;
+  workspaceId?: string;
+  missionId: string;
+  requestingPrincipalId?: string;
+  intent: RuntimeAdmissionIntentRequest["intent"];
+  lifecycleState: string;
+  taskGraph?: Array<Record<string, unknown>> | { tasks?: Array<Record<string, unknown>> };
+  policy?: Record<string, unknown> | null;
+  authority?: Record<string, unknown> | null;
+  challenge?: {
+    state?: string;
+    status?: string;
+    issuedAt?: string;
+    expiresAt?: string;
+    attemptsRemaining?: number;
+    reissueCount?: number;
+    reissueAvailable?: boolean;
+    secretValuesExposed?: false;
+  } | null;
+  verification?: Record<string, unknown> | null;
+  operationalAsset?: Record<string, unknown> | null;
+  firstHeartbeat?: Record<string, unknown> | null;
+  proofRefs?: string[];
+  receiptRefs?: string[];
+  replayRefs?: string[];
+  failure?: {
+    code?: string;
+    category?: string;
+    message?: string;
+    reason?: string;
+    retryable?: boolean;
+    remediation?: string;
+    nextAction?: string;
+    occurredAt?: string;
+  } | null;
+  allowedOperations?: string[] | Record<string, boolean>;
+  createdAt?: string;
+  updatedAt?: string;
+  secretValuesExposed: false;
+};
+
+export type RuntimeAdmissionList = {
+  recordType: string;
+  admissions?: RuntimeAdmission[];
+  admissionRequests?: RuntimeAdmission[];
+  requests?: RuntimeAdmission[];
+  admissionCapability?: RuntimeAdmissionCapability;
+  limitations?: string[];
+  secretValuesExposed: false;
+};
+
+export type RuntimeAdmissionResponse = RuntimeAdmission | {
+  recordType?: string;
+  admission?: RuntimeAdmission;
+  admissionRequest?: RuntimeAdmission;
+  request?: RuntimeAdmission;
+  secretValuesExposed?: false;
+};
+
+export type ConclaveTask = {
+  task_id: string;
+  objective: string;
+  expected_outputs: string[];
+  evidence_required: string[];
+  completion_criteria: string[];
+  confidence: number | null;
+  priority: number;
+  dependencies: string[];
+  status: string;
+  specialist_id: string | null;
+  evidence_ids: string[];
+};
+
+export type ConclaveSpecialist = {
+  specialist_id: string;
+  name: string;
+  purpose: string;
+  task_domains: string[];
+  required_evidence: string[];
+  enabled: boolean;
+  assignedTaskIds: string[];
+  taskStatuses: string[];
+};
+
+export type ConclaveEvidence = {
+  evidence_id: string;
+  workspace_id: string;
+  origin: string;
+  source_classification: string;
+  collected_at: string;
+  collector: string;
+  confidence: number;
+  claim: string;
+  supporting_artifacts: string[];
+  relationships: string[];
+  operational_context: Record<string, unknown>;
+  content_digest: string;
+};
+
+export type ConclaveWorkspaceRecord = {
+  recordType: "nexus_conclave_workspace";
+  schemaVersion: string;
+  created: boolean;
+  workspaceId: string;
+  missionId: string;
+  proposal: string;
+  status: string;
+  operationalStatus: string;
+  executionAuthorized: false;
+  externalExecutionPerformed: false;
+  coordinationActive: boolean;
+  waitingForEvidence: boolean;
+  mission: Record<string, unknown>;
+  dashboard: Record<string, unknown>;
+  objectives: string[];
+  questions: Array<{ questionId: string; text: string }>;
+  unknowns: Array<{ unknownId: string; text: string }>;
+  tasks: ConclaveTask[];
+  specialistRegistry: ConclaveSpecialist[];
+  evidence: ConclaveEvidence[];
+  contradictions: Array<Record<string, unknown>>;
+  executiveSummary: Record<string, unknown> | null;
+  completionReceipt: Record<string, unknown> | null;
+  lifecycleReceipt: {
+    receiptId: string;
+    missionId: string;
+    replayId: string;
+    recordedStatus: string;
+    contentDigest: string;
+    completionClaimed: false;
+  } | null;
+  operationalReplay: {
+    runId: string;
+    status: string;
+    contentDigest: string;
+    stageCount: number;
+    stages: Array<{
+      sequence: number;
+      stageId: string;
+      stageName: string;
+      status: string;
+      explanation: string;
+      startedAt: string;
+      completedAt: string;
+      evidenceRefs: string[];
+    }>;
+  };
+  scope: { tenantId: string; workspaceId: string; requestingPrincipalId?: string };
+  recommendedNextAction: string;
+  constitutionalBasis: Record<string, unknown>;
+  limitations: string[];
+  secretValuesExposed: false;
+};
+
+export type ConclaveWorkspaceList = {
+  recordType: "nexus_conclave_workspace_list";
+  schemaVersion: string;
+  workspaceCount: number;
+  workspaces: ConclaveWorkspaceRecord[];
+  scope: { tenantId: string; workspaceId: string };
+  constitutionalBasis: Record<string, unknown>;
+  secretValuesExposed: false;
+};
+
+async function request<T>(path: string, options: RequestInit = {}, idempotencyKey?: string): Promise<T> {
   const hosted = capabilityTransport.mode === "hosted";
   const response = await fetch(`${hosted ? "/api/operations" : "/api/local"}${path}`, {
     ...options,
     headers: {
       Accept: "application/json",
       ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(hosted && options.method === "POST" ? { "X-CSRF-Token": capabilityTransport.csrfToken, "Idempotency-Key": globalThis.crypto.randomUUID() } : {}),
+      ...(options.method === "POST" ? {
+        ...(hosted ? { "X-CSRF-Token": capabilityTransport.csrfToken } : {}),
+        ...(idempotencyKey || hosted ? { "Idempotency-Key": idempotencyKey ?? globalThis.crypto.randomUUID() } : {}),
+      } : {}),
       ...(options.headers ?? {})
     },
     credentials: "same-origin"
@@ -179,7 +428,11 @@ export const operationalSessionClient = Object.freeze({
   mode: () => capabilityTransport.mode
 });
 
-const post = <T,>(path: string, body: Record<string, unknown>) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
+const post = <T, B extends object = Record<string, unknown>>(path: string, body: B, idempotencyKey?: string) => request<T>(
+  path,
+  { method: "POST", body: JSON.stringify(body) },
+  idempotencyKey,
+);
 
 export const localNexusClient = Object.freeze({
   status: () => request<Record<string, unknown>>("/status"),
@@ -199,6 +452,15 @@ export const localNexusClient = Object.freeze({
   missions: () => request<Record<string, unknown>>("/missions"),
   planMission: (objective: string) => post<Record<string, unknown>>("/missions/plan", { objective }),
   executeMissionStep: (missionId: string, stepId: string) => post<Record<string, unknown>>(`/missions/${encodeURIComponent(missionId)}/execute-step`, { stepId }),
+  conclaveWorkspaces: () => request<ConclaveWorkspaceList>("/conclave/workspaces"),
+  createConclaveWorkspace: (proposal: string, idempotencyKey: string) => post<ConclaveWorkspaceRecord>(
+    "/conclave/workspaces",
+    { proposal },
+    idempotencyKey,
+  ),
+  conclaveWorkspace: (missionId: string) => request<ConclaveWorkspaceRecord>(
+    `/conclave/workspaces/${encodeURIComponent(missionId)}`,
+  ),
   workSessions: () => request<Record<string, unknown>>("/work-sessions"),
   planWorkSession: (objective: string) => post<Record<string, unknown>>("/work-sessions/plan", { objective }),
   startWorkSession: (objective: string) => post<Record<string, unknown>>("/work-sessions/start", { objective }),
@@ -212,6 +474,42 @@ export const localNexusClient = Object.freeze({
   executeAction: (action: string) => post<Record<string, unknown>>("/actions/execute", { action, explicitRequest: true }),
   connectors: () => request<Record<string, unknown>>("/connectors"),
   connectorHealth: () => request<Record<string, unknown>>("/connectors/health"),
+  runtimeNodes: () => request<RuntimeNodeFleet>("/runtime-coordination/nodes"),
+  runtimeAdmissions: () => request<RuntimeAdmissionList>("/runtime-coordination/admissions"),
+  createRuntimeAdmission: (intent: RuntimeAdmissionIntentRequest, idempotencyKey: string) => post<RuntimeAdmissionResponse>(
+    "/runtime-coordination/admissions",
+    intent,
+    idempotencyKey,
+  ),
+  runtimeAdmission: (admissionRequestId: string) => request<RuntimeAdmissionResponse>(
+    `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}`,
+  ),
+  cancelRuntimeAdmission: (
+    admissionRequestId: string,
+    expectedVersion: number,
+    reason: string,
+    idempotencyKey: string,
+  ) => post<RuntimeAdmissionResponse>(
+    `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}/cancel`,
+    { expectedVersion, reason },
+    idempotencyKey,
+  ),
+  reissueRuntimeAdmissionChallenge: (
+    admissionRequestId: string,
+    expectedVersion: number,
+    reason: string,
+    idempotencyKey: string,
+  ) => post<RuntimeAdmissionResponse>(
+    `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}/challenge/reissue`,
+    { expectedVersion, reason },
+    idempotencyKey,
+  ),
+  runtimeAdmissionReceipt: (admissionRequestId: string) => request<Record<string, unknown>>(
+    `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}/receipt`,
+  ),
+  runtimeAdmissionReplay: (admissionRequestId: string) => request<Record<string, unknown>>(
+    `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}/replay`,
+  ),
   proofs: () => request<Record<string, unknown>>("/proofs"),
   receipts: () => request<Record<string, unknown>>("/receipts")
 });

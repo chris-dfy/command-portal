@@ -13,7 +13,16 @@ Configure these server-only secrets and variables in the hosting environment:
 - `COMMAND_PORTAL_CACHE_TTL_MS=15000`
 - `COMMAND_PORTAL_MAX_RESPONSE_BYTES=1048576`
 
-To enable the single-workspace Hosted Operational Gateway, provision every server-only operational variable from `.env.example`, deploy the execution Runtime behind HTTPS, and provision the matching `NEXUS_HOSTED_OPERATIONAL_TOKEN`, tenant ID, and workspace ID in that Runtime. Never enable operational mode while the Runtime ingress token or fixed workspace binding is absent.
+To enable the single-workspace Hosted Operational Gateway, provision every server-only operational variable from `.env.example`, deploy the execution Runtime behind HTTPS, and provision the matching Runtime token, tenant, workspace, and fixed service bindings:
+
+- `NEXUS_HOSTED_OPERATIONAL_TOKEN` matches `COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN`;
+- `NEXUS_HOSTED_TENANT_ID` matches `COMMAND_PORTAL_TENANT_ID`;
+- `NEXUS_HOSTED_WORKSPACE_ID` matches `COMMAND_PORTAL_WORKSPACE_ID`;
+- `NEXUS_HOSTED_SERVICE_ID` matches `COMMAND_PORTAL_OPERATOR_USER_ID`;
+- `NEXUS_HOSTED_SERVICE_ROLE` matches `COMMAND_PORTAL_OPERATOR_ROLE`; and
+- `NEXUS_HOSTED_SERVICE_SCOPES` matches `COMMAND_PORTAL_OPERATIONAL_SCOPES` using the same comma-separated values.
+
+Never enable operational mode while any ingress or fixed-binding value is absent or mismatched. This is a fixed single-operator compatibility boundary, not enterprise identity, multi-user RBAC, or an Authority Grant. `productionMultiTenantReady` remains `false`.
 
 Build with `npm run build` and start with `npm run start`. Never create a browser-visible `VITE_` runtime variable. After deployment, verify every allowlisted route, mutation rejection, secret isolation, failure rendering, and the live topology.
 

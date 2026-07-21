@@ -1,64 +1,92 @@
 import { useState } from "react";
-import { BrainCircuit, CheckCircle2, Scale, ShieldAlert, TriangleAlert } from "lucide-react";
+import { BrainCircuit, CheckCircle2, RefreshCw, Scale, ShieldAlert, TriangleAlert } from "lucide-react";
 import { DataPanel } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
-import { runConclaveReview, type ConclaveReview } from "../lib/conclave-client";
+import { startConclaveInvestigation, type ConclaveRun } from "../lib/conclave-client";
+import { localNexusClient } from "../lib/local-client";
 import { displayLabel } from "../lib/presentation";
 
-const suggestedProposal = "Authorize a new operational capability before registered evidence, governance authority, and rollback criteria are complete.";
+const suggestedProposal = "Investigate how an Edge Runtime can establish evidence-only communication with an unfamiliar operational asset, identify every available interface, and recommend the safest next test.";
 
 export function ConclaveWorkspace({ status }: { status?: Record<string, unknown> | null }) {
   const [proposal, setProposal] = useState("");
-  const [review, setReview] = useState<ConclaveReview | null>(null);
+  const [run, setRun] = useState<ConclaveRun | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const workspace = run?.workspace ?? null;
+  const review = run?.preflightReview ?? null;
+  const taskCounts = workspace?.tasks.reduce<Record<string, number>>((counts, task) => {
+    counts[task.status] = (counts[task.status] ?? 0) + 1;
+    return counts;
+  }, {}) ?? {};
 
-  async function runReview() {
+  async function startInvestigation() {
     const value = proposal.trim();
     if (!value || busy) return;
     setBusy(true); setError(null);
-    try { setReview(await runConclaveReview(value)); }
+    try { setRun(await startConclaveInvestigation(value)); }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setBusy(false); }
+  }
+
+  async function refreshWorkspace() {
+    if (!workspace || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const refreshed = await localNexusClient.conclaveWorkspace(workspace.missionId);
+      setRun((current) => current ? { ...current, workspace: refreshed } : current);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
   }
 
   return <div className="conclave-workspace">
     <section className="conclave-hero">
-      <div><span>Runtime-owned decision challenge</span><h2>Conclave</h2><p>Pressure-test an assessment before governance or execution. Conclave preserves disagreement, identifies missing evidence, and returns a bounded synthesis grounded only in registered Operational Context.</p></div>
-      <aside><StatusPill value={String(status?.state ?? "available")} /><strong>Structured Runtime review</strong><small>No execution authority · No fabricated independent agents</small></aside>
+      <div><span>Runtime-owned knowledge acquisition</span><h2>Conclave</h2><p>Launch an isolated investigation workspace, route evidence-gated tasks to the configurable specialist registry, and follow the work through Operational Replay. Conclusions remain withheld until the evidence supports them.</p></div>
+      <aside><StatusPill value={workspace?.status ?? String(status?.state ?? "available")} /><strong>Live governed investigation</strong><small>Real workspace · Dissent preserved · Execution Not authorized</small></aside>
     </section>
 
-    <DataPanel eyebrow="Proposal under review" title="Frame the decision" icon={<Scale size={18} />}>
-      <div className="conclave-composer"><label htmlFor="conclave-proposal">What should Conclave challenge?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><button onClick={() => void runReview()} disabled={!proposal.trim() || busy}><BrainCircuit size={16} />{busy ? "Reviewing registered context…" : "Run governed review"}</button></div></div>
+    <DataPanel eyebrow="Investigation mission" title="Frame the operational question" icon={<Scale size={18} />}>
+      <div className="conclave-composer"><label htmlFor="conclave-proposal">What should Conclave investigate?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><span className="conclave-composer__actions">{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={!proposal.trim() || busy}><BrainCircuit size={16} />{busy ? "Coordinating…" : "Start governed investigation"}</button></span></div></div>
       {error && <p className="conclave-error" role="alert">{error}</p>}
     </DataPanel>
 
     <section className="conclave-context-grid" aria-label="Conclave mission workspace">
-      <article><span>Mission</span><strong>{review?.reviewId ?? "Review not started"}</strong><p>{proposal || "Frame a governed mission decision above."}</p></article>
-      <article><span>Objectives</span><strong>Challenge before progression</strong><p>Identify missing authority, evidence, constraints, and rollback expectations.</p></article>
-      <article><span>Knowledge</span><strong>{review?.provenanceCount ?? 0} provenance records</strong><p>Only registered Runtime context contributes to synthesis.</p></article>
-      <article><span>Unknowns</span><strong>{review?.missingContextDomains.length ?? 0} open domains</strong><p>{review?.missingContextDomains.join(", ") || "Unknowns populate after review."}</p></article>
-      <article><span>Task Graph</span><strong>{review ? "Review → Challenge → Synthesis" : "Awaiting proposal"}</strong><p>Conclave does not execute the resulting mission graph.</p></article>
-      <article><span>Specialists</span><strong>{review?.perspectives.length ?? 0} assigned perspectives</strong><p>{review?.perspectives.map((item) => item.name).join(", ") || "Specialists populate from the governed review."}</p></article>
-      <article><span>Evidence</span><strong>{review?.proofIds.length ?? 0} proof references</strong><p>{review?.proofIds.join(", ") || "No review evidence is selected."}</p></article>
-      <article><span>Knowledge Graph</span><strong>{review ? "Context relationships established" : "Not established"}</strong><p>Provenance, dissent, missing domains, and conclusions remain linked.</p></article>
-      <article><span>Operational Replay</span><strong>{review ? "Review replay available" : "No replay"}</strong><p>Review stages remain inspectable through the permanent Replay workspace.</p></article>
-      <article><span>Executive Conclusions</span><strong>{review ? displayLabel(review.outcome) : "Pending"}</strong><p>{review?.synthesis ?? "Run a review to establish a bounded conclusion."}</p></article>
+      <article><span>Mission</span><strong>{workspace?.missionId ?? "Not started"}</strong><p>{workspace?.proposal ?? (proposal || "Frame an investigation mission above.")}</p></article>
+      <article><span>Objectives</span><strong>{workspace ? `${workspace.objectives.length} evidence lanes` : "Awaiting mission"}</strong><p>Domain-neutral inquiry routes through the existing Knowledge Acquisition Engine.</p></article>
+      <article><span>Knowledge</span><strong>{workspace?.evidence.length ?? 0} admitted Evidence records</strong><p>Working state stays in Mission Store; nothing is silently promoted to Knowledge Store.</p></article>
+      <article><span>Unknowns</span><strong>{workspace?.unknowns.length ?? 0} open questions</strong><p>{workspace ? "Unknowns remain first-class until Evidence resolves them." : "Unknowns populate when the workspace is created."}</p></article>
+      <article><span>Task Graph</span><strong>{workspace ? `${taskCounts.in_progress ?? 0} active · ${taskCounts.complete ?? 0} complete` : "Awaiting mission"}</strong><p>{workspace ? `${taskCounts.assigned ?? 0} dependency-gated tasks are waiting.` : "Tasks are generated by the CAO-005 Mission Planner."}</p></article>
+      <article><span>Specialists</span><strong>{workspace?.specialistRegistry.filter((item) => item.assignedTaskIds.length).length ?? 0} assigned roles</strong><p>Roles are configurable and contain no product-specific expertise.</p></article>
+      <article><span>Evidence</span><strong>{workspace?.evidence.length ?? 0} immutable records</strong><p>{workspace?.waitingForEvidence ? "Active specialists are waiting for authorized collectors." : "Evidence posture updates from the Runtime."}</p></article>
+      <article><span>Knowledge Graph</span><strong>{workspace ? `${workspace.contradictions.length} open contradiction records` : "Not established"}</strong><p>Findings, provenance, unknowns, and contradictions remain linked.</p></article>
+      <article><span>Operational Replay</span><strong>{workspace ? `${workspace.operationalReplay.stageCount} recorded stages` : "No Replay"}</strong><p>{workspace ? workspace.operationalReplay.contentDigest : "Replay begins when the mission is admitted."}</p></article>
+      <article><span>Lifecycle Receipt</span><strong>{workspace?.lifecycleReceipt?.receiptId ?? "Not issued"}</strong><p>{workspace?.lifecycleReceipt ? `Recorded ${workspace.lifecycleReceipt.recordedStatus}; completion is not claimed.` : "A Runtime receipt is issued when the mission lifecycle starts."}</p></article>
+      <article><span>Executive Conclusions</span><strong>{workspace?.executiveSummary ? "Evidence-backed synthesis available" : "Withheld"}</strong><p>{workspace?.recommendedNextAction ?? "Conclusions require completed tasks and admitted Evidence."}</p></article>
     </section>
 
-    {review ? <>
-      <section className="conclave-summary" data-outcome={review.outcome}>
-        <div><span>Conclave synthesis</span><h3>{displayLabel(review.outcome)}</h3><p>{review.synthesis}</p></div>
-        <dl><div><dt>Confidence</dt><dd>{Math.round(review.confidence * 100)}%</dd></div><div><dt>Context coverage</dt><dd>{Math.round(review.contextCompleteness * 100)}%</dd></div><div><dt>Dissent preserved</dt><dd>{review.dissent.length}</dd></div><div><dt>Execution</dt><dd>Not authorized</dd></div></dl>
+    {workspace ? <>
+      <section className="conclave-summary" data-outcome={workspace.waitingForEvidence ? "insufficient_context" : workspace.status}>
+        <div><span>Mission Executor posture</span><h3>{displayLabel(workspace.status)}</h3><p>{workspace.recommendedNextAction}</p></div>
+        <dl><div><dt>Active tasks</dt><dd>{taskCounts.in_progress ?? 0}</dd></div><div><dt>Evidence</dt><dd>{workspace.evidence.length}</dd></div><div><dt>Replay stages</dt><dd>{workspace.operationalReplay.stageCount}</dd></div><div><dt>External execution</dt><dd>Not performed</dd></div></dl>
       </section>
-      <div className="conclave-perspectives">{review.perspectives.map((item) => <article key={item.id} data-position={item.position}>
-        <header>{item.position === "challenge" ? <ShieldAlert size={18} /> : <CheckCircle2 size={18} />}<div><span>{item.mandate}</span><h3>{item.name}</h3></div><StatusPill value={item.position} /></header>
-        <p>{item.assessment}</p>
-        {item.requiredEvidence.length > 0 && <section><strong>Required before progression</strong><ul>{item.requiredEvidence.map((evidence) => <li key={evidence}>{evidence}</li>)}</ul></section>}
-      </article>)}</div>
-      <DataPanel eyebrow="Truth boundary" title="What this review does not establish" icon={<TriangleAlert size={18} />}>
-        <div className="conclave-boundary"><p>This review is Runtime evidence, not proof that the proposal is correct. It does not authorize or perform execution.</p><div>{review.missingContextDomains.map((domain) => <StatusPill key={domain} value={`${domain} missing`} tone="warn" />)}</div><small>{review.reviewId} · {review.provenanceCount} provenance records · {new Date(review.reviewedAt).toLocaleString()}</small></div>
+
+      <div className="conclave-perspectives">{workspace.tasks.map((task) => {
+        const specialist = workspace.specialistRegistry.find((item) => item.specialist_id === task.specialist_id);
+        return <article key={task.task_id} data-position={task.status === "blocked" ? "challenge" : task.status === "complete" ? "support" : "conditional"}>
+          <header>{task.status === "blocked" ? <ShieldAlert size={18} /> : <CheckCircle2 size={18} />}<div><span>{specialist?.purpose ?? "Unassigned specialist role"}</span><h3>{specialist?.name ?? task.specialist_id ?? "Unassigned"}</h3></div><StatusPill value={task.status} /></header>
+          <p>{task.objective}</p>
+          <section><strong>Required before progression</strong><ul>{task.evidence_required.map((item) => <li key={item}>{item}</li>)}</ul></section>
+          <small>{task.task_id} · {task.evidence_ids.length} Evidence record(s) · {task.dependencies.length} dependencies</small>
+        </article>;
+      })}</div>
+
+      {review && <DataPanel eyebrow="Conclave synthesis" title={displayLabel(review.outcome)} icon={<ShieldAlert size={18} />}>
+        <div className="conclave-boundary"><p>{review.synthesis}</p><div>{review.missingContextDomains.map((domain) => <StatusPill key={domain} value={`${domain} missing`} tone="warn" />)}</div><small>{review.reviewId} · This diagnostic review does not replace the live investigation workspace.</small></div>
+      </DataPanel>}
+
+      <DataPanel eyebrow="Truth boundary" title="Current operational limits" icon={<TriangleAlert size={18} />}>
+        <div className="conclave-boundary"><p>The workspace is executing coordination, not device control. A task state does not claim a specialist or operational asset performed work.</p><ul>{workspace.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul>{run?.preflightUnavailableReason && <small>Diagnostic preflight unavailable: {run.preflightUnavailableReason}</small>}<small>{workspace.missionId} · scope {workspace.scope.tenantId}/{workspace.scope.workspaceId}</small></div>
       </DataPanel>
-    </> : <section className="conclave-empty"><BrainCircuit size={25} /><div><strong>No review has been run in this client session.</strong><p>Frame a proposal above. Conclave will expose challenges and missing evidence before the work moves toward governance.</p></div></section>}
+    </> : <section className="conclave-empty"><BrainCircuit size={25} /><div><strong>No live investigation is active in this client session.</strong><p>Frame a mission above. Conclave will create an isolated workspace, task graph, specialist assignments, and Replay stream in the operational Runtime.</p></div></section>}
   </div>;
 }
