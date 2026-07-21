@@ -113,7 +113,7 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
   const [app, center, contract, portalClient] = await Promise.all([
     read("../src/App.tsx"), read("../src/components/OperationsCenter.tsx"), read("../src/lib/eox-client.ts"), read("../src/lib/portal-client.ts")
   ]);
-  assert.match(app, /return AREAS\.some\(\(area\) => area\.id === value\) \? value : "dashboard"/);
+  assert.match(app, /return isAreaId\(pathValue\) \? pathValue : "dashboard"/);
   assert.match(app, /active === "dashboard"/);
   for (const label of ["Operations Center", "Executive Brief", "Operational Health", "Attention Queue", "Recommended Actions", "Operational Understanding", "Mission Timeline", "Executive state"]) assert.match(center, new RegExp(label));
   assert.match(center, /assessment\.loop\.map/);
@@ -124,6 +124,15 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
   assert.match(center, /persistent NEXUS copilot is the client presentation surface/i);
   assert.doesNotMatch(contract, /beginBriefing|speechRequested|\/api\/runtime\/executive-briefing/);
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(center + contract), false);
+});
+
+test("direct hosted workspace paths survive a fresh page load", async () => {
+  const app = await read("../src/App.tsx");
+  assert.match(app, /window\.location\.pathname/);
+  assert.match(app, /window\.location\.hash/);
+  assert.match(app, /if \(isAreaId\(hashValue\)\) return hashValue/);
+  assert.match(app, /const \[active, setActive\] = useState<AreaId>\(routeFromLocation\)/);
+  assert.match(app, /setActive\(routeFromLocation\(\)\)/);
 });
 
 test("Conclave is a visible Runtime-owned decision challenge capability", async () => {
