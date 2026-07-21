@@ -71,7 +71,13 @@ const RAIL_GROUPS: PlatformRailGroup[] = (["Platform", "Capabilities"] as const)
 const record = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const list = (value: unknown) => Array.isArray(value) ? value as Record<string, unknown>[] : [];
 const STATE_PRIORITY: ConnectionState[] = ["Unauthorized", "Schema Mismatch", "Version Mismatch", "Timed Out", "Unavailable", "Unknown", "Degraded", "Retrying", "Connecting", "Healthy"];
-const routeFromHash = (): AreaId => { const value = window.location.hash.replace(/^#\/?/, "") as AreaId; return AREAS.some((area) => area.id === value) ? value : "dashboard"; };
+const isAreaId = (value: string): value is AreaId => AREAS.some((area) => area.id === value);
+const routeFromLocation = (): AreaId => {
+  const hashValue = window.location.hash.replace(/^#\/?/, "");
+  if (isAreaId(hashValue)) return hashValue;
+  const pathValue = window.location.pathname.replace(/^\/+|\/+$/g, "").split("/")[0] ?? "";
+  return isAreaId(pathValue) ? pathValue : "dashboard";
+};
 const COPILOT_TO_PLATFORM: Record<CopilotAreaId, AreaId> = {
   center: "dashboard", intake: "documents", projects: "projects", voice: "voice",
   operations: "mission-control", replay: "replay", missions: "missions", knowledge: "knowledge", edge: "edge",
@@ -127,7 +133,7 @@ export function App() {
   const appearance = useAppearanceSettings();
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>({});
   const [failures, setFailures] = useState<GatewayEnvelope[]>([]);
-  const [active, setActive] = useState<AreaId>(routeFromHash);
+  const [active, setActive] = useState<AreaId>(routeFromLocation);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
@@ -153,7 +159,7 @@ export function App() {
     return () => { active = false; };
   }, []);
   useEffect(() => { const timer = window.setInterval(() => refresh(false), 30_000); return () => window.clearInterval(timer); }, []);
-  useEffect(() => { const sync = () => setActive(routeFromHash()); window.addEventListener("hashchange", sync); return () => window.removeEventListener("hashchange", sync); }, []);
+  useEffect(() => { const sync = () => setActive(routeFromLocation()); window.addEventListener("hashchange", sync); return () => window.removeEventListener("hashchange", sync); }, []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); focusPlatformSearch(); }
