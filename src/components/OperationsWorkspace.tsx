@@ -14,7 +14,7 @@ const records = (value: unknown, keys: string[]): RuntimeRecord[] => {
 const text = (value: unknown, fallback = "Unavailable") => typeof value === "string" && value.trim() ? value : fallback;
 const idOf = (item: RuntimeRecord, keys: string[]) => keys.map((key) => item[key]).find((value) => typeof value === "string") as string | undefined;
 
-export function OperationsWorkspace() {
+export function OperationsWorkspace({ session, onSessionChange }: { session: OperationalSession; onSessionChange: (session: OperationalSession) => void }) {
   const [contract, setContract] = useState<ClientCapabilityContract | null>(null);
   const [missions, setMissions] = useState<RuntimeRecord[]>([]);
   const [sessions, setSessions] = useState<RuntimeRecord[]>([]);
@@ -25,9 +25,6 @@ export function OperationsWorkspace() {
   const [result, setResult] = useState<RuntimeRecord | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [session, setSession] = useState<OperationalSession>({ authenticated: false });
-  const [accessKey, setAccessKey] = useState("");
-  const [sessionChecked, setSessionChecked] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true); setError("");
@@ -44,13 +41,7 @@ export function OperationsWorkspace() {
     finally { setBusy(false); }
   }, []);
 
-  useEffect(() => {
-    operationalSessionClient.status()
-      .then((next) => { operationalSessionClient.use(next); setSession(next); })
-      .catch(() => operationalSessionClient.use({ authenticated: false }))
-      .finally(() => setSessionChecked(true));
-  }, []);
-  useEffect(() => { if (sessionChecked) void refresh(); }, [refresh, sessionChecked]);
+  useEffect(() => { if (session.authenticated) void refresh(); }, [refresh, session.authenticated]);
 
   const run = async (operation: () => Promise<RuntimeRecord>, refreshAfter = true) => {
     setBusy(true); setError("");
@@ -65,26 +56,17 @@ export function OperationsWorkspace() {
     return false;
   };
 
-  const login = async () => {
-    setBusy(true); setError("");
-    try {
-      const next = await operationalSessionClient.login(accessKey);
-      operationalSessionClient.use(next); setSession(next); setAccessKey(""); await refresh();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Authentication failed."); }
-    finally { setBusy(false); }
-  };
-
   const logout = async () => {
     setBusy(true); setError("");
-    try { const next = await operationalSessionClient.logout(); operationalSessionClient.use(next); setSession(next); }
+    try { const next = await operationalSessionClient.logout(); operationalSessionClient.use(next); onSessionChange(next); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Sign out failed."); }
     finally { setBusy(false); }
   };
 
   return <div className="experience-grid operations-workspace">
-    <DataPanel eyebrow="Hosted Operational Gateway" title={session.authenticated ? "Authenticated operational session" : "Operational sign in"} icon={<ShieldAlert size={18} />} className="span-2">
-      {session.authenticated ? <div className="session-strip"><article><span>User</span><strong>{session.userId}</strong></article><article><span>Tenant</span><strong>{session.tenantId}</strong></article><article><span>Workspace</span><strong>{session.workspaceId}</strong></article><article><span>Role</span><strong>{session.role}</strong></article><StatusPill value="authenticated" /><button className="secondary-action" onClick={() => void logout()} disabled={busy}>Sign out</button></div> : <div className="session-login"><label className="operation-field"><span>Operator access key</span><input type="password" autoComplete="current-password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} placeholder="Enter the hosted operator access key" /></label><button className="secondary-action" onClick={() => void login()} disabled={busy || accessKey.length < 16}>Authenticate</button></div>}
-      <p className="boundary-note">{session.authenticated ? "Requests use an HttpOnly session, CSRF verification, scoped authorization, fixed tenant/workspace identity, and per-mutation idempotency keys." : "Without a hosted session, the client remains in local-first mode. Hosted credentials never enter browser storage."}</p>
+    <DataPanel eyebrow="Hosted Operational Gateway" title="Authenticated operational session" icon={<ShieldAlert size={18} />} className="span-2">
+      <div className="session-strip"><article><span>User</span><strong>{session.userId}</strong></article><article><span>Tenant</span><strong>{session.tenantId}</strong></article><article><span>Workspace</span><strong>{session.workspaceId}</strong></article><article><span>Role</span><strong>{session.role}</strong></article><StatusPill value="authenticated" /><button className="secondary-action" onClick={() => void logout()} disabled={busy}>Sign out</button></div>
+      <p className="boundary-note">Requests use an HttpOnly session, CSRF verification, scoped authorization, fixed tenant/workspace identity, and per-mutation idempotency keys.</p>
       <p className="boundary-note">Current classification: <strong>single-workspace hosted alpha</strong>. Production multi-tenant readiness remains false until external identity-provider login and persistent tenant-isolation verification are complete.</p>
     </DataPanel>
     <DataPanel eyebrow="Client parity contract" title="Runtime-owned operational surface" icon={<Network size={18} />} className="span-2">

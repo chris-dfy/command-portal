@@ -277,11 +277,16 @@ test("navigation, Context Inspector, and NEXUS reflow without covering the works
 });
 
 test("canonical shell bootstraps the hosted operational session before mounting workspaces", async () => {
-  const app = await read("../src/App.tsx");
+  const [app, gate] = await Promise.all([read("../src/App.tsx"), read("../src/components/OperationalAccessGate.tsx")]);
   assert.match(app, /operationalSessionClient\.status\(\)/);
   assert.match(app, /operationalSessionClient\.use\(session\)/);
   assert.match(app, /operationalSessionClient\.use\(\{ authenticated: false \}\)/);
   assert.match(app, /!sessionBootstrapComplete \|\| \(loading && !Object\.keys\(snapshot\)\.length\)/);
+  assert.match(app, /OPERATIONAL_AREAS\.has\(active\) && !operationalSession\.authenticated/);
+  assert.match(app, /<OperationalAccessGate workspace=\{current\.label\}/);
+  assert.match(gate, /operationalSessionClient\.login\(accessKey\)/);
+  assert.match(gate, /HttpOnly, scoped session/);
+  assert.doesNotMatch(gate, /localStorage|sessionStorage/);
   for (const mapping of ['replay: "replay"', 'missions: "missions"', 'knowledge: "knowledge"', 'edge: "edge"']) assert.match(app, new RegExp(mapping));
   assert.doesNotMatch(app, /as never/);
 });
