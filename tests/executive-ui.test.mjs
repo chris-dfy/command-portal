@@ -99,13 +99,24 @@ test("mission control consumes the versioned Runtime parity contract", async () 
   const [app, workspace, client] = await Promise.all([
     read("../src/App.tsx"), read("../src/components/OperationsWorkspace.tsx"), read("../src/lib/local-client.ts")
   ]);
-  for (const label of ["Mission Control", "Work Sessions", "Approval queue", "Simulate before governed action", "Connector readiness"]) assert.match(`${app}\n${workspace}`, new RegExp(label));
-  for (const operation of ["clientCapabilities", "planMission", "startWorkSession", "controlWorkSession", "approve", "deny", "dryRunAction", "executeAction", "connectors"]) assert.match(client, new RegExp(operation));
-  assert.match(workspace, /Operational behavior, context assembly, governance decisions, proofs, and receipts remain owned by NEXUS Runtime/);
-  assert.match(workspace, /Runtime policy and approval gates remain authoritative/);
-  for (const boundary of ["Hosted Operational Gateway", "HttpOnly session", "CSRF verification", "single-workspace hosted alpha", "Production multi-tenant readiness remains false"]) assert.match(workspace, new RegExp(boundary));
+  for (const label of ["Mission Control", "Mission portfolio", "Mission Executor", "Mission receipts", "Operational Replay", "Capability-specific readiness"]) assert.match(`${app}\n${workspace}`, new RegExp(label));
+  for (const operation of ["capabilityReadiness", "missions", "mission", "missionReceipts", "operationalReplayForMission", "planMission"]) assert.match(client, new RegExp(operation));
+  assert.match(workspace, /Mission status, task graph, receipts, and Replay come from independent canonical Runtime routes/);
+  assert.match(workspace, /Authentication and role never establish operational Authority/);
+  for (const boundary of ["Hosted Operational Gateway", "Session expiration", "server-derived", "authenticated Runtime"]) assert.match(workspace, new RegExp(boundary));
+  for (const staleCall of ["clientCapabilities\\(\\)", "workSessions\\(\\)", "approvals\\(\\)", "connectors\\(\\)", "dryRunAction\\(", "executeAction\\("]) assert.doesNotMatch(workspace, new RegExp(staleCall));
   assert.match(client, /Idempotency-Key/);
   assert.match(client, /operationalSessionClient/);
+  assert.match(client, /if \(session\.authenticated\) capabilityTransport\.mode = "hosted"/);
+  assert.doesNotMatch(client, /capabilityTransport\.mode = session\.authenticated \?/);
+  assert.match(app, /hosted-operational-context/);
+  assert.match(app, /localNexusClient\.capabilityReadiness\(\)/);
+  assert.match(app, /Capability state/);
+  assert.match(app, /Capability reason/);
+  assert.match(app, /AREA_CAPABILITY_IDS/);
+  assert.match(app, /Runtime commit/);
+  assert.match(app, /runtimeCommit=\{deployedRuntimeCommit\}/);
+  assert.match(workspace, /missionCreationAllowed/);
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(workspace), false);
 });
 
@@ -385,6 +396,19 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(client, /runtimeAdmissionReplay/);
   assert.match(knowledge, /Mission Store/);
   assert.match(knowledge, /Knowledge Store/);
+  for (const operation of ["knowledgeIntake", "knowledgeAcquisition", "knowledgePromotionCandidate", "knowledgeVersions", "knowledgeReceipt", "knowledgePromotions"]) assert.match(client, new RegExp(operation));
+  assert.match(knowledge, /policyEligible/);
+  for (const gate of ["intakeGate", "acquisitionGate", "promotionGate"]) assert.match(knowledge, new RegExp(gate));
+  assert.match(knowledge, /Mission completion never writes to Knowledge Store automatically/);
+  for (const field of ["operationalState", "awaitingNodeProof", "requiredNextAction", "replayId"]) assert.match(admission, new RegExp(field));
+  assert.match(admission, /Awaiting physical node proof/);
+  assert.match(admission, /ADMISSION_REVIEW_SCOPE/);
+  assert.match(admission, /reviewPermissionGranted/);
+  assert.match(missions, /\["active", "in_progress", "running", "executing"\]/);
+  assert.match(missions, /step\.reversible === true/);
+  assert.doesNotMatch(missions, /step\.reversible !== false/);
+  assert.match(app, /HostedContractUnavailable/);
+  assert.match(app, /will not fall back to a local-only gateway/);
   assert.match(edge, /Edge status is unavailable/);
   assert.match(edge, /Array\.isArray\(capabilityData\)/);
   assert.match(edge, /EDGE_CAPABILITY_IDS/);

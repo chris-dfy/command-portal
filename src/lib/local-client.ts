@@ -18,7 +18,18 @@ export type LocalEnvelope<T> = {
     localSourceOfTruth: true;
     secretValuesExposed: false;
   };
-  error?: { code: string; message: string };
+  error?: {
+    code: string;
+    message: string;
+    details?: {
+      reason?: string;
+      missingDependencies?: string[];
+      retryable?: boolean;
+      requiredNextAction?: string;
+      capabilityId?: string;
+      capabilityState?: string;
+    };
+  };
 };
 
 export type IntakeSource = {
@@ -214,6 +225,10 @@ export type RuntimeAdmission = {
   requestingPrincipalId?: string;
   intent: RuntimeAdmissionIntentRequest["intent"];
   lifecycleState: string;
+  operationalState?: string;
+  awaitingNodeProof?: boolean;
+  requiredNextAction?: string;
+  replayId?: string;
   taskGraph?: Array<Record<string, unknown>> | { tasks?: Array<Record<string, unknown>> };
   policy?: Record<string, unknown> | null;
   authority?: Record<string, unknown> | null;
@@ -389,12 +404,24 @@ async function request<T>(path: string, options: RequestInit = {}, idempotencyKe
   });
   const envelope = await response.json() as LocalEnvelope<T>;
   if (!response.ok || !envelope.ok || envelope.data === null) {
-    throw Object.assign(new Error(envelope.error?.message ?? `Local NEXUS request failed (${response.status})`), { envelope });
+    if (hosted && response.status === 401) window.dispatchEvent(new Event(OPERATIONAL_SESSION_INVALID_EVENT));
+    const details = envelope.error?.details;
+    const explanation = [
+      envelope.error?.message,
+      details?.reason,
+      details?.missingDependencies?.length ? `Missing dependencies: ${details.missingDependencies.join(", ")}.` : "",
+      details?.requiredNextAction,
+    ].filter((item): item is string => Boolean(item));
+    throw Object.assign(
+      new Error([...new Set(explanation)].join(" ") || `${hosted ? "Hosted" : "Local"} NEXUS request failed (${response.status})`),
+      { envelope, details },
+    );
   }
   return envelope.data;
 }
 
 const capabilityTransport: { mode: "local" | "hosted"; csrfToken: string } = { mode: "local", csrfToken: "" };
+export const OPERATIONAL_SESSION_INVALID_EVENT = "nexus:operational-session-invalid";
 
 export type OperationalSession = {
   authenticated: boolean;
@@ -415,6 +442,19 @@ export type KnowledgePromotionRequest = {
   candidateId: string;
 };
 
+export type KnowledgeIntakeRequest = {
+  missionId: string;
+  taskId: string;
+  origin: string;
+  sourceClassification: "model_native" | "platform_knowledge" | "tenant_knowledge" | "retrieved_evidence" | "live_external_source" | "runtime_evidence";
+  confidence: number;
+  claim: string;
+  supportingArtifacts?: string[];
+  relationships?: string[];
+  operationalContext?: Record<string, unknown>;
+  completeTask?: boolean;
+};
+
 async function sessionRequest(path: string, options: RequestInit = {}): Promise<OperationalSession> {
   const response = await fetch(`/api/session${path}`, {
     ...options, credentials: "same-origin",
@@ -430,7 +470,7 @@ export const operationalSessionClient = Object.freeze({
   login: (accessKey: string) => sessionRequest("/login", { method: "POST", body: JSON.stringify({ accessKey }) }),
   logout: () => sessionRequest("/logout", { method: "POST", headers: { "X-CSRF-Token": capabilityTransport.csrfToken }, body: JSON.stringify({}) }),
   use: (session: OperationalSession) => {
-    capabilityTransport.mode = session.authenticated ? "hosted" : "local";
+    if (session.authenticated) capabilityTransport.mode = "hosted";
     capabilityTransport.csrfToken = session.csrfToken ?? "";
   },
   mode: () => capabilityTransport.mode
@@ -459,6 +499,9 @@ export const localNexusClient = Object.freeze({
   voiceHistory: () => request<{ events?: Array<Record<string, unknown>> }>("/voice-operator/history"),
   routeTranscript: (transcript: string, source: "browser_speech" | "text_fallback") => post<VoiceRouteResult>("/voice-operator/route-transcript", { transcript, source }),
   missions: () => request<Record<string, unknown>>("/missions"),
+  mission: (missionId: string) => request<Record<string, unknown>>(
+    `/missions/${encodeURIComponent(missionId)}`,
+  ),
   planMission: (objective: string) => capabilityTransport.mode === "hosted"
     ? post<Record<string, unknown>>(
       "/conclave/workspaces",
@@ -556,8 +599,22 @@ export const localNexusClient = Object.freeze({
     `/receipts/missions/${encodeURIComponent(missionId)}`,
   ),
   missionStore: () => request<Record<string, unknown>>("/mission-store"),
+  missionStoreRecord: (missionId: string) => request<Record<string, unknown>>(
+    `/mission-store/${encodeURIComponent(missionId)}`,
+  ),
+  knowledgeIntake: (payload: KnowledgeIntakeRequest, idempotencyKey: string) => post<Record<string, unknown>, KnowledgeIntakeRequest>(
+    "/knowledge/intake",
+    payload,
+    idempotencyKey,
+  ),
   knowledgeAcquisitions: () => request<Record<string, unknown>>("/knowledge/acquisitions"),
+  knowledgeAcquisition: (missionId: string) => request<Record<string, unknown>>(
+    `/knowledge/acquisitions/${encodeURIComponent(missionId)}`,
+  ),
   knowledgePromotionCandidates: () => request<Record<string, unknown>>("/knowledge/promotion-candidates"),
+  knowledgePromotionCandidate: (candidateId: string) => request<Record<string, unknown>>(
+    `/knowledge/promotion-candidates/${encodeURIComponent(candidateId)}`,
+  ),
   createKnowledgePromotionCandidate: (
     missionId: string,
     expectedMissionVersion: string | number | undefined,
@@ -568,7 +625,17 @@ export const localNexusClient = Object.freeze({
     idempotencyKey,
   ),
   knowledgeStore: () => request<Record<string, unknown>>("/knowledge/store"),
+  knowledgeRecord: (recordId: string) => request<Record<string, unknown>>(
+    `/knowledge/store/${encodeURIComponent(recordId)}`,
+  ),
+  knowledgeVersions: (recordId: string) => request<Record<string, unknown>>(
+    `/knowledge/store/${encodeURIComponent(recordId)}/versions`,
+  ),
   knowledgeReceipts: () => request<Record<string, unknown>>("/knowledge/receipts"),
+  knowledgeReceipt: (receiptId: string) => request<Record<string, unknown>>(
+    `/knowledge/receipts/${encodeURIComponent(receiptId)}`,
+  ),
+  knowledgePromotions: () => request<Record<string, unknown>>("/knowledge/promotions"),
   establishRuntimeBaseline: (payload: RuntimeBaselineRequest, idempotencyKey: string) => post<Record<string, unknown>>(
     "/runtime/baselines",
     payload,

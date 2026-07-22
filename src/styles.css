@@ -417,6 +417,11 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 .operations-summary article { display: grid; gap: 5px; padding: 12px; border: 1px solid rgba(var(--accent-rgb), .13); border-radius: 8px; background: rgba(0, 0, 0, .13); }
 .operations-summary span, .operation-field span { color: var(--muted); font-size: .59rem; letter-spacing: .07em; text-transform: uppercase; }
 .operations-summary strong { font-size: .86rem; }
+.hosted-operational-context { display: grid; grid-template-columns: minmax(220px, 1.6fr) repeat(2, minmax(110px, .8fr)) minmax(220px, 1.8fr) repeat(3, minmax(110px, .8fr)); gap: 8px; margin: 0 0 14px; }
+.hosted-operational-context article { min-width: 0; display: grid; align-content: center; gap: 5px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--nx-surface-2) 90%, transparent); }
+.hosted-operational-context span { color: var(--muted); font-size: .58rem; letter-spacing: .07em; text-transform: uppercase; }
+.hosted-operational-context strong, .hosted-operational-context code { min-width: 0; overflow-wrap: anywhere; color: var(--text); font-size: .72rem; }
+.hosted-operational-context__reason strong { font-weight: 500; line-height: 1.4; }
 .operation-field { display: grid; gap: 7px; margin: 10px 0; }
 .operation-field textarea { min-height: 82px; resize: vertical; padding: 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: rgba(0, 0, 0, .18); font: inherit; font-size: .72rem; }
 .operation-field input { min-height: 38px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: rgba(0, 0, 0, .18); font: inherit; font-size: .72rem; }
@@ -531,6 +536,9 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
   .experience-grid > .span-2 { grid-column: auto; }
   .cache-grid { grid-template-columns: 1fr; }
   .operations-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hosted-operational-context { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hosted-operational-context article:first-child { grid-column: 1 / -1; }
+  .hosted-operational-context__reason { grid-column: 1 / -1; }
   .session-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .eox-hero { grid-template-columns: 1fr; padding: 22px; }
   .eox-hero > aside { border-top: 1px solid rgba(var(--accent-rgb), .18); border-left: 0; }
@@ -543,6 +551,9 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
   .information-grid, .health-card-grid, .lifecycle-grid, .diagnostic-list { grid-template-columns: 1fr; }
   .runtime-alert dl { display: grid; gap: 7px; }
   .operations-summary { grid-template-columns: 1fr; }
+  .hosted-operational-context { grid-template-columns: 1fr; }
+  .hosted-operational-context article:first-child { grid-column: auto; }
+  .hosted-operational-context__reason { grid-column: auto; }
   .connector-records article { grid-template-columns: 1fr auto; }
   .connector-records article > span:last-child { grid-column: 1 / -1; }
   .session-login, .session-strip { grid-template-columns: 1fr; }

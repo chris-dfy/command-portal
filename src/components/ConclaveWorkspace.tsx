@@ -3,7 +3,7 @@ import { BrainCircuit, CheckCircle2, RefreshCw, Scale, ShieldAlert, TriangleAler
 import { DataPanel } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 import { startConclaveInvestigation, type ConclaveRun } from "../lib/conclave-client";
-import { localNexusClient, type ConclaveWorkspaceRecord } from "../lib/local-client";
+import { localNexusClient, type ConclaveWorkspaceRecord, type OperationalSession } from "../lib/local-client";
 import { displayLabel } from "../lib/presentation";
 
 const suggestedProposal = "Investigate how an Edge Runtime can establish evidence-only communication with an unfamiliar operational asset, identify every available interface, and recommend the safest next test.";
@@ -16,7 +16,13 @@ const presentationText = (record: Record<string, unknown> | null, keys: string[]
   return "";
 };
 
-export function ConclaveWorkspace() {
+export function ConclaveWorkspace({
+  readiness = null,
+  session = { authenticated: false },
+}: {
+  readiness?: Record<string, unknown> | null;
+  session?: OperationalSession;
+} = {}) {
   const [proposal, setProposal] = useState("");
   const [run, setRun] = useState<ConclaveRun | null>(null);
   const [workspaces, setWorkspaces] = useState<ConclaveWorkspaceRecord[]>([]);
@@ -30,6 +36,13 @@ export function ConclaveWorkspace() {
     counts[task.status] = (counts[task.status] ?? 0) + 1;
     return counts;
   }, {}) ?? {};
+  const readinessCapabilities = Array.isArray(readiness?.capabilities) ? readiness.capabilities.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
+  const conclaveCapability = readinessCapabilities.find((item) => String(item.capabilityId ?? item.capability_id ?? item.id ?? "") === "conclave");
+  const conclaveAvailable = String(conclaveCapability?.state ?? conclaveCapability?.status ?? "unavailable").toLowerCase() === "available";
+  const creationAllowed = conclaveAvailable && session.scopes?.includes("operations:write") === true;
+  const creationReason = !conclaveAvailable
+    ? String(conclaveCapability?.reason ?? conclaveCapability?.requiredNextAction ?? "Conclave capability readiness is unavailable.")
+    : session.scopes?.includes("operations:write") ? "Conclave and the hosted mutation scope are available." : "The hosted session lacks operations:write.";
 
   const refreshDirectory = useCallback(async () => {
     try {
@@ -53,6 +66,10 @@ export function ConclaveWorkspace() {
   async function startInvestigation() {
     const value = proposal.trim();
     if (!value || busy) return;
+    if (!creationAllowed) {
+      setError(creationReason);
+      return;
+    }
     setBusy(true); setError(null);
     try {
       const next = await startConclaveInvestigation(value);
@@ -83,9 +100,10 @@ export function ConclaveWorkspace() {
     </section>
 
     <DataPanel eyebrow="Investigation mission" title="Frame the operational question" icon={<Scale size={18} />}>
-      <div className="conclave-composer"><label htmlFor="conclave-workspace">Durable Runtime workspace</label><select id="conclave-workspace" value={workspace?.missionId ?? ""} onChange={(event) => { const selected = workspaces.find((item) => item.missionId === event.target.value); if (selected) setRun({ workspace: selected }); }} disabled={!workspaces.length}><option value="">{sourceState === "loading" ? "Loading Runtime workspaces…" : "No Runtime workspace available"}</option>{workspaces.map((item) => <option key={item.missionId} value={item.missionId}>{item.proposal} · {item.status}</option>)}</select><label htmlFor="conclave-proposal">What should Conclave investigate?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><span className="conclave-composer__actions">{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={!proposal.trim() || busy}><BrainCircuit size={16} />{busy ? "Coordinating…" : "Start governed investigation"}</button></span></div></div>
+      <div className="conclave-composer"><label htmlFor="conclave-workspace">Durable Runtime workspace</label><select id="conclave-workspace" value={workspace?.missionId ?? ""} onChange={(event) => { const selected = workspaces.find((item) => item.missionId === event.target.value); if (selected) setRun({ workspace: selected }); }} disabled={!workspaces.length}><option value="">{sourceState === "loading" ? "Loading Runtime workspaces…" : "No Runtime workspace available"}</option>{workspaces.map((item) => <option key={item.missionId} value={item.missionId}>{item.proposal} · {item.status}</option>)}</select><label htmlFor="conclave-proposal">What should Conclave investigate?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><span className="conclave-composer__actions">{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={!proposal.trim() || busy || !creationAllowed}><BrainCircuit size={16} />{busy ? "Coordinating…" : "Start governed investigation"}</button></span></div></div>
       {error && <p className="conclave-error" role="alert">{error}</p>}
       <p className="boundary-note">Workspace directory: <strong>{sourceState}</strong>. The portal does not substitute a static one-shot review when durable Conclave is unavailable.</p>
+      <p className="boundary-note">Investigation creation gate: <strong>{creationReason}</strong></p>
     </DataPanel>
 
     <section className="conclave-context-grid" aria-label="Conclave mission workspace">

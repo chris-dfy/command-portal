@@ -104,7 +104,7 @@ const PROJECT_ARTIFACT_TYPES = new Set(["roadmap", "project_plan", "scope_of_wor
 const ADMISSION_ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const OPERATIONAL_RECORD_ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const RUNTIME_CAPABILITY_PATTERN = /^nexus\.[A-Za-z0-9][A-Za-z0-9._:-]{0,158}$/;
-const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:@-]{8,160}$/;
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,160}$/;
 const RESERVED_ADMISSION_METADATA_KEYS = new Set([
   "tenantid", "workspaceid", "principalid", "requestingprincipalid", "authoritygrantid",
   "decisionid", "accountabilityid", "nodeid", "operationalassetid", "verificationstate",
@@ -114,7 +114,10 @@ const RESERVED_ADMISSION_METADATA_KEYS = new Set([
 const RUNTIME_COORDINATION_SECRET_FIELDS = new Set([
   "challengeid", "challengevalue", "rawchallenge", "challengesecret", "challengehash",
   "challengeverifier", "credential", "credentialref", "credentialvalue", "privatekey",
-  "authoritytoken", "sessionsecret",
+  "authoritytoken", "sessionsecret", "sessiontoken", "runtimeaccesstoken", "runtimetoken",
+  "operatoraccesskey", "accesskey", "password", "privatekeymaterial", "authoritysigningmaterial",
+  "enrollmentchallengesecret", "authorization", "token", "accesstoken", "refreshtoken", "secret",
+  "signingkey",
 ]);
 const UNTRUSTED_OPERATIONAL_FIELDS = new Set([
   "identity", "tenant", "tenantid", "workspace", "workspaceid", "principal", "principalid",
@@ -122,6 +125,8 @@ const UNTRUSTED_OPERATIONAL_FIELDS = new Set([
   "authority", "authorities", "authoritygrant", "authoritygrantid", "approval", "approvals", "approvalid",
   "approvalrequired", "approvalgranted", "approved", "approvalstate", "decisionid", "evidencevalidity",
   "evidencevalid", "evidencevalidation", "evidenceverified", "missionowner", "missionownership",
+  "verification", "verified", "verificationstate", "verificationstatus", "principalrole", "servicerole",
+  "authorizationrole", "authenticatedrole",
 ]);
 
 const CACHEABLE_ROUTES = new Set([
@@ -146,6 +151,9 @@ const CONTENT_TYPES = {
   ".pdf": "application/pdf",
   ".zip": "application/zip"
 };
+const ABSENT_BROWSER_METADATA = new Set([
+  "/service-worker.js", "/sw.js", "/manifest.json", "/manifest.webmanifest",
+]);
 
 const TRUTH = Object.freeze({
   productionReady: false,
@@ -260,6 +268,9 @@ export function loadConfig(overrides = {}) {
     overrides.replayBaseUrl ?? process.env.COMMAND_PORTAL_REPLAY_API_BASE_URL ?? "http://127.0.0.1:4317"
   ));
   const operationalEnabled = enabled(overrides.operationalEnabled ?? process.env.COMMAND_PORTAL_OPERATIONAL_ENABLED);
+  if (operationalEnabled && (localCapabilitiesEnabled || replayEnabled)) {
+    throw new Error("Hosted operational mode cannot coexist with local capability or legacy Replay gateways.");
+  }
   const operationalApiBaseUrl = safeOperationalApiUrl(String(
     overrides.operationalApiBaseUrl ?? process.env.COMMAND_PORTAL_OPERATIONAL_API_BASE_URL ?? "https://nexus-operations.invalid"
   ));
@@ -306,13 +317,14 @@ export function loadConfig(overrides = {}) {
 }
 
 class GatewayFailure extends Error {
-  constructor(code, message, state, status, retryable = false) {
+  constructor(code, message, state, status, retryable = false, details = undefined) {
     super(message);
     this.name = "GatewayFailure";
     this.code = code;
     this.state = state;
     this.status = status;
     this.retryable = retryable;
+    this.details = details;
   }
 }
 
@@ -323,9 +335,9 @@ function structuredLog(event, fields = {}) {
   console.log(JSON.stringify({ timestamp: nowIso(), event, ...fields }));
 }
 
-function requestOriginAllowed(request, config) {
+function requestOriginAllowed(request, config, originRequired = false) {
   const origin = request.headers.origin;
-  if (!origin) return true;
+  if (!origin) return !(originRequired && config.operationalCookieSecure);
   if (origin === "null") return false;
   const forwardedProto = String(request.headers["x-forwarded-proto"] ?? "").split(",")[0].trim();
   const protocol = forwardedProto || (request.socket.encrypted ? "https" : "http");
@@ -425,7 +437,7 @@ function operationalEnvelope(config, route, data, claims) {
   };
 }
 
-function operationalFailure(config, route, code, message, status = "Unavailable") {
+function operationalFailure(config, route, code, message, status = "Unavailable", details = undefined) {
   return {
     ok: false, data: null,
     operational: {
@@ -434,7 +446,7 @@ function operationalFailure(config, route, code, message, status = "Unavailable"
       contextAssemblyOwner: "NEXUS Runtime", productionMultiTenantReady: false,
       secretValuesExposed: false
     },
-    truth: TRUTH, error: { code, message }
+    truth: TRUTH, error: { code, message, ...(details ? { details } : {}) }
   };
 }
 
@@ -523,12 +535,18 @@ export const CANONICAL_OPERATIONAL_ROUTES = Object.freeze({
   "/api/operations/operational-replay/failures": Object.freeze({ GET: "/operational-replay/failures" }),
   "/api/operations/receipts": Object.freeze({ GET: "/receipts" }),
   "/api/operations/mission-store": Object.freeze({ GET: "/mission-store" }),
+  "/api/operations/knowledge/intake": Object.freeze({ POST: "/knowledge/intake" }),
   "/api/operations/knowledge/acquisitions": Object.freeze({ GET: "/knowledge/acquisitions" }),
   "/api/operations/knowledge/promotion-candidates": Object.freeze({ GET: "/knowledge/promotion-candidates" }),
+  "/api/operations/knowledge/promotions": Object.freeze({ GET: "/knowledge/promotions", POST: "/knowledge/promotions" }),
   "/api/operations/knowledge/store": Object.freeze({ GET: "/knowledge/store" }),
   "/api/operations/knowledge/receipts": Object.freeze({ GET: "/knowledge/receipts" }),
-  "/api/operations/runtime/baselines": Object.freeze({ POST: "/runtime/baselines" }),
-  "/api/operations/knowledge/promotions": Object.freeze({ POST: "/knowledge/promotions" }),
+  "/api/operations/runtime/baselines": Object.freeze({ GET: "/runtime/baselines", POST: "/runtime/baselines" }),
+  "/api/operations/governance/readiness": Object.freeze({ GET: "/governance/readiness" }),
+  "/api/operations/authority/readiness": Object.freeze({ GET: "/authority/readiness" }),
+  "/api/operations/runtime-coordination/nodes": Object.freeze({ GET: "/runtime-coordination/nodes" }),
+  "/api/operations/runtime-coordination/events": Object.freeze({ GET: "/runtime-coordination/events" }),
+  "/api/operations/runtime-coordination/admissions": Object.freeze({ GET: "/runtime-coordination/admissions", POST: "/runtime-coordination/admissions" }),
 });
 
 function operationalMethod(route, method) {
@@ -592,11 +610,30 @@ export function resolveOperationalCapability(pathname, method) {
     if (!missionId) return null;
     return operationalMethod({ GET: `/receipts/missions/${missionId}` }, method);
   }
+  const receiptProofs = pathname.match(/^\/api\/operations\/receipts\/([^/]+)\/proofs$/);
+  if (receiptProofs) {
+    const receiptId = operationalIdentifier(receiptProofs[1]);
+    if (!receiptId) return null;
+    return operationalMethod({ GET: `/receipts/${receiptId}/proofs` }, method);
+  }
   const receipt = pathname.match(/^\/api\/operations\/receipts\/([^/]+)$/);
   if (receipt) {
     const receiptId = operationalIdentifier(receipt[1]);
     if (!receiptId) return null;
     return operationalMethod({ GET: `/receipts/${receiptId}` }, method);
+  }
+  const conclaveEvidence = pathname.match(/^\/api\/operations\/conclave\/workspaces\/([^/]+)\/tasks\/([^/]+)\/evidence$/);
+  if (conclaveEvidence) {
+    const missionId = operationalIdentifier(conclaveEvidence[1]);
+    const taskId = operationalIdentifier(conclaveEvidence[2]);
+    if (!missionId || !taskId) return null;
+    return operationalMethod({ POST: `/conclave/workspaces/${missionId}/tasks/${taskId}/evidence` }, method);
+  }
+  const conclaveWorkspace = pathname.match(/^\/api\/operations\/conclave\/workspaces\/([^/]+)$/);
+  if (conclaveWorkspace) {
+    const missionId = operationalIdentifier(conclaveWorkspace[1]);
+    if (!missionId) return null;
+    return operationalMethod({ GET: `/conclave/workspaces/${missionId}` }, method);
   }
   const promotionCandidate = pathname.match(/^\/api\/operations\/knowledge\/acquisitions\/([^/]+)\/promotion-candidates$/);
   if (promotionCandidate) {
@@ -604,19 +641,71 @@ export function resolveOperationalCapability(pathname, method) {
     if (!missionId) return null;
     return operationalMethod({ POST: `/knowledge/acquisitions/${missionId}/promotion-candidates` }, method);
   }
+  const acquisition = pathname.match(/^\/api\/operations\/knowledge\/acquisitions\/([^/]+)$/);
+  if (acquisition) {
+    const missionId = operationalIdentifier(acquisition[1]);
+    if (!missionId) return null;
+    return operationalMethod({ GET: `/knowledge/acquisitions/${missionId}` }, method);
+  }
+  const candidate = pathname.match(/^\/api\/operations\/knowledge\/promotion-candidates\/([^/]+)$/);
+  if (candidate) {
+    const candidateId = operationalIdentifier(candidate[1]);
+    if (!candidateId) return null;
+    return operationalMethod({ GET: `/knowledge/promotion-candidates/${candidateId}` }, method);
+  }
+  const knowledgeVersions = pathname.match(/^\/api\/operations\/knowledge\/store\/([^/]+)\/versions$/);
+  if (knowledgeVersions) {
+    const recordId = operationalIdentifier(knowledgeVersions[1]);
+    if (!recordId) return null;
+    return operationalMethod({ GET: `/knowledge/store/${recordId}/versions` }, method);
+  }
+  const knowledgeRecord = pathname.match(/^\/api\/operations\/knowledge\/store\/([^/]+)$/);
+  if (knowledgeRecord) {
+    const recordId = operationalIdentifier(knowledgeRecord[1]);
+    if (!recordId) return null;
+    return operationalMethod({ GET: `/knowledge/store/${recordId}` }, method);
+  }
+  const knowledgeReceipt = pathname.match(/^\/api\/operations\/knowledge\/receipts\/([^/]+)$/);
+  if (knowledgeReceipt) {
+    const receiptId = operationalIdentifier(knowledgeReceipt[1]);
+    if (!receiptId) return null;
+    return operationalMethod({ GET: `/knowledge/receipts/${receiptId}` }, method);
+  }
+  const missionStoreDetail = pathname.match(/^\/api\/operations\/mission-store\/([^/]+)$/);
+  if (missionStoreDetail) {
+    const missionId = operationalIdentifier(missionStoreDetail[1]);
+    if (!missionId) return null;
+    return operationalMethod({ GET: `/mission-store/${missionId}` }, method);
+  }
   const missionDetail = pathname.match(/^\/api\/operations\/missions\/([^/]+)$/);
   if (missionDetail && missionDetail[1] !== "plan") {
     const missionId = operationalIdentifier(missionDetail[1]);
     if (!missionId) return null;
     return operationalMethod({ GET: `/missions/${missionId}` }, method);
   }
-  if (
-    pathname === "/api/operations/missions/plan"
-    || /^\/api\/operations\/missions\/[^/]+\/execute-step$/.test(pathname)
-  ) return null;
-
-  const localPath = `/api/local${pathname.slice("/api/operations".length)}`;
-  return resolveLocalCapability(localPath, method);
+  const baseline = pathname.match(/^\/api\/operations\/runtime\/baselines\/([^/]+)$/);
+  if (baseline) {
+    const baselineId = operationalIdentifier(baseline[1]);
+    if (!baselineId) return null;
+    return operationalMethod({ GET: `/runtime/baselines/${baselineId}` }, method);
+  }
+  const runtimeNode = pathname.match(/^\/api\/operations\/runtime-coordination\/nodes\/([^/]+)$/);
+  if (runtimeNode) {
+    const nodeId = operationalIdentifier(runtimeNode[1]);
+    if (!nodeId) return null;
+    return operationalMethod({ GET: `/runtime-coordination/nodes/${nodeId}` }, method);
+  }
+  const admission = pathname.match(/^\/api\/operations\/runtime-coordination\/admissions\/([^/]+)(?:\/(cancel|challenge\/reissue|receipt|replay))?$/);
+  if (admission) {
+    const admissionId = operationalIdentifier(admission[1]);
+    if (!admissionId) return null;
+    const action = admission[2] ?? "read";
+    const expectedMethod = ["read", "receipt", "replay"].includes(action) ? "GET" : "POST";
+    return operationalMethod({
+      [expectedMethod]: `/runtime-coordination/admissions/${admissionId}${action === "read" ? "" : `/${action}`}`,
+    }, method);
+  }
+  return null;
 }
 
 async function readJsonBody(request, maximumBytes) {
@@ -709,16 +798,30 @@ function sanitizedMutationPayload(payload) {
   return sanitized;
 }
 
-function sanitizeRuntimeCoordinationResponse(runtimePath, value) {
-  if (!runtimePath.startsWith("/runtime-coordination/")) return value;
-  if (Array.isArray(value)) return value.map((item) => sanitizeRuntimeCoordinationResponse(runtimePath, item));
+function sanitizeOperationalResponse(value) {
+  if (Array.isArray(value)) return value.map((item) => sanitizeOperationalResponse(item));
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value).flatMap(([key, item]) => {
     const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
     return RUNTIME_COORDINATION_SECRET_FIELDS.has(normalized)
       ? []
-      : [[key, sanitizeRuntimeCoordinationResponse(runtimePath, item)]];
+      : [[key, sanitizeOperationalResponse(item)]];
   }));
+}
+
+function structuredOperationalFailure(value) {
+  const body = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const missingDependencies = Array.isArray(body.missingDependencies)
+    ? body.missingDependencies.filter((item) => typeof item === "string").slice(0, 64)
+    : undefined;
+  return {
+    ...(typeof body.reason === "string" ? { reason: body.reason.slice(0, 1_000) } : {}),
+    ...(missingDependencies ? { missingDependencies } : {}),
+    ...(typeof body.retryable === "boolean" ? { retryable: body.retryable } : {}),
+    ...(typeof body.requiredNextAction === "string" ? { requiredNextAction: body.requiredNextAction.slice(0, 1_000) } : {}),
+    ...(typeof body.capabilityId === "string" ? { capabilityId: body.capabilityId.slice(0, 160) } : {}),
+    ...(typeof body.state === "string" ? { capabilityState: body.state.slice(0, 80) } : {}),
+  };
 }
 
 function validateLocalPayload(runtimePath, payload, maximumBytes) {
@@ -752,6 +855,53 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
       return { expectedMissionVersion: boundedText(expectedMissionVersion, "expectedMissionVersion", 160) };
     }
     throw new GatewayFailure("request_invalid", "expectedMissionVersion is invalid.", "Unknown", 400);
+  }
+  if (runtimePath === "/knowledge/intake") {
+    strictKeys(payload, new Set([
+      "missionId", "taskId", "origin", "sourceClassification", "collector", "confidence", "claim",
+      "supportingArtifacts", "relationships", "operationalContext", "completeTask",
+    ]));
+    const missionId = boundedText(payload.missionId, "missionId", 160);
+    const taskId = boundedText(payload.taskId, "taskId", 160);
+    if (!OPERATIONAL_RECORD_ID_PATTERN.test(missionId) || !OPERATIONAL_RECORD_ID_PATTERN.test(taskId)) {
+      throw new GatewayFailure("request_invalid", "missionId or taskId is invalid.", "Unknown", 400);
+    }
+    const sourceClassification = boundedText(payload.sourceClassification, "sourceClassification", 80);
+    if (!["model_native", "platform_knowledge", "tenant_knowledge", "retrieved_evidence", "live_external_source", "runtime_evidence"].includes(sourceClassification)) {
+      throw new GatewayFailure("request_invalid", "sourceClassification is not registered.", "Unknown", 400);
+    }
+    const confidence = Number(payload.confidence);
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      throw new GatewayFailure("request_invalid", "confidence must be between zero and one.", "Unknown", 400);
+    }
+    const supportingArtifacts = payload.supportingArtifacts ?? [];
+    const relationships = payload.relationships ?? [];
+    if (!Array.isArray(supportingArtifacts) || supportingArtifacts.length > 100 || supportingArtifacts.some((item) => typeof item !== "string" || item.length > 2_000)) {
+      throw new GatewayFailure("request_invalid", "supportingArtifacts is invalid.", "Unknown", 400);
+    }
+    if (!Array.isArray(relationships) || relationships.length > 100 || relationships.some((item) => typeof item !== "string" || item.length > 500)) {
+      throw new GatewayFailure("request_invalid", "relationships is invalid.", "Unknown", 400);
+    }
+    const operationalContext = payload.operationalContext ?? {};
+    if (!operationalContext || typeof operationalContext !== "object" || Array.isArray(operationalContext) || Object.keys(operationalContext).length > 100) {
+      throw new GatewayFailure("request_invalid", "operationalContext is invalid.", "Unknown", 400);
+    }
+    if (payload.completeTask !== undefined && typeof payload.completeTask !== "boolean") {
+      throw new GatewayFailure("request_invalid", "completeTask must be a boolean.", "Unknown", 400);
+    }
+    return {
+      missionId,
+      taskId,
+      origin: boundedText(payload.origin, "origin", 2_000),
+      sourceClassification,
+      ...(payload.collector ? { collector: boundedText(payload.collector, "collector", 240) } : {}),
+      confidence,
+      claim: boundedText(payload.claim, "claim", 8_000),
+      supportingArtifacts,
+      relationships,
+      operationalContext,
+      completeTask: payload.completeTask === true,
+    };
   }
   if (runtimePath === "/conclave/workspaces") {
     strictKeys(payload, new Set(["proposal"]));
@@ -972,7 +1122,7 @@ async function fetchLocalCapability(resolved, payload, request, config, localFet
     try {
       const body = JSON.parse(raw.toString("utf8"));
       if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("not_object");
-      return sanitizeRuntimeCoordinationResponse(resolved.runtimePath, body);
+      return sanitizeOperationalResponse(body);
     } catch {
       throw new GatewayFailure("local_response_invalid", "Local Runtime returned invalid JSON.", "Unknown", 502);
     }
@@ -1008,13 +1158,28 @@ async function fetchOperationalCapability(resolved, payload, claims, request, co
       if (error?.name === "AbortError" || controller.signal.aborted) throw new GatewayFailure("operational_runtime_timed_out", "Hosted NEXUS Runtime request timed out.", "Timed Out", 504);
       throw new GatewayFailure("operational_runtime_unavailable", "Hosted operational NEXUS Runtime is unavailable.", "Unavailable", 503);
     }
-    if ([401, 403].includes(response.status)) throw new GatewayFailure("operational_runtime_unauthorized", "Hosted Runtime rejected the gateway identity.", "Unauthorized", 502);
-    if (!response.ok) throw new GatewayFailure("operational_runtime_error", `Hosted operational Runtime returned status ${response.status}.`, "Unavailable", 502);
     const raw = Buffer.from(await response.arrayBuffer());
     if (raw.byteLength > config.localMaxResponseBytes) throw new GatewayFailure("operational_response_too_large", "Hosted Runtime response exceeded the gateway limit.", "Unknown", 502);
-    const body = JSON.parse(raw.toString("utf8"));
+    let body;
+    try { body = JSON.parse(raw.toString("utf8")); }
+    catch { throw new GatewayFailure("operational_response_invalid", "Hosted Runtime returned invalid JSON.", "Unknown", 502); }
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("not_object");
-    return sanitizeRuntimeCoordinationResponse(resolved.runtimePath, body);
+    const sanitized = sanitizeOperationalResponse(body);
+    if ([401, 403].includes(response.status)) throw new GatewayFailure("operational_runtime_unauthorized", "Hosted Runtime rejected the gateway identity.", "Unauthorized", 502);
+    if (!response.ok) {
+      const upstreamCode = typeof sanitized.error === "string" ? sanitized.error : "operational_runtime_error";
+      const upstreamMessage = [sanitized.message, sanitized.reason].find((item) => typeof item === "string" && item.trim());
+      const safeStatus = [400, 404, 409, 422, 429, 503].includes(response.status) ? response.status : 502;
+      throw new GatewayFailure(
+        upstreamCode.slice(0, 160),
+        upstreamMessage?.slice(0, 1_000) ?? `Hosted operational Runtime returned status ${response.status}.`,
+        response.status === 503 ? "Unavailable" : "Unknown",
+        safeStatus,
+        sanitized.retryable === true,
+        structuredOperationalFailure(sanitized),
+      );
+    }
+    return sanitized;
   } catch (error) {
     if (error instanceof GatewayFailure) throw error;
     throw new GatewayFailure("operational_response_invalid", "Hosted Runtime returned invalid JSON.", "Unknown", 502);
@@ -1023,7 +1188,7 @@ async function fetchOperationalCapability(resolved, payload, claims, request, co
 
 async function handleSessionApi(request, response, config, sessionAuthority) {
   const url = new URL(request.url, "http://portal.invalid");
-  if (!requestOriginAllowed(request, config)) return sendJson(response, 403, operationalFailure(config, url.pathname, "origin_denied", "Request origin is not allowed."));
+  if (!requestOriginAllowed(request, config, request.method === "POST")) return sendJson(response, 403, operationalFailure(config, url.pathname, "origin_denied", "Request origin is not allowed."));
   if (!config.operationalEnabled) return sendJson(response, 503, operationalFailure(config, url.pathname, "operational_gateway_disabled", "Hosted operational mode is not enabled."));
   if (url.pathname === "/api/session" && request.method === "GET") return sendJson(response, 200, { ok: true, session: sessionAuthority.publicSession(sessionAuthority.authenticate(request)), truth: TRUTH });
   if (url.pathname === "/api/session/login" && request.method === "POST") {
@@ -1036,6 +1201,7 @@ async function handleSessionApi(request, response, config, sessionAuthority) {
   if (url.pathname === "/api/session/logout" && request.method === "POST") {
     const claims = sessionAuthority.authenticate(request);
     if (!claims || !sessionAuthority.csrfValid(request, claims)) return sendJson(response, 403, operationalFailure(config, url.pathname, "csrf_invalid", "Session verification failed.", "Unauthorized"));
+    sessionAuthority.revoke(claims);
     return sendJson(response, 200, { ok: true, session: { authenticated: false }, truth: TRUTH }, { "Set-Cookie": sessionAuthority.clearCookie() });
   }
   return sendJson(response, 404, operationalFailure(config, url.pathname, "route_not_allowlisted", "This session route is not allowlisted."));
@@ -1043,7 +1209,7 @@ async function handleSessionApi(request, response, config, sessionAuthority) {
 
 async function handleOperationalApi(request, response, config, operationalFetch, sessionAuthority) {
   const url = new URL(request.url, "http://portal.invalid");
-  if (!requestOriginAllowed(request, config)) return sendJson(response, 403, operationalFailure(config, url.pathname, "origin_denied", "Request origin is not allowed."));
+  if (!requestOriginAllowed(request, config, request.method === "POST")) return sendJson(response, 403, operationalFailure(config, url.pathname, "origin_denied", "Request origin is not allowed."));
   if (!config.operationalEnabled) return sendJson(response, 503, operationalFailure(config, url.pathname, "operational_gateway_disabled", "Hosted operational mode is not enabled."));
   if (url.search) return sendJson(response, 400, operationalFailure(config, url.pathname, "query_not_allowed", "Operational routes do not accept browser query parameters."));
   const claims = sessionAuthority.authenticate(request);
@@ -1069,7 +1235,7 @@ async function handleOperationalApi(request, response, config, operationalFetch,
     return sendJson(response, 200, operationalEnvelope(config, url.pathname, data, claims));
   } catch (error) {
     const failure = error instanceof GatewayFailure ? error : new GatewayFailure("operational_gateway_error", "Hosted operation failed safely.", "Unknown", 500);
-    return sendJson(response, failure.status, operationalFailure(config, url.pathname, failure.code, failure.message, failure.state));
+    return sendJson(response, failure.status, operationalFailure(config, url.pathname, failure.code, failure.message, failure.state, failure.details));
   }
 }
 
@@ -1474,6 +1640,15 @@ function serveStatic(request, response) {
     return response.end();
   }
   const url = new URL(request.url, "http://portal.invalid");
+  if (ABSENT_BROWSER_METADATA.has(url.pathname)) {
+    response.writeHead(404, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Length": 9,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    return response.end("Not found");
+  }
   const requested = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
   let filePath = join(DIST, requested === "/" ? "index.html" : requested);
   if (!filePath.startsWith(DIST)) filePath = join(DIST, "index.html");
@@ -1484,6 +1659,11 @@ function serveStatic(request, response) {
     response.writeHead(200, {
       "Content-Type": CONTENT_TYPES[extname(filePath)] ?? "application/octet-stream",
       "Content-Length": stat.size,
+      "Cache-Control": filePath.endsWith("index.html")
+        ? "no-store"
+        : /^\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(url.pathname)
+          ? "public, max-age=31536000, immutable"
+          : "no-cache",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
     });
