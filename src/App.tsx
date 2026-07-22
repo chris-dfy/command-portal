@@ -11,6 +11,7 @@ import { NexusCopilot } from "./components/NexusCopilot";
 import { OperationalReplay } from "./components/OperationalReplay";
 import { OperationsCenter } from "./components/OperationsCenter";
 import { OperationsWorkspace } from "./components/OperationsWorkspace";
+import { OperationalAccessGate } from "./components/OperationalAccessGate";
 import { ProjectStudio } from "./components/ProjectStudio";
 import { RuntimeHealth } from "./components/RuntimeHealth";
 import { RuntimeInformation } from "./components/RuntimeInformation";
@@ -20,7 +21,7 @@ import { VoiceWorkspace } from "./components/VoiceWorkspace";
 import { AppearanceWorkspace } from "./appearance/AppearanceWorkspace";
 import { useAppearanceSettings } from "./appearance/useAppearanceSettings";
 import type { EoxAssessment } from "./lib/eox-client";
-import { operationalSessionClient } from "./lib/local-client";
+import { operationalSessionClient, type OperationalSession } from "./lib/local-client";
 import { portalClient } from "./lib/portal-client";
 import { displayLabel } from "./lib/presentation";
 import type { ConnectionState, GatewayEnvelope, ProviderRecord, RuntimeSnapshot } from "./lib/types";
@@ -89,6 +90,10 @@ const PLATFORM_TO_COPILOT: Record<AreaId, CopilotAreaId> = {
   knowledge: "knowledge", edge: "edge", "mission-control": "operations", settings: "information",
   documents: "intake", projects: "projects", voice: "voice", providers: "providers", evidence: "evidence",
 };
+const OPERATIONAL_AREAS = new Set<AreaId>([
+  "missions", "replay", "conclave", "knowledge", "edge", "mission-control",
+  "documents", "projects", "voice",
+]);
 
 function connectionState(snapshot: RuntimeSnapshot, failures: GatewayEnvelope[], loading: boolean): ConnectionState {
   if (!Object.keys(snapshot).length) return loading ? "Connecting" : "Unavailable";
@@ -142,6 +147,7 @@ export function App() {
   const [copilotExpanded, setCopilotExpanded] = useState(false);
   const [replayMissionId, setReplayMissionId] = useState<string>();
   const [sessionBootstrapComplete, setSessionBootstrapComplete] = useState(false);
+  const [operationalSession, setOperationalSession] = useState<OperationalSession>({ authenticated: false });
 
   const refresh = (forceRefresh = false) => { setLoading(true); portalClient.snapshot(forceRefresh).then((result) => { setSnapshot((current) => ({ ...current, ...result.data })); setFailures(result.failures); }).catch(() => { setSnapshot({}); setFailures([]); }).finally(() => setLoading(false)); };
   function focusPlatformSearch() {
@@ -153,8 +159,8 @@ export function App() {
   useEffect(() => {
     let active = true;
     operationalSessionClient.status()
-      .then((session) => operationalSessionClient.use(session))
-      .catch(() => operationalSessionClient.use({ authenticated: false }))
+      .then((session) => { operationalSessionClient.use(session); if (active) setOperationalSession(session); })
+      .catch(() => { operationalSessionClient.use({ authenticated: false }); if (active) setOperationalSession({ authenticated: false }); })
       .finally(() => { if (active) setSessionBootstrapComplete(true); });
     return () => { active = false; };
   }, []);
@@ -208,14 +214,20 @@ export function App() {
     else setCopilotExpanded(false);
   }
 
-  const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length) ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section> : <>
+  function acceptOperationalSession(session: OperationalSession) {
+    operationalSessionClient.use(session);
+    setOperationalSession(session);
+    refresh(true);
+  }
+
+  const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length) ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section> : OPERATIONAL_AREAS.has(active) && !operationalSession.authenticated ? <OperationalAccessGate workspace={current.label} onAuthenticated={acceptOperationalSession} /> : <>
     {active === "dashboard" && <><ExecutiveStatusBar snapshot={snapshot} connectionState={state} /><OperationsCenter assessment={eox ?? null} /></>}
     {active === "missions" && <MissionDashboard onReplay={openReplay} />}
     {active === "replay" && <OperationalReplay requestedMissionId={replayMissionId} />}
     {active === "conclave" && <ConclaveWorkspace status={record(snapshot.conclave?.data)} />}
     {active === "knowledge" && <KnowledgeWorkspace snapshot={snapshot} />}
     {active === "edge" && <><EdgeRuntime snapshot={snapshot} /><RuntimeTopology snapshot={snapshot} /></>}
-    {active === "mission-control" && <OperationsWorkspace />}
+    {active === "mission-control" && <OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} />}
     {active === "settings" && <div className="settings-workspaces"><AppearanceWorkspace appearance={appearance} /><RuntimeInformation snapshot={snapshot} connectionState={state} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
     {active === "documents" && <DocumentIntake />}
     {active === "projects" && <ProjectStudio />}
