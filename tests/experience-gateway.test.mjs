@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { afterEach, test } from "node:test";
-import { createPortalServer, LOCAL_CAPABILITY_ROUTES, REPLAY_ROUTES, RUNTIME_MUTATION_ROUTES, RUNTIME_ROUTES } from "../server/portal-server.mjs";
+import {
+  CANONICAL_OPERATIONAL_ROUTES,
+  createPortalServer,
+  LOCAL_CAPABILITY_ROUTES,
+  REPLAY_ROUTES,
+  RUNTIME_MUTATION_ROUTES,
+  RUNTIME_ROUTES,
+} from "../server/portal-server.mjs";
 
 const servers = [];
 afterEach(async () => Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve)))));
@@ -777,28 +784,28 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
     "X-NEXUS-Role": "observer",
     "X-NEXUS-Scopes": "operations:write"
   } })).status, 200);
-  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/missions/history?limit=8");
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/missions");
   assert.equal(observed.at(-1).options.headers.Authorization, `Bearer ${config.operationalRuntimeToken}`);
   assert.equal(observed.at(-1).options.headers["X-NEXUS-User-ID"], "operator-1");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Role"], "admin");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,actions:simulate");
+  const callsBeforeLegacyPlan = observed.length;
   assert.equal((await fetch(`${base}/api/operations/missions/plan`, {
     method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ objective: "Plan alpha" })
-  })).status, 403);
+  })).status, 404);
   assert.equal((await fetch(`${base}/api/operations/missions/plan`, {
-    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken }, body: JSON.stringify({ objective: "Plan alpha" })
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken, "Idempotency-Key": "legacy-plan-12345" }, body: JSON.stringify({ objective: "Plan alpha" })
+  })).status, 404);
+  assert.equal(observed.length, callsBeforeLegacyPlan);
+
+  assert.equal((await fetch(`${base}/api/operations/conclave/workspaces`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ proposal: "Investigate an unfamiliar asset through an Edge Runtime." })
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/conclave/workspaces`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken }, body: JSON.stringify({ proposal: "Investigate an unfamiliar asset through an Edge Runtime." })
   })).status, 400);
-  const mutation = await fetch(`${base}/api/operations/missions/plan`, {
-    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken, "Idempotency-Key": "operation-12345" },
-    body: JSON.stringify({ objective: "Plan alpha" })
-  });
-  assert.equal(mutation.status, 200);
-  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "operation-12345");
-  const body = await mutation.json();
-  assert.equal(body.operational.productionMultiTenantReady, false);
-  assert.equal(JSON.stringify(body).includes(config.operationalRuntimeToken), false);
 
   const conclaveMutation = await fetch(`${base}/api/operations/conclave/workspaces`, {
     method: "POST",
@@ -810,6 +817,161 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "conclave-operation-12345");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
   assert.deepEqual(JSON.parse(observed.at(-1).options.body), { proposal: "Investigate an unfamiliar asset through an Edge Runtime." });
+  const body = await conclaveMutation.json();
+  assert.equal(body.operational.productionMultiTenantReady, false);
+  assert.equal(JSON.stringify(body).includes(config.operationalRuntimeToken), false);
+});
+
+test("authenticated hosted reads use the canonical Runtime contracts without Replay fallback", async () => {
+  const observed = [];
+  let replayFallbackCalls = 0;
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "operations:write", "knowledge:promote"],
+    operationalCookieSecure: false,
+    replayEnabled: true,
+  };
+  const base = await start(
+    async () => runtimeResponse({}),
+    config,
+    async () => localResponse({}),
+    async (url, options) => {
+      observed.push({ url, options });
+      return localResponse({ recordType: "canonical_runtime_projection", secretValuesExposed: false });
+    },
+    async () => {
+      replayFallbackCalls += 1;
+      return localResponse({ fabricatedFallback: true });
+    },
+  );
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const routes = [
+    ["/capabilities/readiness", "/capabilities/readiness"],
+    ["/missions", "/missions"],
+    ["/conclave/workspaces", "/conclave/workspaces"],
+    ["/operational-replay", "/operational-replay"],
+    ["/operational-replay/REPLAY-001", "/operational-replay/REPLAY-001"],
+    ["/operational-replay/REPLAY-001/events", "/operational-replay/REPLAY-001/events"],
+    ["/operational-replay/REPLAY-001/stages/stage-17", "/operational-replay/REPLAY-001/stages/stage-17"],
+    ["/operational-replay/REPLAY-001/stages/stage-17/explain", "/operational-replay/REPLAY-001/stages/stage-17/explain"],
+    ["/operational-replay/failures", "/operational-replay/failures"],
+    ["/operational-replay/missions/MISSION-001", "/operational-replay/missions/MISSION-001"],
+    ["/operational-replay/receipts/RECEIPT-001", "/operational-replay/receipts/RECEIPT-001"],
+    ["/receipts", "/receipts"],
+    ["/receipts/RECEIPT-001", "/receipts/RECEIPT-001"],
+    ["/receipts/missions/MISSION-001", "/receipts/missions/MISSION-001"],
+    ["/mission-store", "/mission-store"],
+    ["/knowledge/acquisitions", "/knowledge/acquisitions"],
+    ["/knowledge/promotion-candidates", "/knowledge/promotion-candidates"],
+    ["/knowledge/store", "/knowledge/store"],
+    ["/knowledge/receipts", "/knowledge/receipts"],
+  ];
+  for (const [portalPath, runtimePath] of routes) {
+    const response = await fetch(`${base}/api/operations${portalPath}`, { headers: { Cookie: cookie } });
+    assert.equal(response.status, 200, portalPath);
+    const call = observed.at(-1);
+    assert.equal(call.url, `http://127.0.0.1:9876${runtimePath}`, portalPath);
+    assert.equal(call.options.method, "GET", portalPath);
+    assert.equal(call.options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha", portalPath);
+    assert.equal(call.options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha", portalPath);
+  }
+  assert.equal(replayFallbackCalls, 0);
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/missions"].GET, "/missions");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/runtime/baselines"].POST, "/runtime/baselines");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/knowledge/promotions"].POST, "/knowledge/promotions");
+
+  const baselineKey = "runtime-baseline-0001";
+  const baseline = await fetch(`${base}/api/operations/runtime/baselines`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": baselineKey,
+    },
+    body: JSON.stringify({ expectedDeployedCommit: "0123456789abcdef0123456789abcdef01234567" }),
+  });
+  assert.equal(baseline.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/runtime/baselines");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], baselineKey);
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), {
+    expectedDeployedCommit: "0123456789abcdef0123456789abcdef01234567",
+  });
+
+  const promotionKey = "knowledge-promotion-0001";
+  const promotion = await fetch(`${base}/api/operations/knowledge/promotions`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": promotionKey,
+    },
+    body: JSON.stringify({ candidateId: "candidate-runtime-baseline-001" }),
+  });
+  assert.equal(promotion.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/knowledge/promotions");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], promotionKey);
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,knowledge:promote");
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { candidateId: "candidate-runtime-baseline-001" });
+
+  const candidateKey = "promotion-candidate-0001";
+  const candidate = await fetch(`${base}/api/operations/knowledge/acquisitions/MISSION-001/promotion-candidates`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": candidateKey,
+    },
+    body: JSON.stringify({ expectedMissionVersion: 7 }),
+  });
+  assert.equal(candidate.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/knowledge/acquisitions/MISSION-001/promotion-candidates");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], candidateKey);
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { expectedMissionVersion: 7 });
+
+  const callsBeforeRejectedMutations = observed.length;
+  assert.equal((await fetch(`${base}/api/operations/runtime/baselines`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "Idempotency-Key": "runtime-baseline-0002" },
+    body: JSON.stringify({ expectedDeployedCommit: "0123456789abcdef0123456789abcdef01234567" }),
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/knowledge/promotions`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": "knowledge-promotion-0002",
+    },
+    body: JSON.stringify({ candidateId: "candidate-runtime-baseline-001", tenantId: "browser-tenant" }),
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/knowledge/acquisitions/MISSION-001/promotion-candidates`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": "promotion-candidate-0002",
+    },
+    body: JSON.stringify({ expectedMissionVersion: { metadata: { tenantId: "browser-tenant" } } }),
+  })).status, 403);
+  assert.equal(observed.length, callsBeforeRejectedMutations);
 });
 
 test("hosted Runtime Coordination keeps fleet reads and requires the admission request scope", async () => {
@@ -851,6 +1013,18 @@ test("hosted Runtime Coordination keeps fleet reads and requires the admission r
   });
   assert.equal(denied.status, 403);
   assert.equal((await denied.json()).error.code, "scope_denied");
+  const promotionDenied = await fetch(`${base}/api/operations/knowledge/promotions`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": "knowledge-promotion-0003",
+    },
+    body: JSON.stringify({ candidateId: "candidate-runtime-baseline-001" }),
+  });
+  assert.equal(promotionDenied.status, 403);
+  assert.equal((await promotionDenied.json()).error.code, "scope_denied");
   assert.equal(observed.length, 1);
 });
 
@@ -916,7 +1090,7 @@ test("hosted admission proxy derives identity, preserves one idempotency key, an
     headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": key },
     body: JSON.stringify({ ...intent, tenantId: "browser-tenant" })
   });
-  assert.equal(trusted.status, 400);
+  assert.equal(trusted.status, 403);
   const mismatch = await fetch(`${base}/api/operations/runtime-coordination/admissions`, {
     method: "POST",
     headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": key },

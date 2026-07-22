@@ -102,6 +102,7 @@ const PROJECT_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,160}$/;
 const PROJECT_READ_ACTIONS = new Set(["sources", "evidence", "scope", "estimate", "planning-model", "artifacts"]);
 const PROJECT_ARTIFACT_TYPES = new Set(["roadmap", "project_plan", "scope_of_work", "proposal", "backlog", "risk_register", "status_report", "executive_briefing"]);
 const ADMISSION_ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,160}$/;
+const OPERATIONAL_RECORD_ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const RUNTIME_CAPABILITY_PATTERN = /^nexus\.[A-Za-z0-9][A-Za-z0-9._:-]{0,158}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:@-]{8,160}$/;
 const RESERVED_ADMISSION_METADATA_KEYS = new Set([
@@ -114,6 +115,13 @@ const RUNTIME_COORDINATION_SECRET_FIELDS = new Set([
   "challengeid", "challengevalue", "rawchallenge", "challengesecret", "challengehash",
   "challengeverifier", "credential", "credentialref", "credentialvalue", "privatekey",
   "authoritytoken", "sessionsecret",
+]);
+const UNTRUSTED_OPERATIONAL_FIELDS = new Set([
+  "identity", "tenant", "tenantid", "workspace", "workspaceid", "principal", "principalid",
+  "requestingprincipal", "requestingprincipalid", "user", "userid", "role", "roles", "scope", "scopes",
+  "authority", "authorities", "authoritygrant", "authoritygrantid", "approval", "approvals", "approvalid",
+  "approvalrequired", "approvalgranted", "approved", "approvalstate", "decisionid", "evidencevalidity",
+  "evidencevalid", "evidencevalidation", "evidenceverified", "missionowner", "missionownership",
 ]);
 
 const CACHEABLE_ROUTES = new Set([
@@ -255,7 +263,7 @@ export function loadConfig(overrides = {}) {
   const operationalApiBaseUrl = safeOperationalApiUrl(String(
     overrides.operationalApiBaseUrl ?? process.env.COMMAND_PORTAL_OPERATIONAL_API_BASE_URL ?? "https://nexus-operations.invalid"
   ));
-  const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,actions:simulate,actions:execute,approvals:decide,evidence:write,edge:node_admission:request")
+  const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,actions:simulate,actions:execute,approvals:decide,evidence:write,knowledge:promote,edge:node_admission:request")
     .split(",").map((item) => item.trim()).filter(Boolean);
   return Object.freeze({
     port: integer(overrides.port ?? process.env.PORT, 4173, 0),
@@ -507,6 +515,110 @@ function resolveLocalCapability(pathname, method) {
   return { method: expectedMethod, runtimePath: `/projects/${projectId}/${action}` };
 }
 
+export const CANONICAL_OPERATIONAL_ROUTES = Object.freeze({
+  "/api/operations/capabilities/readiness": Object.freeze({ GET: "/capabilities/readiness" }),
+  "/api/operations/missions": Object.freeze({ GET: "/missions" }),
+  "/api/operations/conclave/workspaces": Object.freeze({ GET: "/conclave/workspaces", POST: "/conclave/workspaces" }),
+  "/api/operations/operational-replay": Object.freeze({ GET: "/operational-replay" }),
+  "/api/operations/operational-replay/failures": Object.freeze({ GET: "/operational-replay/failures" }),
+  "/api/operations/receipts": Object.freeze({ GET: "/receipts" }),
+  "/api/operations/mission-store": Object.freeze({ GET: "/mission-store" }),
+  "/api/operations/knowledge/acquisitions": Object.freeze({ GET: "/knowledge/acquisitions" }),
+  "/api/operations/knowledge/promotion-candidates": Object.freeze({ GET: "/knowledge/promotion-candidates" }),
+  "/api/operations/knowledge/store": Object.freeze({ GET: "/knowledge/store" }),
+  "/api/operations/knowledge/receipts": Object.freeze({ GET: "/knowledge/receipts" }),
+  "/api/operations/runtime/baselines": Object.freeze({ POST: "/runtime/baselines" }),
+  "/api/operations/knowledge/promotions": Object.freeze({ POST: "/knowledge/promotions" }),
+});
+
+function operationalMethod(route, method) {
+  const runtimePath = route?.[method];
+  if (runtimePath) return { method, runtimePath, canonicalHosted: true };
+  if (!route) return null;
+  return { methodMismatch: true, allowed: Object.keys(route).join(", ") };
+}
+
+function operationalIdentifier(raw) {
+  let identifier;
+  try { identifier = decodeURIComponent(raw); } catch { return null; }
+  return OPERATIONAL_RECORD_ID_PATTERN.test(identifier) ? encodeURIComponent(identifier) : null;
+}
+
+export function resolveOperationalCapability(pathname, method) {
+  const direct = operationalMethod(CANONICAL_OPERATIONAL_ROUTES[pathname], method);
+  if (direct) return direct;
+
+  const replayStageExplanation = pathname.match(/^\/api\/operations\/operational-replay\/([^/]+)\/stages\/([^/]+)\/explain$/);
+  if (replayStageExplanation) {
+    const replayId = operationalIdentifier(replayStageExplanation[1]);
+    const stageId = operationalIdentifier(replayStageExplanation[2]);
+    if (!replayId || !stageId) return null;
+    return operationalMethod({ GET: `/operational-replay/${replayId}/stages/${stageId}/explain` }, method);
+  }
+  const replayStage = pathname.match(/^\/api\/operations\/operational-replay\/([^/]+)\/stages\/([^/]+)$/);
+  if (replayStage) {
+    const replayId = operationalIdentifier(replayStage[1]);
+    const stageId = operationalIdentifier(replayStage[2]);
+    if (!replayId || !stageId) return null;
+    return operationalMethod({ GET: `/operational-replay/${replayId}/stages/${stageId}` }, method);
+  }
+  const replayEvents = pathname.match(/^\/api\/operations\/operational-replay\/([^/]+)\/events$/);
+  if (replayEvents) {
+    const replayId = operationalIdentifier(replayEvents[1]);
+    if (!replayId) return null;
+    return operationalMethod({ GET: `/operational-replay/${replayId}/events` }, method);
+  }
+  const missionReplay = pathname.match(/^\/api\/operations\/operational-replay\/missions\/([^/]+)$/);
+  if (missionReplay) {
+    const missionId = operationalIdentifier(missionReplay[1]);
+    if (!missionId) return null;
+    return operationalMethod({ GET: `/operational-replay/missions/${missionId}` }, method);
+  }
+  const receiptReplay = pathname.match(/^\/api\/operations\/operational-replay\/receipts\/([^/]+)$/);
+  if (receiptReplay) {
+    const receiptId = operationalIdentifier(receiptReplay[1]);
+    if (!receiptId) return null;
+    return operationalMethod({ GET: `/operational-replay/receipts/${receiptId}` }, method);
+  }
+  const replay = pathname.match(/^\/api\/operations\/operational-replay\/([^/]+)$/);
+  if (replay) {
+    const replayId = operationalIdentifier(replay[1]);
+    if (!replayId) return null;
+    return operationalMethod({ GET: `/operational-replay/${replayId}` }, method);
+  }
+  const missionReceipts = pathname.match(/^\/api\/operations\/receipts\/missions\/([^/]+)$/);
+  if (missionReceipts) {
+    const missionId = operationalIdentifier(missionReceipts[1]);
+    if (!missionId) return null;
+    return operationalMethod({ GET: `/receipts/missions/${missionId}` }, method);
+  }
+  const receipt = pathname.match(/^\/api\/operations\/receipts\/([^/]+)$/);
+  if (receipt) {
+    const receiptId = operationalIdentifier(receipt[1]);
+    if (!receiptId) return null;
+    return operationalMethod({ GET: `/receipts/${receiptId}` }, method);
+  }
+  const promotionCandidate = pathname.match(/^\/api\/operations\/knowledge\/acquisitions\/([^/]+)\/promotion-candidates$/);
+  if (promotionCandidate) {
+    const missionId = operationalIdentifier(promotionCandidate[1]);
+    if (!missionId) return null;
+    return operationalMethod({ POST: `/knowledge/acquisitions/${missionId}/promotion-candidates` }, method);
+  }
+  const missionDetail = pathname.match(/^\/api\/operations\/missions\/([^/]+)$/);
+  if (missionDetail && missionDetail[1] !== "plan") {
+    const missionId = operationalIdentifier(missionDetail[1]);
+    if (!missionId) return null;
+    return operationalMethod({ GET: `/missions/${missionId}` }, method);
+  }
+  if (
+    pathname === "/api/operations/missions/plan"
+    || /^\/api\/operations\/missions\/[^/]+\/execute-step$/.test(pathname)
+  ) return null;
+
+  const localPath = `/api/local${pathname.slice("/api/operations".length)}`;
+  return resolveLocalCapability(localPath, method);
+}
+
 async function readJsonBody(request, maximumBytes) {
   const declared = Number(request.headers["content-length"] ?? 0);
   if (declared > maximumBytes) throw new GatewayFailure("request_too_large", "Request exceeded the local capability size limit.", "Unknown", 413);
@@ -550,6 +662,26 @@ function strictKeys(payload, allowed) {
   if (unknown.length) throw new GatewayFailure("request_invalid", `Unsupported request field: ${unknown[0]}.`, "Unknown", 400);
 }
 
+function rejectUntrustedOperationalFields(value, trail = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => rejectUntrustedOperationalFields(item, [...trail, String(index)]));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, item] of Object.entries(value)) {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (UNTRUSTED_OPERATIONAL_FIELDS.has(normalized)) {
+      throw new GatewayFailure(
+        "untrusted_identity_field",
+        `Request field ${[...trail, key].join(".")} cannot select or strengthen Runtime identity, approval, or Authority.`,
+        "Unauthorized",
+        403,
+      );
+    }
+    rejectUntrustedOperationalFields(item, [...trail, key]);
+  }
+}
+
 function optionalProjectId(value) {
   if (value === undefined || value === null || value === "") return undefined;
   const projectId = String(value).trim();
@@ -590,6 +722,37 @@ function sanitizeRuntimeCoordinationResponse(runtimePath, value) {
 }
 
 function validateLocalPayload(runtimePath, payload, maximumBytes) {
+  if (runtimePath === "/runtime/baselines") {
+    strictKeys(payload, new Set(["expectedDeployedCommit"]));
+    const expectedDeployedCommit = boundedText(payload.expectedDeployedCommit, "expectedDeployedCommit", 160, false);
+    if (expectedDeployedCommit && !OPERATIONAL_RECORD_ID_PATTERN.test(expectedDeployedCommit)) {
+      throw new GatewayFailure("request_invalid", "expectedDeployedCommit is invalid.", "Unknown", 400);
+    }
+    return expectedDeployedCommit ? { expectedDeployedCommit } : {};
+  }
+  if (runtimePath === "/knowledge/promotions") {
+    strictKeys(payload, new Set(["candidateId"]));
+    const candidateId = boundedText(payload.candidateId, "candidateId", 160);
+    if (!OPERATIONAL_RECORD_ID_PATTERN.test(candidateId)) {
+      throw new GatewayFailure("request_invalid", "candidateId is invalid.", "Unknown", 400);
+    }
+    return { candidateId };
+  }
+  if (/^\/knowledge\/acquisitions\/[A-Za-z0-9_.%:@-]+\/promotion-candidates$/.test(runtimePath)) {
+    strictKeys(payload, new Set(["expectedMissionVersion"]));
+    const expectedMissionVersion = payload.expectedMissionVersion;
+    if (expectedMissionVersion === undefined) return {};
+    if (typeof expectedMissionVersion === "number") {
+      if (!Number.isFinite(expectedMissionVersion)) {
+        throw new GatewayFailure("request_invalid", "expectedMissionVersion is invalid.", "Unknown", 400);
+      }
+      return { expectedMissionVersion };
+    }
+    if (typeof expectedMissionVersion === "string") {
+      return { expectedMissionVersion: boundedText(expectedMissionVersion, "expectedMissionVersion", 160) };
+    }
+    throw new GatewayFailure("request_invalid", "expectedMissionVersion is invalid.", "Unknown", 400);
+  }
   if (runtimePath === "/conclave/workspaces") {
     strictKeys(payload, new Set(["proposal"]));
     return { proposal: boundedText(payload.proposal, "proposal", 8_000) };
@@ -885,8 +1048,7 @@ async function handleOperationalApi(request, response, config, operationalFetch,
   if (url.search) return sendJson(response, 400, operationalFailure(config, url.pathname, "query_not_allowed", "Operational routes do not accept browser query parameters."));
   const claims = sessionAuthority.authenticate(request);
   if (!claims) return sendJson(response, 401, operationalFailure(config, url.pathname, "session_required", "An authenticated operational session is required.", "Unauthorized"));
-  const localPath = `/api/local${url.pathname.slice("/api/operations".length)}`;
-  const resolved = resolveLocalCapability(localPath, request.method);
+  const resolved = resolveOperationalCapability(url.pathname, request.method);
   if (!resolved) return sendJson(response, 404, operationalFailure(config, url.pathname, "route_not_allowlisted", "This hosted operation is not allowlisted."));
   if (resolved.methodMismatch) return sendJson(response, 405, operationalFailure(config, url.pathname, "method_not_allowed", "Method is not allowed for this hosted operation."), { Allow: resolved.allowed });
   const scope = requiredScope(resolved.runtimePath, resolved.method);
@@ -897,6 +1059,7 @@ async function handleOperationalApi(request, response, config, operationalFetch,
   }
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
+    if (resolved.method === "POST") rejectUntrustedOperationalFields(rawPayload);
     const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
     if (resolved.method === "POST" && payload?.idempotencyKey && payload.idempotencyKey !== request.headers["idempotency-key"]) {
       throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match the request body.", "Unknown", 400);

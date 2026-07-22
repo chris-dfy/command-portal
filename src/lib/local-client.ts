@@ -407,6 +407,14 @@ export type OperationalSession = {
   csrfToken?: string;
 };
 
+export type RuntimeBaselineRequest = {
+  expectedDeployedCommit?: string;
+};
+
+export type KnowledgePromotionRequest = {
+  candidateId: string;
+};
+
 async function sessionRequest(path: string, options: RequestInit = {}): Promise<OperationalSession> {
   const response = await fetch(`/api/session${path}`, {
     ...options, credentials: "same-origin",
@@ -436,6 +444,7 @@ const post = <T, B extends object = Record<string, unknown>>(path: string, body:
 
 export const localNexusClient = Object.freeze({
   status: () => request<Record<string, unknown>>("/status"),
+  capabilityReadiness: () => request<Record<string, unknown>>("/capabilities/readiness"),
   clientCapabilities: () => request<ClientCapabilityContract>("/client-capabilities"),
   intakeHistory: () => request<IntakeHistory>("/intake/history"),
   intakeUpload: (filename: string, contentBase64: string, projectId?: string) => post<Record<string, unknown>>("/intake/upload", { filename, contentBase64, ...(projectId ? { projectId } : {}) }),
@@ -450,8 +459,16 @@ export const localNexusClient = Object.freeze({
   voiceHistory: () => request<{ events?: Array<Record<string, unknown>> }>("/voice-operator/history"),
   routeTranscript: (transcript: string, source: "browser_speech" | "text_fallback") => post<VoiceRouteResult>("/voice-operator/route-transcript", { transcript, source }),
   missions: () => request<Record<string, unknown>>("/missions"),
-  planMission: (objective: string) => post<Record<string, unknown>>("/missions/plan", { objective }),
-  executeMissionStep: (missionId: string, stepId: string) => post<Record<string, unknown>>(`/missions/${encodeURIComponent(missionId)}/execute-step`, { stepId }),
+  planMission: (objective: string) => capabilityTransport.mode === "hosted"
+    ? post<Record<string, unknown>>(
+      "/conclave/workspaces",
+      { proposal: objective },
+      `conclave-mission:${globalThis.crypto.randomUUID()}`,
+    )
+    : post<Record<string, unknown>>("/missions/plan", { objective }),
+  executeMissionStep: (missionId: string, stepId: string) => capabilityTransport.mode === "hosted"
+    ? Promise.reject(new Error("Hosted Mission execution is unavailable until a canonical governed execution route is registered."))
+    : post<Record<string, unknown>>(`/missions/${encodeURIComponent(missionId)}/execute-step`, { stepId }),
   conclaveWorkspaces: () => request<ConclaveWorkspaceList>("/conclave/workspaces"),
   createConclaveWorkspace: (proposal: string, idempotencyKey: string) => post<ConclaveWorkspaceRecord>(
     "/conclave/workspaces",
@@ -460,6 +477,26 @@ export const localNexusClient = Object.freeze({
   ),
   conclaveWorkspace: (missionId: string) => request<ConclaveWorkspaceRecord>(
     `/conclave/workspaces/${encodeURIComponent(missionId)}`,
+  ),
+  operationalReplays: () => request<Record<string, unknown>>("/operational-replay"),
+  operationalReplay: (replayId: string) => request<Record<string, unknown>>(
+    `/operational-replay/${encodeURIComponent(replayId)}`,
+  ),
+  operationalReplayEvents: (replayId: string) => request<Record<string, unknown>>(
+    `/operational-replay/${encodeURIComponent(replayId)}/events`,
+  ),
+  operationalReplayStage: (replayId: string, stageId: string) => request<Record<string, unknown>>(
+    `/operational-replay/${encodeURIComponent(replayId)}/stages/${encodeURIComponent(stageId)}`,
+  ),
+  explainOperationalReplayStage: (replayId: string, stageId: string) => request<Record<string, unknown>>(
+    `/operational-replay/${encodeURIComponent(replayId)}/stages/${encodeURIComponent(stageId)}/explain`,
+  ),
+  operationalReplayFailures: () => request<Record<string, unknown>>("/operational-replay/failures"),
+  operationalReplayForMission: (missionId: string) => request<Record<string, unknown>>(
+    `/operational-replay/missions/${encodeURIComponent(missionId)}`,
+  ),
+  operationalReplayForReceipt: (receiptId: string) => request<Record<string, unknown>>(
+    `/operational-replay/receipts/${encodeURIComponent(receiptId)}`,
   ),
   workSessions: () => request<Record<string, unknown>>("/work-sessions"),
   planWorkSession: (objective: string) => post<Record<string, unknown>>("/work-sessions/plan", { objective }),
@@ -511,5 +548,35 @@ export const localNexusClient = Object.freeze({
     `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}/replay`,
   ),
   proofs: () => request<Record<string, unknown>>("/proofs"),
-  receipts: () => request<Record<string, unknown>>("/receipts")
+  receipts: () => request<Record<string, unknown>>("/receipts"),
+  receipt: (receiptId: string) => request<Record<string, unknown>>(
+    `/receipts/${encodeURIComponent(receiptId)}`,
+  ),
+  missionReceipts: (missionId: string) => request<Record<string, unknown>>(
+    `/receipts/missions/${encodeURIComponent(missionId)}`,
+  ),
+  missionStore: () => request<Record<string, unknown>>("/mission-store"),
+  knowledgeAcquisitions: () => request<Record<string, unknown>>("/knowledge/acquisitions"),
+  knowledgePromotionCandidates: () => request<Record<string, unknown>>("/knowledge/promotion-candidates"),
+  createKnowledgePromotionCandidate: (
+    missionId: string,
+    expectedMissionVersion: string | number | undefined,
+    idempotencyKey: string,
+  ) => post<Record<string, unknown>>(
+    `/knowledge/acquisitions/${encodeURIComponent(missionId)}/promotion-candidates`,
+    expectedMissionVersion === undefined ? {} : { expectedMissionVersion },
+    idempotencyKey,
+  ),
+  knowledgeStore: () => request<Record<string, unknown>>("/knowledge/store"),
+  knowledgeReceipts: () => request<Record<string, unknown>>("/knowledge/receipts"),
+  establishRuntimeBaseline: (payload: RuntimeBaselineRequest, idempotencyKey: string) => post<Record<string, unknown>>(
+    "/runtime/baselines",
+    payload,
+    idempotencyKey,
+  ),
+  promoteKnowledge: (payload: KnowledgePromotionRequest, idempotencyKey: string) => post<Record<string, unknown>>(
+    "/knowledge/promotions",
+    payload,
+    idempotencyKey,
+  ),
 });

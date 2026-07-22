@@ -113,7 +113,7 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
   const [app, center, contract, portalClient] = await Promise.all([
     read("../src/App.tsx"), read("../src/components/OperationsCenter.tsx"), read("../src/lib/eox-client.ts"), read("../src/lib/portal-client.ts")
   ]);
-  assert.match(app, /return isAreaId\(pathValue\) \? pathValue : "dashboard"/);
+  assert.match(app, /areaFromPath\(window\.location\.pathname\)/);
   assert.match(app, /active === "dashboard"/);
   for (const label of ["Operations Center", "Executive Brief", "Operational Health", "Attention Queue", "Recommended Actions", "Operational Understanding", "Mission Timeline", "Executive state"]) assert.match(center, new RegExp(label));
   assert.match(center, /assessment\.loop\.map/);
@@ -127,12 +127,17 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
 });
 
 test("direct hosted workspace paths survive a fresh page load", async () => {
-  const app = await read("../src/App.tsx");
+  const [app, navigation] = await Promise.all([read("../src/App.tsx"), read("../src/platform/navigation.ts")]);
   assert.match(app, /window\.location\.pathname/);
   assert.match(app, /window\.location\.hash/);
-  assert.match(app, /if \(isAreaId\(hashValue\)\) return hashValue/);
+  for (const path of ["/missions", "/mission-control", "/conclave", "/operational-replay", "/knowledge", "/edge-runtime"]) {
+    assert.match(navigation, new RegExp(`"${path.replaceAll("/", "\\/")}"`));
+  }
   assert.match(app, /const \[active, setActive\] = useState<AreaId>\(routeFromLocation\)/);
   assert.match(app, /setActive\(routeFromLocation\(\)\)/);
+  assert.match(app, /window\.history\.pushState/);
+  assert.match(app, /window\.history\.replaceState/);
+  assert.match(app, /routePath=\{AREA_PATHS\[active\]\}/);
 });
 
 test("Conclave is a visible Runtime-owned decision challenge capability", async () => {
@@ -143,7 +148,11 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(navigation, /label: "Conclave"/);
   assert.match(app, /<ConclaveWorkspace/);
   for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
-  assert.match(client, /\/api\/runtime\/conclave\/reviews/);
+  assert.match(client, /localNexusClient\.createConclaveWorkspace/);
+  assert.doesNotMatch(client, /\/api\/runtime\/conclave\/reviews|runConclaveReview/);
+  assert.match(conclave, /localNexusClient\.conclaveWorkspaces\(\)/);
+  assert.match(conclave, /Durable Runtime workspace/);
+  assert.match(conclave, /does not substitute a static one-shot review/);
   assert.match(conclave, /useState\(""\)/);
   assert.match(conclave, /placeholder=\{suggestedProposal\}/);
   assert.doesNotMatch(client, /gateway\.data\.data/);
@@ -301,7 +310,7 @@ test("canonical consolidation exposes every permanent platform workspace", async
   for (const label of ["Dashboard", "Missions", "Operational Replay", "Conclave", "Knowledge", "Edge Runtime", "Mission Control", "Settings"]) assert.match(navigation, new RegExp(`label: "${label}"`));
   for (const label of ["Active Missions", "Blocked Missions", "Completed Missions", "Mission Health", "Mission Executor", "Mission receipts"]) assert.match(missions, new RegExp(label, "i"));
   for (const label of ["Replay pipeline visualization", "Stage Inspector", "Explain This Step", "Executive Mode", "Engineering Mode", "Failure Replay", "Export"]) assert.match(replay, new RegExp(label, "i"));
-  for (const label of ["Mission Store", "Knowledge Store", "Knowledge Promotion Engine", "Promotion Receipts"]) assert.match(knowledge, new RegExp(label, "i"));
+  for (const label of ["Mission Store", "Knowledge Store", "Knowledge Promotion", "Knowledge Receipts"]) assert.match(knowledge, new RegExp(label, "i"));
   for (const label of ["Mission", "Objectives", "Knowledge", "Unknowns", "Task Graph", "Specialists", "Evidence", "Knowledge Graph", "Operational Replay", "Executive Conclusions"]) assert.match(conclave, new RegExp(label));
   for (const component of ["NexusExecutiveNavigation", "NexusPlatformRail", "NexusWorkspaceCommandBar", "NexusWorkspaceFrame", "NexusActivityStream", "NexusContextInspector"]) assert.match(app, new RegExp(`<${component}`));
   assert.match(workspaceFrame, /<NexusPageHeader/);
@@ -322,20 +331,23 @@ test("Operational Replay surfaces Runtime-owned stage playback with truthful bou
     read("../src/App.tsx"),
     read("../src/platform/navigation.ts"),
     read("../src/components/OperationalReplay.tsx"),
-    read("../src/lib/replay-client.ts")
+    read("../src/lib/local-client.ts")
   ]);
   assert.match(navigation, /label: "Operational Replay"/);
   assert.match(app, /<OperationalReplay/);
-  for (const stage of ["Observation", "Evidence", "Representation", "Conclave", "Authority", "Decision", "Receipt"]) {
-    assert.match(replay, new RegExp(`label: "${stage}"`));
-  }
   for (const control of ["Restart", "Previous", "Play", "Pause", "Next"]) {
-    assert.match(replay, new RegExp(`<span>${control}</span>`));
+    assert.match(replay, new RegExp(control));
   }
   assert.match(replay, /Explain This Step/);
+  assert.match(replay, /supplied\.whatChanged/);
   assert.match(replay, /Runtime supplied no explanation for this stage\./);
   assert.match(replay, /STAGE_INTERVAL_BASE_MS \/ speed/);
-  assert.match(client, /\/api\/runtime\/replay/);
+  for (const operation of ["operationalReplays", "operationalReplayEvents", "operationalReplayStage", "explainOperationalReplayStage", "operationalReplayFailures", "operationalReplayForMission", "operationalReplayForReceipt"]) {
+    assert.match(client, new RegExp(operation));
+  }
+  assert.match(replay, /Canonical direct Replay/);
+  assert.match(replay, /No local-only Replay fallback is used/);
+  assert.doesNotMatch(replay, /replayClient|\/api\/replay|\/api\/runtime\/replay/);
   assert.equal(client.includes("COMMAND_PORTAL_RUNTIME_READ_TOKEN"), false);
   assert.equal(client.includes("Authorization"), false);
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(replay + client), false);

@@ -1,30 +1,66 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BrainCircuit, CheckCircle2, RefreshCw, Scale, ShieldAlert, TriangleAlert } from "lucide-react";
 import { DataPanel } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 import { startConclaveInvestigation, type ConclaveRun } from "../lib/conclave-client";
-import { localNexusClient } from "../lib/local-client";
+import { localNexusClient, type ConclaveWorkspaceRecord } from "../lib/local-client";
 import { displayLabel } from "../lib/presentation";
 
 const suggestedProposal = "Investigate how an Edge Runtime can establish evidence-only communication with an unfamiliar operational asset, identify every available interface, and recommend the safest next test.";
+const presentationText = (record: Record<string, unknown> | null, keys: string[]) => {
+  if (!record) return "";
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+};
 
-export function ConclaveWorkspace({ status }: { status?: Record<string, unknown> | null }) {
+export function ConclaveWorkspace() {
   const [proposal, setProposal] = useState("");
   const [run, setRun] = useState<ConclaveRun | null>(null);
+  const [workspaces, setWorkspaces] = useState<ConclaveWorkspaceRecord[]>([]);
+  const [sourceState, setSourceState] = useState<"loading" | "available" | "empty" | "unavailable" | "stale">("loading");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const workspace = run?.workspace ?? null;
-  const review = run?.preflightReview ?? null;
+  const synthesis = presentationText(workspace?.executiveSummary ?? null, ["synthesis", "summary", "conclusion", "narrative"]);
+  const synthesisOutcome = presentationText(workspace?.executiveSummary ?? null, ["outcome", "status"]);
   const taskCounts = workspace?.tasks.reduce<Record<string, number>>((counts, task) => {
     counts[task.status] = (counts[task.status] ?? 0) + 1;
     return counts;
   }, {}) ?? {};
 
+  const refreshDirectory = useCallback(async () => {
+    try {
+      const result = await localNexusClient.conclaveWorkspaces();
+      const next = Array.isArray(result.workspaces) ? result.workspaces : [];
+      setWorkspaces(next);
+      setSourceState(next.length ? "available" : "empty");
+      setRun((current) => {
+        const refreshed = current && next.find((item) => item.missionId === current.workspace.missionId);
+        if (refreshed) return { workspace: refreshed };
+        return current ?? (next[0] ? { workspace: next[0] } : null);
+      });
+    } catch (caught) {
+      setSourceState((current) => current === "available" || current === "stale" ? "stale" : "unavailable");
+      setError(caught instanceof Error ? caught.message : "Conclave workspace history is unavailable.");
+    }
+  }, []);
+
+  useEffect(() => { void refreshDirectory(); }, [refreshDirectory]);
+
   async function startInvestigation() {
     const value = proposal.trim();
     if (!value || busy) return;
     setBusy(true); setError(null);
-    try { setRun(await startConclaveInvestigation(value)); }
+    try {
+      const next = await startConclaveInvestigation(value);
+      setRun(next);
+      setWorkspaces((current) => [next.workspace, ...current.filter((item) => item.missionId !== next.workspace.missionId)]);
+      setSourceState("available");
+      setProposal("");
+    }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
   }
@@ -35,6 +71,7 @@ export function ConclaveWorkspace({ status }: { status?: Record<string, unknown>
     try {
       const refreshed = await localNexusClient.conclaveWorkspace(workspace.missionId);
       setRun((current) => current ? { ...current, workspace: refreshed } : current);
+      setWorkspaces((current) => current.map((item) => item.missionId === refreshed.missionId ? refreshed : item));
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
   }
@@ -42,12 +79,13 @@ export function ConclaveWorkspace({ status }: { status?: Record<string, unknown>
   return <div className="conclave-workspace">
     <section className="conclave-hero">
       <div><span>Runtime-owned knowledge acquisition</span><h2>Conclave</h2><p>Launch an isolated investigation workspace, route evidence-gated tasks to the configurable specialist registry, and follow the work through Operational Replay. Conclusions remain withheld until the evidence supports them.</p></div>
-      <aside><StatusPill value={workspace?.status ?? String(status?.state ?? "available")} /><strong>Live governed investigation</strong><small>Real workspace · Dissent preserved · Execution Not authorized</small></aside>
+      <aside><StatusPill value={workspace?.status ?? sourceState} /><strong>Durable governed investigation</strong><small>Runtime workspace · Dissent preserved · Execution Not authorized</small></aside>
     </section>
 
     <DataPanel eyebrow="Investigation mission" title="Frame the operational question" icon={<Scale size={18} />}>
-      <div className="conclave-composer"><label htmlFor="conclave-proposal">What should Conclave investigate?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><span className="conclave-composer__actions">{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={!proposal.trim() || busy}><BrainCircuit size={16} />{busy ? "Coordinating…" : "Start governed investigation"}</button></span></div></div>
+      <div className="conclave-composer"><label htmlFor="conclave-workspace">Durable Runtime workspace</label><select id="conclave-workspace" value={workspace?.missionId ?? ""} onChange={(event) => { const selected = workspaces.find((item) => item.missionId === event.target.value); if (selected) setRun({ workspace: selected }); }} disabled={!workspaces.length}><option value="">{sourceState === "loading" ? "Loading Runtime workspaces…" : "No Runtime workspace available"}</option>{workspaces.map((item) => <option key={item.missionId} value={item.missionId}>{item.proposal} · {item.status}</option>)}</select><label htmlFor="conclave-proposal">What should Conclave investigate?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><span className="conclave-composer__actions">{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={!proposal.trim() || busy}><BrainCircuit size={16} />{busy ? "Coordinating…" : "Start governed investigation"}</button></span></div></div>
       {error && <p className="conclave-error" role="alert">{error}</p>}
+      <p className="boundary-note">Workspace directory: <strong>{sourceState}</strong>. The portal does not substitute a static one-shot review when durable Conclave is unavailable.</p>
     </DataPanel>
 
     <section className="conclave-context-grid" aria-label="Conclave mission workspace">
@@ -80,12 +118,12 @@ export function ConclaveWorkspace({ status }: { status?: Record<string, unknown>
         </article>;
       })}</div>
 
-      {review && <DataPanel eyebrow="Conclave synthesis" title={displayLabel(review.outcome)} icon={<ShieldAlert size={18} />}>
-        <div className="conclave-boundary"><p>{review.synthesis}</p><div>{review.missingContextDomains.map((domain) => <StatusPill key={domain} value={`${domain} missing`} tone="warn" />)}</div><small>{review.reviewId} · This diagnostic review does not replace the live investigation workspace.</small></div>
-      </DataPanel>}
+      <DataPanel eyebrow="Conclave synthesis" title={workspace.executiveSummary ? "Runtime synthesis recorded" : "Withheld pending Evidence"} icon={<ShieldAlert size={18} />}>
+        <div className="conclave-boundary">{synthesis ? <p>{synthesis}</p> : <p>{workspace.executiveSummary ? "The Runtime recorded a structured executive summary but supplied no presentation-safe synthesis field." : "No synthesis is presented until the durable Runtime workspace records an evidence-backed executive summary."}</p>}{synthesisOutcome && <StatusPill value={synthesisOutcome} />}<small>{workspace.missionId} · source: authenticated Runtime workspace · hidden model reasoning is never presented</small></div>
+      </DataPanel>
 
       <DataPanel eyebrow="Truth boundary" title="Current operational limits" icon={<TriangleAlert size={18} />}>
-        <div className="conclave-boundary"><p>The workspace is executing coordination, not device control. A task state does not claim a specialist or operational asset performed work.</p><ul>{workspace.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul>{run?.preflightUnavailableReason && <small>Diagnostic preflight unavailable: {run.preflightUnavailableReason}</small>}<small>{workspace.missionId} · scope {workspace.scope.tenantId}/{workspace.scope.workspaceId}</small></div>
+        <div className="conclave-boundary"><p>The workspace is executing coordination, not device control. A task state does not claim a specialist or operational asset performed work.</p><ul>{workspace.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul><small>{workspace.missionId} · scope {workspace.scope.tenantId}/{workspace.scope.workspaceId}</small></div>
       </DataPanel>
     </> : <section className="conclave-empty"><BrainCircuit size={25} /><div><strong>No live investigation is active in this client session.</strong><p>Frame a mission above. Conclave will create an isolated workspace, task graph, specialist assignments, and Replay stream in the operational Runtime.</p></div></section>}
   </div>;

@@ -11,11 +11,13 @@ const records = (value: unknown, keys: string[]): RuntimeRecord[] => {
   for (const key of keys) if (Array.isArray(object[key])) return object[key] as RuntimeRecord[];
   return [];
 };
+const object = (value: unknown): RuntimeRecord => value && typeof value === "object" && !Array.isArray(value) ? value as RuntimeRecord : {};
 const text = (value: unknown, fallback = "Unavailable") => typeof value === "string" && value.trim() ? value : fallback;
 const idOf = (item: RuntimeRecord, keys: string[]) => keys.map((key) => item[key]).find((value) => typeof value === "string") as string | undefined;
 
 export function OperationsWorkspace({ session, onSessionChange }: { session: OperationalSession; onSessionChange: (session: OperationalSession) => void }) {
   const [contract, setContract] = useState<ClientCapabilityContract | null>(null);
+  const [readiness, setReadiness] = useState<RuntimeRecord | null>(null);
   const [missions, setMissions] = useState<RuntimeRecord[]>([]);
   const [sessions, setSessions] = useState<RuntimeRecord[]>([]);
   const [approvals, setApprovals] = useState<RuntimeRecord[]>([]);
@@ -29,10 +31,11 @@ export function OperationsWorkspace({ session, onSessionChange }: { session: Ope
   const refresh = useCallback(async () => {
     setBusy(true); setError("");
     try {
-      const [nextContract, missionData, sessionData, approvalData, connectorData] = await Promise.all([
-        localNexusClient.clientCapabilities(), localNexusClient.missions(), localNexusClient.workSessions(), localNexusClient.approvals(), localNexusClient.connectors()
+      const [nextContract, readinessData, missionData, sessionData, approvalData, connectorData] = await Promise.all([
+        localNexusClient.clientCapabilities(), localNexusClient.capabilityReadiness().catch(() => null), localNexusClient.missions(), localNexusClient.workSessions(), localNexusClient.approvals(), localNexusClient.connectors()
       ]);
       setContract(nextContract);
+      setReadiness(readinessData);
       setMissions(records(missionData, ["missions"]));
       setSessions(records(sessionData, ["sessions", "workSessions"]));
       setApprovals(records(approvalData, ["approvals"]));
@@ -42,6 +45,11 @@ export function OperationsWorkspace({ session, onSessionChange }: { session: Ope
   }, []);
 
   useEffect(() => { if (session.authenticated) void refresh(); }, [refresh, session.authenticated]);
+
+  const readinessCapabilities = records(readiness, ["capabilities", "items", "records"]);
+  const runtimeIdentity = object(readiness?.runtimeIdentity ?? readiness?.runtime ?? readiness?.deployment ?? readiness?.source);
+  const runtimeVersion = text(readiness?.runtimeVersion ?? readiness?.runtime_version ?? runtimeIdentity.runtimeVersion ?? runtimeIdentity.version, "Not supplied");
+  const sourceCommit = text(readiness?.sourceCommit ?? readiness?.source_commit ?? readiness?.deployedCommit ?? runtimeIdentity.sourceCommit ?? runtimeIdentity.commit, "Not supplied");
 
   const run = async (operation: () => Promise<RuntimeRecord>, refreshAfter = true) => {
     setBusy(true); setError("");
@@ -79,6 +87,12 @@ export function OperationsWorkspace({ session, onSessionChange }: { session: Ope
       <p className="boundary-note">Operational behavior, context assembly, governance decisions, proofs, and receipts remain owned by NEXUS Runtime. This web workspace only presents the shared contract and submits operator intent.</p>
       {contract && !contract.completeNativeInventory && <p className="boundary-note">Current scope: <strong>{contract.inventoryScope}</strong>. Remaining native surfaces are explicitly tracked: {contract.truth.remainingNativeSurfaces.join(", ").replaceAll("_", " ")}.</p>}
       <button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} className={busy ? "spin" : ""} /> Refresh Runtime state</button>
+    </DataPanel>
+
+    <DataPanel eyebrow="Capability-specific readiness" title="Canonical deployed Runtime identity" icon={<CheckCircle2 size={18} />} className="span-2">
+      <div className="operations-summary"><article><span>Runtime version</span><strong>{runtimeVersion}</strong></article><article><span>Source commit</span><strong>{sourceCommit}</strong></article><article><span>Capability records</span><strong>{readiness ? readinessCapabilities.length : "—"}</strong></article><article><span>Readiness source</span><strong>{readiness ? "authenticated Runtime" : "Unavailable"}</strong></article></div>
+      <div className="compact-records">{readinessCapabilities.length ? readinessCapabilities.slice(0, 8).map((capability, index) => { const id = text(capability.capabilityId ?? capability.capability_id ?? capability.id ?? capability.name, `Capability ${index + 1}`); return <article key={id}><strong>{id}</strong><span>{text(capability.reason ?? capability.requiredNextAction ?? capability.required_next_action, "Runtime supplied no readiness reason")}</span><StatusPill value={text(capability.state ?? capability.status ?? capability.availability, "unknown")} /></article>; }) : <EmptyRecord>Capability-specific readiness is unavailable or contains no capability records.</EmptyRecord>}</div>
+      <p className="boundary-note">Route presence and configured providers do not establish operational readiness. This view presents only the Runtime's capability-specific dependency assessment.</p>
     </DataPanel>
 
     {error && <section className="operation-error span-2" role="alert"><ShieldAlert size={18} /><span>{error}</span></section>}

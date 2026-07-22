@@ -30,7 +30,12 @@ import { NexusExecutiveNavigation } from "./platform/NexusExecutiveNavigation";
 import { NexusPlatformRail, type PlatformRailGroup } from "./platform/NexusPlatformRail";
 import { NexusActivityStream, NexusWorkspaceCommandBar } from "./platform/NexusWorkspaceChrome";
 import { NexusWorkspaceFrame } from "./platform/NexusWorkspaceFrame";
-import { NEXUS_PLATFORM_NAVIGATION, type NexusPlatformAreaId } from "./platform/navigation";
+import {
+  NEXUS_PLATFORM_NAVIGATION,
+  NEXUS_PLATFORM_PATH_ALIASES,
+  NEXUS_PLATFORM_PATHS,
+  type NexusPlatformAreaId,
+} from "./platform/navigation";
 import "./design-system/nexus-tokens.css";
 import "./design-system/nexus-foundation.css";
 import "./appearance/appearance-workspace.css";
@@ -73,11 +78,30 @@ const record = (value: unknown) => value && typeof value === "object" && !Array.
 const list = (value: unknown) => Array.isArray(value) ? value as Record<string, unknown>[] : [];
 const STATE_PRIORITY: ConnectionState[] = ["Unauthorized", "Schema Mismatch", "Version Mismatch", "Timed Out", "Unavailable", "Unknown", "Degraded", "Retrying", "Connecting", "Healthy"];
 const isAreaId = (value: string): value is AreaId => AREAS.some((area) => area.id === value);
+const AREA_PATHS: Readonly<Record<AreaId, string>> = Object.freeze({
+  ...NEXUS_PLATFORM_PATHS,
+  documents: "/documents",
+  projects: "/projects",
+  voice: "/voice",
+  providers: "/providers",
+  evidence: "/evidence",
+});
+const normalizePath = (value: string) => {
+  const normalized = `/${value}`.replace(/\/{2,}/g, "/").replace(/\/$/, "");
+  return normalized || "/";
+};
+const areaFromPath = (pathname: string): AreaId | null => {
+  const path = normalizePath(pathname);
+  const canonical = (Object.entries(AREA_PATHS) as Array<[AreaId, string]>).find(([, candidate]) => (
+    path === candidate || (candidate !== "/" && path.startsWith(`${candidate}/`))
+  ));
+  if (canonical) return canonical[0];
+  return NEXUS_PLATFORM_PATH_ALIASES[path] ?? null;
+};
 const routeFromLocation = (): AreaId => {
-  const hashValue = window.location.hash.replace(/^#\/?/, "");
-  if (isAreaId(hashValue)) return hashValue;
-  const pathValue = window.location.pathname.replace(/^\/+|\/+$/g, "").split("/")[0] ?? "";
-  return isAreaId(pathValue) ? pathValue : "dashboard";
+  const hashValue = window.location.hash.replace(/^#\/?/, "").split("/")[0] ?? "";
+  if (normalizePath(window.location.pathname) === "/" && isAreaId(hashValue)) return hashValue;
+  return areaFromPath(window.location.pathname) ?? (isAreaId(hashValue) ? hashValue : "dashboard");
 };
 const COPILOT_TO_PLATFORM: Record<CopilotAreaId, AreaId> = {
   center: "dashboard", intake: "documents", projects: "projects", voice: "voice",
@@ -165,7 +189,21 @@ export function App() {
     return () => { active = false; };
   }, []);
   useEffect(() => { const timer = window.setInterval(() => refresh(false), 30_000); return () => window.clearInterval(timer); }, []);
-  useEffect(() => { const sync = () => setActive(routeFromLocation()); window.addEventListener("hashchange", sync); return () => window.removeEventListener("hashchange", sync); }, []);
+  useEffect(() => {
+    const sync = () => setActive(routeFromLocation());
+    window.addEventListener("popstate", sync);
+    window.addEventListener("hashchange", sync);
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("hashchange", sync);
+    };
+  }, []);
+  useEffect(() => {
+    const canonical = AREA_PATHS[active];
+    if (normalizePath(window.location.pathname) !== canonical || window.location.hash) {
+      window.history.replaceState({ nexusArea: active }, "", canonical);
+    }
+  }, [active]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); focusPlatformSearch(); }
@@ -192,7 +230,15 @@ export function App() {
   const activityTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const sidePanel = copilotOpen ? "copilot" : inspectorOpen ? "inspector" : "closed";
 
-  function navigate(id: AreaId) { window.location.hash = `/${id}`; setActive(id); setMenuOpen(false); window.scrollTo({ top: 0 }); }
+  function navigate(id: AreaId) {
+    const path = AREA_PATHS[id];
+    if (normalizePath(window.location.pathname) !== path || window.location.hash) {
+      window.history.pushState({ nexusArea: id }, "", path);
+    }
+    setActive(id);
+    setMenuOpen(false);
+    window.scrollTo({ top: 0 });
+  }
   function openReplay(missionId?: string) { setReplayMissionId(missionId); navigate("replay"); }
   function toggleCopilot() {
     const next = !copilotOpen;
@@ -224,7 +270,7 @@ export function App() {
     {active === "dashboard" && <><ExecutiveStatusBar snapshot={snapshot} connectionState={state} /><OperationsCenter assessment={eox ?? null} /></>}
     {active === "missions" && <MissionDashboard onReplay={openReplay} />}
     {active === "replay" && <OperationalReplay requestedMissionId={replayMissionId} />}
-    {active === "conclave" && <ConclaveWorkspace status={record(snapshot.conclave?.data)} />}
+    {active === "conclave" && <ConclaveWorkspace />}
     {active === "knowledge" && <KnowledgeWorkspace snapshot={snapshot} />}
     {active === "edge" && <><EdgeRuntime snapshot={snapshot} /><RuntimeTopology snapshot={snapshot} /></>}
     {active === "mission-control" && <OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} />}
@@ -295,7 +341,7 @@ export function App() {
       </section>
       {inspectorOpen && <NexusContextInspector
         featureLabel={current.label}
-        routePath={`/${active}`}
+        routePath={AREA_PATHS[active]}
         sourceClass="runtime_evidence"
         connectionLabel={state}
         connectionTone={connectionTone}

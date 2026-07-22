@@ -15,7 +15,7 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
-import { localNexusClient } from "../lib/local-client";
+import { localNexusClient, operationalSessionClient } from "../lib/local-client";
 import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
@@ -37,7 +37,7 @@ const text = (value: unknown, fallback: string) => {
   return fallback;
 };
 const list = (value: unknown) => Array.isArray(value) ? value.map((item) => text(item, "")).filter(Boolean) : [];
-const missionId = (mission: RuntimeRecord) => text(mission.missionId ?? mission.id, "mission-unavailable");
+const missionId = (mission: RuntimeRecord) => text(mission.missionId ?? mission.mission_id ?? mission.id, "mission-unavailable");
 const statusOf = (mission: RuntimeRecord) => text(mission.status, "planned");
 const receiptId = (receipt: RuntimeRecord) => text(receipt.executionReceiptId ?? receipt.receiptId ?? receipt.id, "");
 const statusValue = (value: unknown) => text(value, "").toLowerCase();
@@ -101,6 +101,7 @@ function missionHasConstraints(mission: RuntimeRecord) {
 const stepIcons = { complete: Check, ready: Play, staged: Radio, blocked: LockKeyhole, unavailable: TriangleAlert, planned: Circle };
 
 export function MissionDashboard({ onReplay }: { onReplay?: (missionId?: string) => void } = {}) {
+  const hosted = operationalSessionClient.mode() === "hosted";
   const [missions, setMissions] = useState<RuntimeRecord[]>([]);
   const [receipts, setReceipts] = useState<RuntimeRecord[]>([]);
   const [missionState, setMissionState] = useState<LoadState>("loading");
@@ -203,7 +204,7 @@ export function MissionDashboard({ onReplay }: { onReplay?: (missionId?: string)
       <NexusMetric label="Mission Health" value={health} detail={selectedMission ? `${progress}% selected progress` : "No selected Runtime mission"} tone={health === "operational" || health === "stable" ? "success" : health === "attention" ? "attention" : "neutral"} />
     </section>
     {error && <section className="operation-error" role="alert"><ShieldAlert size={18} /><span>{error}</span></section>}
-    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the governed outcome NEXUS should coordinate…" /></label><button onClick={() => void plan()} disabled={busy || !objective.trim()}><Network size={15} />Plan independent mission</button></div>
+    <div className="mission-compose"><label><span>{hosted ? "New Conclave mission" : "New mission objective"}</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder={hosted ? "Describe the evidence-bound investigation NEXUS should coordinate…" : "Describe the governed outcome NEXUS should coordinate…"} /></label><button onClick={() => void plan()} disabled={busy || !objective.trim()}><Network size={15} />{hosted ? "Start canonical Conclave mission" : "Plan independent mission"}</button></div>
     <div className="mission-dashboard__grid">
       <DataPanel eyebrow="Mission portfolio" title="Active, blocked, and completed missions" icon={<CircleGauge size={18} />}>
         <div className="mission-list">{missionState === "loading" ? <p className="replay-loading">Loading mission history from Runtime…</p> : missionState === "unavailable" ? <EmptyRecord>Runtime did not supply mission history. Mission status is unavailable.</EmptyRecord> : missions.length ? missions.map((mission) => { const id = missionId(mission); return <button key={id} data-active={id === selected} onClick={() => setSelected(id)}><div><strong>{text(mission.userObjective ?? mission.objective ?? mission.title, "Mission")}</strong><small>{id}</small></div><StatusPill value={statusOf(mission)} /></button>; }) : <EmptyRecord>No missions have been recorded by Runtime.</EmptyRecord>}</div>
@@ -212,7 +213,7 @@ export function MissionDashboard({ onReplay }: { onReplay?: (missionId?: string)
         {selectedMission ? <><div className="mission-progress"><span style={{ width: `${progress}%` }} /><strong>{progress}%</strong></div><p className="boundary-note">{text(selectedMission.executiveSummary ?? selectedMission.executive_summary ?? selectedMission.honestNarration ?? selectedMission.suggestedNextAction, "Runtime has not supplied an executive summary for this mission.")}</p><div className="mission-posture"><span><ShieldCheck size={13} />{text(selectedMission.riskLevel ?? selectedMission.risk_level, "unclassified")} risk</span><span><LockKeyhole size={13} />{blockers.length} constrained</span><span><Check size={13} />{reversible} reversible</span></div>{onReplay && <div className="operation-actions"><button onClick={() => onReplay(missionId(selectedMission))}>Open Operational Replay</button></div>}</> : <EmptyRecord>No Runtime mission is selected.</EmptyRecord>}
       </DataPanel>
       <DataPanel eyebrow="Mission Executor" title="Independent task graph" icon={<Play size={18} />}>
-        <ol className="mission-task-graph">{steps.length ? steps.map((step, index) => { const stepId = text(step.stepId ?? step.step_id ?? step.id, `step-${index + 1}`); const state = stepState(step); const StepIcon = stepIcons[state]; const linked = stepReceiptIds(step).length > 0; return <li key={stepId} data-state={state}><span className="mission-task-rail"><StepIcon size={14} /></span><article><header><div><span>Step {String(index + 1).padStart(2, "0")}</span><strong>{text(step.title ?? step.action, stepId)}</strong></div><StatusPill value={state} /></header><p>{text(step.action ?? step.nextAction ?? step.honestNarration, "This step remains bounded by registered capability and authority.")}</p><footer><span>{text(step.capabilityStatus ?? step.capability_status, "capability unrecorded")}</span><span>{text(step.riskLevel ?? step.risk_level, "unclassified")} risk</span><span>{step.reversible === false ? "irreversible" : "reversible"}</span>{linked ? <span><Check size={11} />receipt linked</span> : <span>no receipt yet</span>}{state === "ready" && <button onClick={() => void execute(missionId(selectedMission ?? {}), stepId)} disabled={busy}><Play size={12} />Execute bounded step</button>}</footer></article></li>; }) : <EmptyRecord>No task graph is available for the selected mission.</EmptyRecord>}</ol>
+        <ol className="mission-task-graph">{steps.length ? steps.map((step, index) => { const stepId = text(step.stepId ?? step.step_id ?? step.id, `step-${index + 1}`); const state = stepState(step); const StepIcon = stepIcons[state]; const linked = stepReceiptIds(step).length > 0; return <li key={stepId} data-state={state}><span className="mission-task-rail"><StepIcon size={14} /></span><article><header><div><span>Step {String(index + 1).padStart(2, "0")}</span><strong>{text(step.title ?? step.action, stepId)}</strong></div><StatusPill value={state} /></header><p>{text(step.action ?? step.nextAction ?? step.honestNarration, "This step remains bounded by registered capability and authority.")}</p><footer><span>{text(step.capabilityStatus ?? step.capability_status, "capability unrecorded")}</span><span>{text(step.riskLevel ?? step.risk_level, "unclassified")} risk</span><span>{step.reversible === false ? "irreversible" : "reversible"}</span>{linked ? <span><Check size={11} />receipt linked</span> : <span>no receipt yet</span>}{state === "ready" && !hosted && <button onClick={() => void execute(missionId(selectedMission ?? {}), stepId)} disabled={busy}><Play size={12} />Execute bounded step</button>}{state === "ready" && hosted && <span>governed execution route unavailable</span>}</footer></article></li>; }) : <EmptyRecord>No task graph is available for the selected mission.</EmptyRecord>}</ol>
       </DataPanel>
       <aside className="mission-inspector" aria-label="Selected mission context">
         <section><span className="nx-eyebrow">Mission posture</span><strong>{selectedMission ? `${progress}% receipt-aware progress` : "Unavailable"}</strong><div className="mission-progress"><span style={{ width: `${progress}%` }} /></div></section>
