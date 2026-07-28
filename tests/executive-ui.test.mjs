@@ -58,6 +58,25 @@ test("browser uses only same-origin allowlisted runtime routes and no token", as
   assert.equal(/VITE_.*TOKEN/.test(env), false);
 });
 
+test("Replit publishes the fixed hosted binding without committing server secrets", async () => {
+  const replit = await read("../.replit");
+  for (const binding of [
+    'COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"',
+    'COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"',
+    'COMMAND_PORTAL_OPERATOR_USER_ID = "operator-alpha"',
+    'COMMAND_PORTAL_TENANT_ID = "nexicron"',
+    'COMMAND_PORTAL_WORKSPACE_ID = "primary"',
+    'COMMAND_PORTAL_OPERATOR_ROLE = "admin"',
+    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,evidence:write,knowledge:promote,edge:node_admission:request,edge:node_admission:review"',
+  ]) assert.match(replit, new RegExp(binding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  for (const secretName of [
+    "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN",
+    "COMMAND_PORTAL_OPERATOR_ACCESS_KEY",
+    "COMMAND_PORTAL_RUNTIME_READ_TOKEN",
+    "COMMAND_PORTAL_SESSION_SECRET",
+  ]) assert.doesNotMatch(replit, new RegExp(secretName));
+});
+
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
   const [app, intake, projects, voice, realtime, client, hif] = await Promise.all([
     read("../src/App.tsx"),
@@ -410,6 +429,8 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(missions, /step\.reversible === true/);
   assert.doesNotMatch(missions, /step\.reversible !== false/);
   assert.match(app, /HostedCapabilityBoundary/);
+  assert.match(app, /if \(configured && capability\.state === "available"\) return children/);
+  assert.match(app, /Hosted operational mode is not configured for this deployment/);
   assert.match(app, /knowledge\.document_intake/);
   assert.match(app, /projects\.nexicron_planning/);
   assert.match(app, /interaction\.human/);

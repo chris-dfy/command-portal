@@ -230,10 +230,12 @@ function HostedCapabilityBoundary({
   capability: { state: string; reason: string };
   children: ReactNode;
 }) {
-  if (!configured || capability.state === "available") return children;
-  return <DataPanel eyebrow="Hosted capability boundary" title={`${title} is ${capability.state === "checking" ? "being verified" : "unavailable"}`} icon={<ShieldCheck size={18} />}>
-    <p className="boundary-note">{capability.reason} NEXUS will not substitute local state or infer readiness from the portal connection.</p>
-    <StatusPill value={capability.state} />
+  if (configured && capability.state === "available") return children;
+  const boundaryState = configured ? capability.state : "unavailable";
+  const reason = configured ? capability.reason : "Hosted operational mode is not configured for this deployment.";
+  return <DataPanel eyebrow="Hosted capability boundary" title={`${title} is ${boundaryState === "checking" ? "being verified" : "unavailable"}`} icon={<ShieldCheck size={18} />}>
+    <p className="boundary-note">{reason} NEXUS will not substitute local state or infer readiness from the portal connection.</p>
+    <StatusPill value={boundaryState} />
   </DataPanel>;
 }
 
