@@ -156,6 +156,9 @@ function capabilityStateView(
     if (clientContract.truth.hostedExecutionAvailable !== true) {
       return { state: "unavailable", reason: "The Runtime reports hosted execution unavailable for this deployment." };
     }
+    if (clientContract.capabilityStates?.[contractCapabilityId] !== "available") {
+      return { state: "unavailable", reason: `The Runtime reports ${contractCapabilityId} unavailable for this deployment.` };
+    }
     const capability = clientContract.capabilities.find((item) => item.capabilityId === contractCapabilityId);
     if (!capability || capability.clients.nexusWeb !== "implemented" || !capability.implementationState.startsWith("implemented")) {
       return { state: "unavailable", reason: `Runtime contract ${clientContract.contractVersion} does not register ${contractCapabilityId} for NEXUS Web.` };

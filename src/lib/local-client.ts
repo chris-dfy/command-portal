@@ -134,7 +134,8 @@ export type ClientCapabilityContract = {
     limitations: string[];
   }>;
   parity: { portableCapabilityCount: number; nexusCommandImplemented: number; nexusWebImplemented: number; driftCount: number; driftCapabilityIds: string[] };
-  truth: { source: string; localRuntimeRequired: boolean; hostedExecutionAvailable: boolean; hostedExecutionMode: "single_workspace_alpha" | "disabled"; productionMultiTenantReady: false; remainingNativeSurfaces: string[]; secretValuesExposed: false };
+  capabilityStates?: Record<string, "available" | "unavailable">;
+  truth: { source: string; localRuntimeRequired: boolean; hostedExecutionAvailable: boolean; allHostedCapabilitiesAvailable: boolean; hostedExecutionMode: "single_workspace_alpha" | "disabled"; productionMultiTenantReady: false; remainingNativeSurfaces: string[]; secretValuesExposed: false };
 };
 
 export type RuntimeCoordinationNode = {
