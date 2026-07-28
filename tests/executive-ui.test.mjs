@@ -88,7 +88,8 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(voice, /model-native knowledge/i);
   assert.equal(/SpeechRecognition|speechSynthesis/.test(voice + realtime), false);
   for (const event of ["SpeechStarted", "SpeechInterrupted", "ConversationStarted", "AvatarMoveRequested", "NavigationRequested", "FocusRequested", "PresentationStarted", "StreamingChunk"]) assert.match(hif, new RegExp(event));
-  assert.match(voice, /hifClient\.start/);
+  assert.match(voice, /localNexusClient\.routeTranscript\(transcript\.trim\(\), "text_fallback"\)/);
+  assert.match(voice, /governed NEXUS Runtime Voice Operator/);
   assert.match(hif, /clientId: "nexus-web"/);
   for (const source of [app, intake, projects, voice, realtime, client, hif]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
