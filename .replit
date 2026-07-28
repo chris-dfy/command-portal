@@ -10,20 +10,3 @@ deploymentTarget = "cloudrun"
 [[ports]]
 localPort = 4173
 externalPort = 80
-
-[agent]
-expertMode = true
-
-[nix]
-channel = "stable-25_05"
-
-[userenv]
-
-[userenv.shared]
-COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"
-COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"
-COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,evidence:write,knowledge:promote,edge:node_admission:request,edge:node_admission:review"
-COMMAND_PORTAL_OPERATOR_ROLE = "admin"
-COMMAND_PORTAL_OPERATOR_USER_ID = "operator-alpha"
-COMMAND_PORTAL_TENANT_ID = "nexicron"
-COMMAND_PORTAL_WORKSPACE_ID = "primary"
