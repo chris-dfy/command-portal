@@ -63,11 +63,11 @@ test("Replit publishes the fixed hosted binding without committing server secret
   for (const binding of [
     'COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"',
     'COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"',
-    'COMMAND_PORTAL_OPERATOR_USER_ID = "operator-alpha"',
+    'COMMAND_PORTAL_OPERATOR_USER_ID = "nexus-workspace-service"',
     'COMMAND_PORTAL_TENANT_ID = "nexicron"',
     'COMMAND_PORTAL_WORKSPACE_ID = "primary"',
-    'COMMAND_PORTAL_OPERATOR_ROLE = "admin"',
-    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,evidence:write,knowledge:promote,edge:node_admission:request,edge:node_admission:review"',
+    'COMMAND_PORTAL_OPERATOR_ROLE = "operator"',
+    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,actions:simulate,evidence:write,edge:node_admission:request"',
   ]) assert.match(replit, new RegExp(binding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   for (const secretName of [
     "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN",
@@ -75,6 +75,25 @@ test("Replit publishes the fixed hosted binding without committing server secret
     "COMMAND_PORTAL_RUNTIME_READ_TOKEN",
     "COMMAND_PORTAL_SESSION_SECRET",
   ]) assert.doesNotMatch(replit, new RegExp(secretName));
+});
+
+test("hosted workspaces bootstrap automatically without a browser credential form", async () => {
+  const [gate, client, app, operations] = await Promise.all([
+    read("../src/components/OperationalAccessGate.tsx"),
+    read("../src/lib/local-client.ts"),
+    read("../src/App.tsx"),
+    read("../src/components/OperationsWorkspace.tsx"),
+  ]);
+  assert.match(app, /operationalSessionClient\.status\(\)/);
+  assert.match(gate, /Retry secure connection/);
+  assert.match(gate, /private deployment admits the user/i);
+  assert.match(gate, /Connection grants API access—not operational Authority/i);
+  assert.doesNotMatch(gate, /password|accessKey|Operator access key|current-password|KeyRound/);
+  for (const forbidden of ['sessionRequest("/login"', "login:", "accessKey"]) {
+    assert.equal(client.includes(forbidden), false);
+  }
+  assert.match(operations, /Private workspace managed/);
+  assert.match(operations, /Authentication and access scope do not create operational Authority/);
 });
 
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
@@ -127,8 +146,7 @@ test("mission control consumes the versioned Runtime parity contract", async () 
   for (const staleCall of ["clientCapabilities\\(\\)", "workSessions\\(\\)", "approvals\\(\\)", "connectors\\(\\)", "dryRunAction\\(", "executeAction\\("]) assert.doesNotMatch(workspace, new RegExp(staleCall));
   assert.match(client, /Idempotency-Key/);
   assert.match(client, /operationalSessionClient/);
-  assert.match(client, /if \(session\.authenticated\) capabilityTransport\.mode = "hosted"/);
-  assert.doesNotMatch(client, /capabilityTransport\.mode = session\.authenticated \?/);
+  assert.match(client, /capabilityTransport\.mode = session\.authenticated \? "hosted" : "local"/);
   assert.match(app, /hosted-operational-context/);
   assert.match(app, /localNexusClient\.capabilityReadiness\(\)/);
   assert.match(app, /Capability state/);
@@ -325,7 +343,8 @@ test("canonical shell bootstraps the hosted operational session before mounting 
   assert.match(app, /const requiresOperationalSession = OPERATIONAL_AREAS\.has\(active\) \|\| \(hostedOperationalConfigured && HOSTED_CONTRACT_AREAS\.has\(active\)\)/);
   assert.match(app, /requiresOperationalSession && !operationalSession\.authenticated/);
   assert.match(app, /<OperationalAccessGate workspace=\{current\.label\}/);
-  assert.match(gate, /operationalSessionClient\.login\(accessKey\)/);
+  assert.match(gate, /operationalSessionClient\.status\(\)/);
+  assert.doesNotMatch(gate, /accessKey|type="password"|Operator access key/);
   assert.match(gate, /HttpOnly, scoped session/);
   assert.doesNotMatch(gate, /localStorage|sessionStorage/);
   for (const mapping of ['replay: "replay"', 'missions: "missions"', 'knowledge: "knowledge"', 'edge: "edge"']) assert.match(app, new RegExp(mapping));

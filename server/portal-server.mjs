@@ -165,6 +165,7 @@ const TRUTH = Object.freeze({
   actualTrainedSLMs: 0,
   secretValuesExposed: false
 });
+const OPERATIONAL_SESSION_MODES = new Set(["access_key", "automatic_private_workspace"]);
 
 const integer = (value, fallback, minimum = 1) => {
   const parsed = Number.parseInt(String(value ?? ""), 10);
@@ -276,6 +277,25 @@ export function loadConfig(overrides = {}) {
   ));
   const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,actions:simulate,actions:execute,approvals:decide,evidence:write,knowledge:promote,edge:node_admission:request")
     .split(",").map((item) => item.trim()).filter(Boolean);
+  const replitDeployment = enabled(overrides.replitDeployment ?? process.env.REPLIT_DEPLOYMENT);
+  const operationalSessionMode = String(
+    overrides.operationalSessionMode
+      ?? process.env.COMMAND_PORTAL_SESSION_MODE
+      ?? (replitDeployment ? "automatic_private_workspace" : "access_key")
+  ).trim();
+  if (!OPERATIONAL_SESSION_MODES.has(operationalSessionMode)) {
+    throw new Error("COMMAND_PORTAL_SESSION_MODE must be access_key or automatic_private_workspace.");
+  }
+  const operationalCookieSecure = enabled(overrides.operationalCookieSecure ?? process.env.COMMAND_PORTAL_COOKIE_SECURE, true);
+  const replitDomains = String(overrides.replitDomains ?? process.env.REPLIT_DOMAINS ?? "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, ""))
+    .filter(Boolean);
+  if (operationalEnabled && operationalSessionMode === "automatic_private_workspace") {
+    if (!replitDeployment || !operationalCookieSecure || replitDomains.length === 0) {
+      throw new Error("Automatic hosted sessions require REPLIT_DEPLOYMENT=1, at least one REPLIT_DOMAINS binding, and Secure cookies.");
+    }
+  }
   return Object.freeze({
     port: integer(overrides.port ?? process.env.PORT, 4173, 0),
     runtimeBaseUrl,
@@ -301,7 +321,12 @@ export function loadConfig(overrides = {}) {
     operationalApiBaseUrl,
     operationalRuntimeToken: operationalEnabled ? requiredSecret(overrides.operationalRuntimeToken ?? process.env.COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN, "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN") : "",
     operationalSessionSecret: operationalEnabled ? requiredSecret(overrides.operationalSessionSecret ?? process.env.COMMAND_PORTAL_SESSION_SECRET, "COMMAND_PORTAL_SESSION_SECRET", 32) : "disabled-session-secret-not-used",
-    operationalAccessKey: operationalEnabled ? requiredSecret(overrides.operationalAccessKey ?? process.env.COMMAND_PORTAL_OPERATOR_ACCESS_KEY, "COMMAND_PORTAL_OPERATOR_ACCESS_KEY", 16) : "disabled-access-key",
+    operationalSessionMode,
+    operationalPrincipalType: operationalSessionMode === "automatic_private_workspace" ? "workspace_service" : "named_operator",
+    operationalAccessBasis: operationalSessionMode === "automatic_private_workspace" ? "replit_private_deployment" : "operator_access_key",
+    operationalAccessKey: operationalEnabled && operationalSessionMode === "access_key"
+      ? requiredSecret(overrides.operationalAccessKey ?? process.env.COMMAND_PORTAL_OPERATOR_ACCESS_KEY, "COMMAND_PORTAL_OPERATOR_ACCESS_KEY", 16)
+      : "automatic-session-no-access-key",
     operationalUserId: String(overrides.operationalUserId ?? process.env.COMMAND_PORTAL_OPERATOR_USER_ID ?? "operator-alpha"),
     operationalTenantId: String(overrides.operationalTenantId ?? process.env.COMMAND_PORTAL_TENANT_ID ?? "nexicron"),
     operationalWorkspaceId: String(overrides.operationalWorkspaceId ?? process.env.COMMAND_PORTAL_WORKSPACE_ID ?? "primary"),
@@ -310,7 +335,9 @@ export function loadConfig(overrides = {}) {
     contextAssertionPrincipalId: String(overrides.contextAssertionPrincipalId ?? process.env.COMMAND_PORTAL_CONTEXT_PRINCIPAL_ID ?? "command-portal-observer"),
     operationalScopes,
     operationalSessionTtlSeconds: integer(overrides.operationalSessionTtlSeconds ?? process.env.COMMAND_PORTAL_SESSION_TTL_SECONDS, 3600, 300),
-    operationalCookieSecure: enabled(overrides.operationalCookieSecure ?? process.env.COMMAND_PORTAL_COOKIE_SECURE, true),
+    operationalCookieSecure,
+    replitDeployment,
+    replitDomains,
     maxAttempts: integer(overrides.maxAttempts, 3),
     retryDelayMs: integer(overrides.retryDelayMs, 100, 0)
   });
@@ -341,8 +368,28 @@ function requestOriginAllowed(request, config, originRequired = false) {
   if (origin === "null") return false;
   const forwardedProto = String(request.headers["x-forwarded-proto"] ?? "").split(",")[0].trim();
   const protocol = forwardedProto || (request.socket.encrypted ? "https" : "http");
-  const selfOrigin = request.headers.host ? `${protocol}://${request.headers.host}` : "";
+  const forwardedHost = String(request.headers["x-forwarded-host"] ?? "").split(",")[0].trim();
+  const selfHost = forwardedHost || request.headers.host;
+  const selfOrigin = selfHost ? `${protocol}://${selfHost}` : "";
   return origin === selfOrigin || config.allowedOrigins.includes(origin);
+}
+
+function automaticWorkspaceIngressAllowed(request, config) {
+  if (
+    config.operationalSessionMode !== "automatic_private_workspace"
+    || !config.replitDeployment
+    || !config.operationalCookieSecure
+  ) return false;
+  const forwardedHost = String(request.headers["x-forwarded-host"] ?? "").split(",")[0].trim();
+  const host = (forwardedHost || String(request.headers.host ?? "")).toLowerCase().replace(/:\d+$/, "");
+  if (!host || !config.replitDomains.includes(host)) return false;
+  const forwardedProto = String(request.headers["x-forwarded-proto"] ?? "").split(",")[0].trim().toLowerCase();
+  const protocol = forwardedProto || (request.socket.encrypted ? "https" : "http");
+  if (protocol !== "https") return false;
+  const fetchSite = String(request.headers["sec-fetch-site"] ?? "").trim().toLowerCase();
+  if (fetchSite === "same-origin") return true;
+  const origin = String(request.headers.origin ?? "").trim().toLowerCase();
+  return origin === `https://${host}`;
 }
 
 function cacheMetadata(entry, cached, stale = false) {
@@ -1207,8 +1254,40 @@ async function handleSessionApi(request, response, config, sessionAuthority) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config, request.method === "POST")) return sendJson(response, 403, operationalFailure(config, url.pathname, "origin_denied", "Request origin is not allowed."));
   if (!config.operationalEnabled) return sendJson(response, 503, operationalFailure(config, url.pathname, "operational_gateway_disabled", "Hosted operational mode is not enabled."));
-  if (url.pathname === "/api/session" && request.method === "GET") return sendJson(response, 200, { ok: true, session: sessionAuthority.publicSession(sessionAuthority.authenticate(request)), truth: TRUTH });
+  if (url.pathname === "/api/session" && request.method === "GET") {
+    const current = sessionAuthority.authenticate(request);
+    if (current) return sendJson(response, 200, { ok: true, session: sessionAuthority.publicSession(current), truth: TRUTH });
+    if (config.operationalSessionMode !== "automatic_private_workspace") {
+      return sendJson(response, 200, { ok: true, session: { authenticated: false }, truth: TRUTH });
+    }
+    if (!automaticWorkspaceIngressAllowed(request, config)) {
+      return sendJson(response, 401, operationalFailure(
+        config,
+        url.pathname,
+        "trusted_private_ingress_required",
+        "Automatic workspace access requires the verified private Replit deployment boundary.",
+        "Unauthorized",
+      ));
+    }
+    const result = sessionAuthority.establish();
+    structuredLog("automatic_operational_session_started", {
+      userId: result.claims.sub,
+      tenantId: result.claims.tenantId,
+      workspaceId: result.claims.workspaceId,
+      principalType: result.claims.principalType,
+      accessBasis: result.claims.accessBasis,
+    });
+    return sendJson(
+      response,
+      200,
+      { ok: true, session: sessionAuthority.publicSession(result.claims), truth: TRUTH },
+      { "Set-Cookie": result.cookie },
+    );
+  }
   if (url.pathname === "/api/session/login" && request.method === "POST") {
+    if (config.operationalSessionMode !== "access_key") {
+      return sendJson(response, 404, operationalFailure(config, url.pathname, "route_not_allowlisted", "Browser-entered operator access keys are not accepted by this deployment."));
+    }
     const payload = await readJsonBody(request, 8_192); strictKeys(payload, new Set(["accessKey"]));
     const result = sessionAuthority.login(boundedText(payload.accessKey, "accessKey", 512), request.socket.remoteAddress);
     if (result.status !== 200) return sendJson(response, result.status, operationalFailure(config, url.pathname, result.error, "Authentication failed.", "Unauthorized"));
@@ -1216,6 +1295,9 @@ async function handleSessionApi(request, response, config, sessionAuthority) {
     return sendJson(response, 200, { ok: true, session: sessionAuthority.publicSession(result.claims), truth: TRUTH }, { "Set-Cookie": result.cookie });
   }
   if (url.pathname === "/api/session/logout" && request.method === "POST") {
+    if (config.operationalSessionMode === "automatic_private_workspace") {
+      return sendJson(response, 409, operationalFailure(config, url.pathname, "managed_session", "This private-workspace session is managed automatically."));
+    }
     const claims = sessionAuthority.authenticate(request);
     if (!claims || !sessionAuthority.csrfValid(request, claims)) return sendJson(response, 403, operationalFailure(config, url.pathname, "csrf_invalid", "Session verification failed.", "Unauthorized"));
     sessionAuthority.revoke(claims);

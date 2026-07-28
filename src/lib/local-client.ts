@@ -436,6 +436,10 @@ export type OperationalSession = {
   scopes?: string[];
   expiresAt?: string;
   csrfToken?: string;
+  connectionMode?: "access_key" | "automatic_private_workspace";
+  principalType?: "named_operator" | "workspace_service";
+  accessBasis?: "operator_access_key" | "replit_private_deployment";
+  managed?: boolean;
 };
 
 export type RuntimeBaselineRequest = {
@@ -471,10 +475,9 @@ async function sessionRequest(path: string, options: RequestInit = {}): Promise<
 
 export const operationalSessionClient = Object.freeze({
   status: () => sessionRequest(""),
-  login: (accessKey: string) => sessionRequest("/login", { method: "POST", body: JSON.stringify({ accessKey }) }),
   logout: () => sessionRequest("/logout", { method: "POST", headers: { "X-CSRF-Token": capabilityTransport.csrfToken }, body: JSON.stringify({}) }),
   use: (session: OperationalSession) => {
-    if (session.authenticated) capabilityTransport.mode = "hosted";
+    capabilityTransport.mode = session.authenticated ? "hosted" : "local";
     capabilityTransport.csrfToken = session.csrfToken ?? "";
   },
   hostedMutationHeaders,
