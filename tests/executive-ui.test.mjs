@@ -410,6 +410,8 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(missions, /step\.reversible === true/);
   assert.doesNotMatch(missions, /step\.reversible !== false/);
   assert.match(app, /HostedCapabilityBoundary/);
+  assert.match(app, /if \(configured && capability\.state === "available"\) return children/);
+  assert.match(app, /Hosted operational mode is not configured for this deployment/);
   assert.match(app, /knowledge\.document_intake/);
   assert.match(app, /projects\.nexicron_planning/);
   assert.match(app, /interaction\.human/);
