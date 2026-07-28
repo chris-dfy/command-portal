@@ -116,6 +116,10 @@ test("Conclave, Executive Briefing, and HIF lifecycle are bounded hosted Runtime
   });
   assert.equal(resumed.status, 200);
   assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/resume");
+  const events = await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`);
+  assert.equal(events.status, 200);
+  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/events");
+  assert.equal(observed.at(-1).options.method, "GET");
 
   const conclave = await fetch(`${base}/api/runtime/conclave/reviews`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -225,6 +229,72 @@ test("Realtime gateway rejects non-SDP and unsafe methods before contacting Runt
   assert.equal(invalid.status, 415);
   assert.equal((await fetch(`${base}/api/runtime/realtime/call`)).status, 405);
   assert.equal(calls, 0);
+});
+
+test("hosted HIF and Realtime voice require the signed operational session and CSRF proof", async () => {
+  const calls = [];
+  const answer = "v=0\r\na=answer\r\n".repeat(12);
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "operations:write"],
+    operationalCookieSecure: false,
+  };
+  const base = await start(async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith("/runtime/voice/realtime/call")) {
+      return new Response(answer, { status: 201, headers: { "Content-Type": "application/sdp" } });
+    }
+    return runtimeResponse({ interaction: { responseText: "Verified response" }, events: [] });
+  }, config);
+  const interactionBody = JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" });
+  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: interactionBody,
+  })).status, 401);
+  assert.equal(calls.length, 0);
+
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: interactionBody,
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken },
+    body: interactionBody,
+  })).status, 200);
+  assert.equal((await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`)).status, 401);
+  assert.equal((await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`, {
+    headers: { Cookie: cookie },
+  })).status, 200);
+
+  const offer = "v=0\r\na=offer\r\n".repeat(12);
+  assert.equal((await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST", headers: { "Content-Type": "application/sdp" }, body: offer,
+  })).status, 401);
+  assert.equal((await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/sdp" }, body: offer,
+  })).status, 403);
+  const realtime = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/sdp", "X-CSRF-Token": session.session.csrfToken },
+    body: offer,
+  });
+  assert.equal(realtime.status, 201);
+  assert.equal(await realtime.text(), answer);
+  assert.equal(calls.length, 3);
 });
 
 test("runtime credential is server-only and never serialized", async () => {
@@ -863,6 +933,14 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
   const cookie = login.headers.get("set-cookie").split(";")[0];
   const routes = [
     ["/capabilities/readiness", "/capabilities/readiness"],
+    ["/client-capabilities", "/client-capabilities"],
+    ["/intake/history", "/intake/history"],
+    ["/projects/artifact-types", "/projects/artifact-types"],
+    ["/projects/PROJECT-001/scope", "/projects/PROJECT-001/scope"],
+    ["/projects/PROJECT-001/estimate", "/projects/PROJECT-001/estimate"],
+    ["/projects/PROJECT-001/planning-model", "/projects/PROJECT-001/planning-model"],
+    ["/voice-operator/status", "/voice-operator/status"],
+    ["/voice-operator/history", "/voice-operator/history"],
     ["/missions", "/missions"],
     ["/missions/MISSION-001", "/missions/MISSION-001"],
     ["/conclave/workspaces", "/conclave/workspaces"],
@@ -911,12 +989,16 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
   assert.equal(replayFallbackCalls, 0);
   assert.equal(localFallbackCalls, 0);
   const callsBeforeStaleRoutes = observed.length;
-  for (const stale of ["client-capabilities", "work-sessions", "approvals", "connectors", "actions/dry-run", "intake/history"]) {
+  for (const stale of ["work-sessions", "approvals", "connectors", "actions/dry-run"]) {
     assert.equal((await fetch(`${base}/api/operations/${stale}`, { headers: { Cookie: cookie } })).status, 404, stale);
   }
   assert.equal(observed.length, callsBeforeStaleRoutes);
   assert.equal(localFallbackCalls, 0);
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/missions"].GET, "/missions");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/client-capabilities"].GET, "/client-capabilities");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/intake/upload"].POST, "/intake/upload");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/projects"].POST, "/projects");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/voice-operator/status"].GET, "/voice-operator/status");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/runtime/baselines"].POST, "/runtime/baselines");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/knowledge/promotions"].POST, "/knowledge/promotions");
 
@@ -998,6 +1080,87 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
     body: JSON.stringify({ expectedMissionVersion: { metadata: { tenantId: "browser-tenant" } } }),
   })).status, 403);
   assert.equal(observed.length, callsBeforeRejectedMutations);
+});
+
+test("hosted Document, Project, and Voice workspaces use authenticated Runtime-owned contracts", async () => {
+  const observed = [];
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "operations:write", "evidence:write"],
+    operationalCookieSecure: false,
+  };
+  const base = await start(
+    async () => runtimeResponse({}),
+    config,
+    async () => localResponse({ fabricatedLocalFallback: true }),
+    async (url, options) => {
+      observed.push({ url, options });
+      return localResponse({ recordType: "workspace_runtime_result", secretValuesExposed: false });
+    },
+  );
+  assert.equal((await fetch(`${base}/api/operations/client-capabilities`)).status, 401);
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const mutationHeaders = (key) => ({
+    Cookie: cookie,
+    "Content-Type": "application/json",
+    "X-CSRF-Token": session.session.csrfToken,
+    "Idempotency-Key": key,
+  });
+
+  assert.equal((await fetch(`${base}/api/operations/intake/upload`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "Idempotency-Key": "intake-upload-0000" },
+    body: JSON.stringify({ filename: "requirements.txt", contentBase64: "SGVsbG8=" }),
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/intake/upload`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken },
+    body: JSON.stringify({ filename: "requirements.txt", contentBase64: "SGVsbG8=" }),
+  })).status, 400);
+
+  const operations = [
+    ["/intake/upload", "/intake/upload", "intake-upload-0001", { filename: "requirements.txt", contentBase64: "SGVsbG8=", projectId: "PROJECT-001" }],
+    ["/intake/query", "/intake/query", "intake-query-0001", { question: "What requirements are supported?", projectId: "PROJECT-001" }],
+    ["/projects", "/projects", "project-create-0001", { name: "Project Alpha" }],
+    ["/projects/PROJECT-001/compile", "/projects/PROJECT-001/compile", "project-compile-0001", { artifactType: "roadmap", options: { defaultPhaseDurationWeeks: 2, assumptions: [] } }],
+    ["/voice-operator/route-transcript", "/voice-operator/route-transcript", "voice-route-0001", { transcript: "Summarize project Alpha", source: "text_fallback" }],
+  ];
+  for (const [portalPath, runtimePath, key, body] of operations) {
+    const response = await fetch(`${base}/api/operations${portalPath}`, {
+      method: "POST",
+      headers: mutationHeaders(key),
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 200, portalPath);
+    const call = observed.at(-1);
+    assert.equal(call.url, `http://127.0.0.1:9876${runtimePath}`, portalPath);
+    assert.equal(call.options.headers["Idempotency-Key"], key, portalPath);
+    assert.equal(call.options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha", portalPath);
+    assert.equal(call.options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha", portalPath);
+    assert.deepEqual(JSON.parse(call.options.body), body, portalPath);
+  }
+
+  const callsBeforeRejectedIdentity = observed.length;
+  assert.equal((await fetch(`${base}/api/operations/projects`, {
+    method: "POST",
+    headers: mutationHeaders("project-create-0002"),
+    body: JSON.stringify({ name: "Project Beta", tenantId: "browser-selected" }),
+  })).status, 403);
+  assert.equal(observed.length, callsBeforeRejectedIdentity);
 });
 
 test("hosted Knowledge intake is canonical, scoped, CSRF-protected, idempotent, and server-bound", async () => {

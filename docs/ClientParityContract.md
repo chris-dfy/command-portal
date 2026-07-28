@@ -1,6 +1,6 @@
 # NEXUS Client Parity Contract
 
-The NEXUS Client Parity Contract is the versioned Runtime description of portable capabilities shared by NEXUS Command and the NEXUS Web App. The current local Runtime publishes it at `GET /client-capabilities`; the web app reads it only through the exact Experience Gateway route `GET /api/local/client-capabilities`.
+The NEXUS Client Parity Contract is the versioned Runtime description of portable capabilities shared by NEXUS Command and the NEXUS Web App. Runtime publishes it at `GET /client-capabilities`; the web app reads it only through an exact Experience Gateway route: `GET /api/local/client-capabilities` in local mode or authenticated `GET /api/operations/client-capabilities` in hosted mode.
 
 ## Ownership boundary
 
@@ -26,7 +26,7 @@ The parity section is derived from the capability entries. `driftCount` identifi
 - Document intelligence
 - Nexicron project planning, scope, pricing, and artifact compilation
 
-The contract currently describes local Runtime availability. It does not claim hosted execution, production readiness, enterprise readiness, verified live model inference, or connector reachability.
+The contract reports hosted execution separately from capability implementation. A hosted workspace is presented only when Runtime reports `hostedExecutionAvailable=true`, its capability entry is implemented for `nexusWeb`, and an exact authenticated gateway route exists. This does not claim production readiness, enterprise readiness, verified live model inference, or connector reachability.
 
 Version 1.0 covers `operational_core_v1`; it is not yet a complete inventory of every native administration and hardware surface. The Runtime reports the remaining surfaces explicitly, including adaptive learning, builder/self-improvement, browser control, continuity and budget administration, model/persistence administration, hosted-team administration, and hardware wake control. These must move into later contract versions rather than being silently represented as parity.
 

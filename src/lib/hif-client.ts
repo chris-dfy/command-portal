@@ -1,3 +1,5 @@
+import { OPERATIONAL_SESSION_INVALID_EVENT, operationalSessionClient } from "./local-client";
+
 export type HifEventType =
   | "SpeechStarted" | "SpeechCompleted" | "SpeechInterrupted"
   | "ConversationStarted" | "ConversationCompleted"
@@ -70,9 +72,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api/runtime/interactions${path}`, {
     ...options,
     credentials: "same-origin",
-    headers: { Accept: "application/json", ...(options?.body ? { "Content-Type": "application/json" } : {}) },
+    headers: {
+      Accept: "application/json",
+      ...(options?.body ? { "Content-Type": "application/json", ...operationalSessionClient.hostedMutationHeaders() } : {}),
+    },
   });
   const gateway = await response.json() as GatewayEnvelope<T>;
+  if (response.status === 401) window.dispatchEvent(new Event(OPERATIONAL_SESSION_INVALID_EVENT));
   if (!response.ok || !gateway.ok || !gateway.data) throw new Error(gateway.error?.message ?? `HIF request failed (${response.status})`);
   return gateway.data;
 }

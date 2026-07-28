@@ -422,6 +422,9 @@ async function request<T>(path: string, options: RequestInit = {}, idempotencyKe
 
 const capabilityTransport: { mode: "local" | "hosted"; csrfToken: string } = { mode: "local", csrfToken: "" };
 export const OPERATIONAL_SESSION_INVALID_EVENT = "nexus:operational-session-invalid";
+const hostedMutationHeaders = (): Record<string, string> => capabilityTransport.mode === "hosted" && capabilityTransport.csrfToken
+  ? { "X-CSRF-Token": capabilityTransport.csrfToken }
+  : {};
 
 export type OperationalSession = {
   authenticated: boolean;
@@ -473,6 +476,7 @@ export const operationalSessionClient = Object.freeze({
     if (session.authenticated) capabilityTransport.mode = "hosted";
     capabilityTransport.csrfToken = session.csrfToken ?? "";
   },
+  hostedMutationHeaders,
   mode: () => capabilityTransport.mode
 });
 

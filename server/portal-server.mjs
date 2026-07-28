@@ -54,7 +54,7 @@ export const RUNTIME_MUTATION_ROUTES = Object.freeze({
 
 function resolveRuntimeMutation(pathname) {
   if (RUNTIME_MUTATION_ROUTES[pathname]) return RUNTIME_MUTATION_ROUTES[pathname];
-  const match = pathname.match(/^\/api\/runtime\/interactions\/([A-Z0-9-]+)\/(interrupt|resume|presentation-complete)$/);
+  const match = pathname.match(/^\/api\/runtime\/interactions\/([A-Z0-9-]+)\/(events|interrupt|resume|presentation-complete)$/);
   return match ? `/runtime/interactions/${match[1]}/${match[2]}` : null;
 }
 
@@ -529,6 +529,15 @@ function resolveLocalCapability(pathname, method) {
 
 export const CANONICAL_OPERATIONAL_ROUTES = Object.freeze({
   "/api/operations/capabilities/readiness": Object.freeze({ GET: "/capabilities/readiness" }),
+  "/api/operations/client-capabilities": Object.freeze({ GET: "/client-capabilities" }),
+  "/api/operations/intake/history": Object.freeze({ GET: "/intake/history" }),
+  "/api/operations/intake/upload": Object.freeze({ POST: "/intake/upload" }),
+  "/api/operations/intake/query": Object.freeze({ POST: "/intake/query" }),
+  "/api/operations/projects": Object.freeze({ POST: "/projects" }),
+  "/api/operations/projects/artifact-types": Object.freeze({ GET: "/projects/artifact-types" }),
+  "/api/operations/voice-operator/status": Object.freeze({ GET: "/voice-operator/status" }),
+  "/api/operations/voice-operator/history": Object.freeze({ GET: "/voice-operator/history" }),
+  "/api/operations/voice-operator/route-transcript": Object.freeze({ POST: "/voice-operator/route-transcript" }),
   "/api/operations/missions": Object.freeze({ GET: "/missions" }),
   "/api/operations/conclave/workspaces": Object.freeze({ GET: "/conclave/workspaces", POST: "/conclave/workspaces" }),
   "/api/operations/operational-replay": Object.freeze({ GET: "/operational-replay" }),
@@ -566,6 +575,14 @@ export function resolveOperationalCapability(pathname, method) {
   const direct = operationalMethod(CANONICAL_OPERATIONAL_ROUTES[pathname], method);
   if (direct) return direct;
 
+  const project = pathname.match(/^\/api\/operations\/projects\/([^/]+)\/(scope|estimate|planning-model|compile)$/);
+  if (project) {
+    const projectId = operationalIdentifier(project[1]);
+    if (!projectId) return null;
+    const action = project[2];
+    const expectedMethod = action === "compile" ? "POST" : "GET";
+    return operationalMethod({ [expectedMethod]: `/projects/${projectId}/${action}` }, method);
+  }
   const replayStageExplanation = pathname.match(/^\/api\/operations\/operational-replay\/([^/]+)\/stages\/([^/]+)\/explain$/);
   if (replayStageExplanation) {
     const replayId = operationalIdentifier(replayStageExplanation[1]);
@@ -1391,10 +1408,49 @@ async function fetchRuntime(runtimePath, config, runtimeFetch) {
 
 async function handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, clock) {
   const url = new URL(request.url, "http://portal.invalid");
-  if (!requestOriginAllowed(request, config)) return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("origin_denied", "Request origin is not allowed.", "Unknown", 403)));
+  if (!requestOriginAllowed(request, config, config.operationalEnabled)) return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("origin_denied", "Request origin is not allowed.", "Unknown", 403)));
   const runtimePath = resolveRuntimeMutation(url.pathname);
   if (!runtimePath) return sendJson(response, 404, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("route_not_allowlisted", "This Runtime mutation is not allowlisted.", "Unknown", 404)));
-  if (request.method !== "POST") return sendJson(response, 405, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("method_not_allowed", "This bounded Runtime route requires POST.", "Unknown", 405)), { Allow: "POST" });
+  const expectedMethod = runtimePath.endsWith("/events") ? "GET" : "POST";
+  if (request.method !== expectedMethod) return sendJson(response, 405, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("method_not_allowed", `This bounded Runtime route requires ${expectedMethod}.`, "Unknown", 405)), { Allow: expectedMethod });
+  const claims = sessionAuthority.authenticate(request);
+  if (config.operationalEnabled && !claims) {
+    return sendJson(response, 401, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("session_required", "An authenticated operational session is required.", "Unauthorized", 401)));
+  }
+  const scope = requiredScope(runtimePath, expectedMethod);
+  if (config.operationalEnabled && !claims.scopes.includes(scope)) {
+    return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("scope_denied", `Session lacks required scope: ${scope}.`, "Unauthorized", 403)));
+  }
+  if (config.operationalEnabled && expectedMethod === "POST" && !sessionAuthority.csrfValid(request, claims)) {
+    return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("csrf_invalid", "CSRF verification failed.", "Unauthorized", 403)));
+  }
+  if (expectedMethod === "GET") {
+    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+    try {
+      const assertion = createTenantContextAssertion(config, claims, "nexus-web", clock);
+      const upstream = await runtimeFetch(`${config.runtimeBaseUrl}${runtimePath}`, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${config.runtimeToken}`,
+          ...(assertion ? { "X-NEXUS-Context-Assertion": assertion } : {})
+        },
+        signal: controller.signal,
+        redirect: "error"
+      });
+      if ([401, 403].includes(upstream.status)) throw new GatewayFailure("runtime_unauthorized", "Runtime rejected the server credential.", "Unauthorized", 502);
+      if (!upstream.ok) throw new GatewayFailure("runtime_unavailable", `Runtime returned status ${upstream.status}.`, "Unavailable", 503);
+      const body = validateRuntimeEnvelope(JSON.parse(Buffer.from(await upstream.arrayBuffer()).toString("utf8")));
+      tracker.lastSuccessfulConnection = nowIso(); tracker.lastSuccessfulRefresh = nowIso();
+      structuredLog("experience_gateway_bounded_runtime_read", { route: url.pathname, runtimePath, status: 200 });
+      return sendJson(response, 200, successfulEnvelope(config, tracker, url.pathname, body, null, false, false, 1));
+    } catch (error) {
+      const failure = error instanceof GatewayFailure ? error
+        : error?.name === "AbortError" ? new GatewayFailure("runtime_timed_out", "Runtime request timed out.", "Timed Out", 504)
+        : new GatewayFailure("runtime_unavailable", "Runtime interaction request failed safely.", "Unavailable", 503);
+      return sendJson(response, failure.status, failureEnvelope(config, tracker, url.pathname, failure));
+    } finally { clearTimeout(timer); }
+  }
   const raw = await readJsonBody(request, 16_384);
   let payload;
   if (runtimePath.endsWith("/interrupt")) {
@@ -1406,7 +1462,7 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
     const clientId = boundedText(raw.clientId, "clientId", 128);
     const metadata = raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? { ...raw.metadata } : {};
     for (const reserved of ["tenantId", "trustedTenantContext", "operator", "roles", "subjectId", "issuer", "assertionId"]) delete metadata[reserved];
-    const assertion = createTenantContextAssertion(config, sessionAuthority.authenticate(request), clientId, clock);
+    const assertion = createTenantContextAssertion(config, claims, clientId, clock);
     payload = {
       clientId,
       inputText: boundedText(raw.inputText, "inputText", 20_000),
@@ -1420,7 +1476,7 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
       metadata: {
         ...metadata,
         contextAssemblyOwner: "nexus-runtime",
-        ...(assertion ? { tenantId: sessionAuthority.authenticate(request)?.tenantId ?? config.operationalTenantId } : {})
+        ...(assertion ? { tenantId: claims?.tenantId ?? config.operationalTenantId } : {})
       }
     };
   } else if (runtimePath === "/runtime/conclave/reviews") {
@@ -1437,7 +1493,7 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const clientId = typeof payload.clientId === "string" ? payload.clientId : "nexus-web";
-    const assertion = createTenantContextAssertion(config, sessionAuthority.authenticate(request), clientId, clock);
+    const assertion = createTenantContextAssertion(config, claims, clientId, clock);
     const upstream = await runtimeFetch(`${config.runtimeBaseUrl}${runtimePath}`, {
       method: "POST", headers: {
         Accept: "application/json",
@@ -1463,13 +1519,23 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
 
 async function handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, clock) {
   const url = new URL(request.url, "http://portal.invalid");
-  if (!requestOriginAllowed(request, config)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
+  if (!requestOriginAllowed(request, config, config.operationalEnabled)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
   if (url.search) return sendJson(response, 400, { ok: false, error: { code: "query_not_allowed", message: "Realtime session routes do not accept browser query parameters." }, truth: TRUTH });
   if (request.method === "OPTIONS") {
     response.writeHead(204, { Allow: "POST, OPTIONS", "Cache-Control": "no-store" });
     return response.end();
   }
   if (request.method !== "POST") return sendJson(response, 405, { ok: false, error: { code: "method_not_allowed", message: "Realtime session creation requires POST." }, truth: TRUTH }, { Allow: "POST, OPTIONS" });
+  const claims = sessionAuthority.authenticate(request);
+  if (config.operationalEnabled && !claims) {
+    return sendJson(response, 401, { ok: false, error: { code: "session_required", message: "An authenticated operational session is required." }, truth: TRUTH });
+  }
+  if (config.operationalEnabled && !claims.scopes.includes("operations:write")) {
+    return sendJson(response, 403, { ok: false, error: { code: "scope_denied", message: "Session lacks required scope: operations:write." }, truth: TRUTH });
+  }
+  if (config.operationalEnabled && !sessionAuthority.csrfValid(request, claims)) {
+    return sendJson(response, 403, { ok: false, error: { code: "csrf_invalid", message: "CSRF verification failed." }, truth: TRUTH });
+  }
 
   let offer;
   try {
@@ -1487,7 +1553,7 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
   try {
     let upstream;
     try {
-      const assertion = createTenantContextAssertion(config, sessionAuthority.authenticate(request), "nexus-web", clock);
+      const assertion = createTenantContextAssertion(config, claims, "nexus-web", clock);
       upstream = await runtimeFetch(`${config.runtimeBaseUrl}/runtime/voice/realtime/call`, {
         method: "POST",
         headers: {

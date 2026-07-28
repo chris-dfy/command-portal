@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Activity, BookOpen, Bot, BrainCircuit, CircleGauge, FileCheck2, Files, FolderKanban, History, Mic2, Network, ServerCog, Settings2, ShieldCheck, Waypoints, type LucideIcon } from "lucide-react";
 import { ConclaveWorkspace } from "./components/ConclaveWorkspace";
 import { DataPanel, EmptyRecord } from "./components/DataPanel";
@@ -21,7 +21,13 @@ import { VoiceWorkspace } from "./components/VoiceWorkspace";
 import { AppearanceWorkspace } from "./appearance/AppearanceWorkspace";
 import { useAppearanceSettings } from "./appearance/useAppearanceSettings";
 import type { EoxAssessment } from "./lib/eox-client";
-import { OPERATIONAL_SESSION_INVALID_EVENT, localNexusClient, operationalSessionClient, type OperationalSession } from "./lib/local-client";
+import {
+  OPERATIONAL_SESSION_INVALID_EVENT,
+  localNexusClient,
+  operationalSessionClient,
+  type ClientCapabilityContract,
+  type OperationalSession,
+} from "./lib/local-client";
 import { portalClient } from "./lib/portal-client";
 import { displayLabel } from "./lib/presentation";
 import type { ConnectionState, GatewayEnvelope, ProviderRecord, RuntimeSnapshot } from "./lib/types";
@@ -58,7 +64,7 @@ const PLATFORM_ICONS: Record<NexusPlatformAreaId, LucideIcon> = {
 
 const AREAS: Area[] = [
   ...NEXUS_PLATFORM_NAVIGATION.map((area) => ({ ...area, icon: PLATFORM_ICONS[area.id], group: "Platform" as const })),
-  { id: "documents", label: "Document Intelligence", detail: "Private evidence ingestion", icon: Files, group: "Capabilities" },
+  { id: "documents", label: "Document Intelligence", detail: "Governed evidence ingestion", icon: Files, group: "Capabilities" },
   { id: "projects", label: "Projects", detail: "Plan, scope, and compile", icon: FolderKanban, group: "Capabilities" },
   { id: "voice", label: "Voice Operations", detail: "Governed voice interface", icon: Mic2, group: "Capabilities" },
   { id: "providers", label: "Model Gateway", detail: "Verified provider registry", icon: Bot, group: "Capabilities" },
@@ -117,6 +123,7 @@ const PLATFORM_TO_COPILOT: Record<AreaId, CopilotAreaId> = {
 const OPERATIONAL_AREAS = new Set<AreaId>([
   "missions", "replay", "conclave", "knowledge", "edge", "mission-control",
 ]);
+const HOSTED_CONTRACT_AREAS = new Set<AreaId>(["documents", "projects", "voice"]);
 const AREA_CAPABILITY_IDS: Partial<Record<AreaId, string[]>> = Object.freeze({
   missions: ["mission_executor", "receipts", "operational_replay"],
   replay: ["operational_replay"],
@@ -125,12 +132,40 @@ const AREA_CAPABILITY_IDS: Partial<Record<AreaId, string[]>> = Object.freeze({
   edge: ["edge_monitoring", "edge_node_admission"],
   "mission-control": ["mission_executor", "conclave", "receipts", "operational_replay"],
 });
+const AREA_CLIENT_CONTRACT_IDS: Partial<Record<AreaId, string>> = Object.freeze({
+  documents: "knowledge.document_intake",
+  projects: "projects.nexicron_planning",
+  voice: "interaction.human",
+});
 
 function capabilityId(value: Record<string, unknown>) {
   return String(value.capabilityId ?? value.capability_id ?? value.id ?? "");
 }
 
-function capabilityStateView(readiness: Record<string, unknown> | null, active: AreaId, failure: string) {
+function capabilityStateView(
+  readiness: Record<string, unknown> | null,
+  clientContract: ClientCapabilityContract | null,
+  active: AreaId,
+  readinessFailure: string,
+  clientContractFailure: string,
+) {
+  const contractCapabilityId = AREA_CLIENT_CONTRACT_IDS[active];
+  if (contractCapabilityId) {
+    if (clientContractFailure) return { state: "unavailable", reason: clientContractFailure };
+    if (!clientContract) return { state: "checking", reason: "The Runtime client capability contract is being verified." };
+    if (clientContract.truth.hostedExecutionAvailable !== true) {
+      return { state: "unavailable", reason: "The Runtime reports hosted execution unavailable for this deployment." };
+    }
+    const capability = clientContract.capabilities.find((item) => item.capabilityId === contractCapabilityId);
+    if (!capability || capability.clients.nexusWeb !== "implemented" || !capability.implementationState.startsWith("implemented")) {
+      return { state: "unavailable", reason: `Runtime contract ${clientContract.contractVersion} does not register ${contractCapabilityId} for NEXUS Web.` };
+    }
+    return {
+      state: "available",
+      reason: `${capability.name} is registered for NEXUS Web by Runtime contract ${clientContract.contractVersion}.`,
+    };
+  }
+  const failure = readinessFailure;
   if (failure) return { state: "unavailable", reason: failure };
   if (!readiness) return { state: "checking", reason: "Capability-specific Runtime readiness is being verified." };
   const required = AREA_CAPABILITY_IDS[active] ?? [];
@@ -184,10 +219,21 @@ function Providers({ snapshot }: { snapshot: RuntimeSnapshot }) {
   </div>;
 }
 
-function HostedContractUnavailable({ title }: { title: string }) {
-  return <DataPanel eyebrow="Hosted capability boundary" title={`${title} is not activated in hosted operational mode`} icon={<ShieldCheck size={18} />}>
-    <p className="boundary-note">No canonical Runtime v26 hosted route is registered for this workspace. Its mutation controls are withheld, and NEXUS will not fall back to a local-only gateway.</p>
-    <StatusPill value="unavailable" />
+function HostedCapabilityBoundary({
+  configured,
+  title,
+  capability,
+  children,
+}: {
+  configured: boolean;
+  title: string;
+  capability: { state: string; reason: string };
+  children: ReactNode;
+}) {
+  if (!configured || capability.state === "available") return children;
+  return <DataPanel eyebrow="Hosted capability boundary" title={`${title} is ${capability.state === "checking" ? "being verified" : "unavailable"}`} icon={<ShieldCheck size={18} />}>
+    <p className="boundary-note">{capability.reason} NEXUS will not substitute local state or infer readiness from the portal connection.</p>
+    <StatusPill value={capability.state} />
   </DataPanel>;
 }
 
@@ -217,6 +263,8 @@ export function App() {
   const [operationalSession, setOperationalSession] = useState<OperationalSession>({ authenticated: false });
   const [operationalReadiness, setOperationalReadiness] = useState<Record<string, unknown> | null>(null);
   const [operationalReadinessFailure, setOperationalReadinessFailure] = useState("");
+  const [clientCapabilityContract, setClientCapabilityContract] = useState<ClientCapabilityContract | null>(null);
+  const [clientCapabilityFailure, setClientCapabilityFailure] = useState("");
 
   const refresh = (forceRefresh = false) => { setLoading(true); portalClient.snapshot(forceRefresh).then((result) => { setSnapshot((current) => ({ ...current, ...result.data })); setFailures(result.failures); }).catch(() => { setSnapshot({}); setFailures([]); }).finally(() => setLoading(false)); };
   function focusPlatformSearch() {
@@ -237,18 +285,31 @@ export function App() {
     if (!operationalSession.authenticated) {
       setOperationalReadiness(null);
       setOperationalReadinessFailure("");
+      setClientCapabilityContract(null);
+      setClientCapabilityFailure("");
       return;
     }
     let mounted = true;
-    const verify = () => localNexusClient.capabilityReadiness().then((value) => {
-      if (!mounted) return;
-      setOperationalReadiness(record(value));
-      setOperationalReadinessFailure("");
-    }).catch((caught) => {
-      if (!mounted) return;
-      setOperationalReadiness(null);
-      setOperationalReadinessFailure(caught instanceof Error ? caught.message : "Capability-specific Runtime readiness is unavailable.");
-    });
+    const verify = () => {
+      void localNexusClient.capabilityReadiness().then((value) => {
+        if (!mounted) return;
+        setOperationalReadiness(record(value));
+        setOperationalReadinessFailure("");
+      }).catch((caught) => {
+        if (!mounted) return;
+        setOperationalReadiness(null);
+        setOperationalReadinessFailure(caught instanceof Error ? caught.message : "Capability-specific Runtime readiness is unavailable.");
+      });
+      void localNexusClient.clientCapabilities().then((value) => {
+        if (!mounted) return;
+        setClientCapabilityContract(value);
+        setClientCapabilityFailure("");
+      }).catch((caught) => {
+        if (!mounted) return;
+        setClientCapabilityContract(null);
+        setClientCapabilityFailure(caught instanceof Error ? caught.message : "The Runtime client capability contract is unavailable.");
+      });
+    };
     void verify();
     const timer = window.setInterval(verify, 30_000);
     return () => { mounted = false; window.clearInterval(timer); };
@@ -320,7 +381,13 @@ export function App() {
   const eox = snapshot.eox?.data as EoxAssessment | null | undefined;
   const proofId = list(snapshot.proofs?.data).map((proof) => proof.id).find(Boolean);
   const receiptId = list(snapshot.receipts?.data).map((receipt) => receipt.id).find(Boolean);
-  const hostedCapability = capabilityStateView(operationalReadiness, active, operationalReadinessFailure);
+  const hostedCapability = capabilityStateView(
+    operationalReadiness,
+    clientCapabilityContract,
+    active,
+    operationalReadinessFailure,
+    clientCapabilityFailure,
+  );
   const activityTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const sidePanel = copilotOpen ? "copilot" : inspectorOpen ? "inspector" : "closed";
 
@@ -360,8 +427,10 @@ export function App() {
     refresh(true);
   }
 
-  const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length) ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section> : OPERATIONAL_AREAS.has(active) && !operationalSession.authenticated ? <OperationalAccessGate workspace={current.label} onAuthenticated={acceptOperationalSession} /> : <>
-    {OPERATIONAL_AREAS.has(active) && operationalSession.authenticated && <section className="hosted-operational-context" aria-label="Authenticated hosted operational context">
+  const requiresOperationalSession = OPERATIONAL_AREAS.has(active) || (hostedOperationalConfigured && HOSTED_CONTRACT_AREAS.has(active));
+  const showsHostedContext = operationalSession.authenticated && (OPERATIONAL_AREAS.has(active) || HOSTED_CONTRACT_AREAS.has(active));
+  const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length) ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section> : requiresOperationalSession && !operationalSession.authenticated ? <OperationalAccessGate workspace={current.label} onAuthenticated={acceptOperationalSession} /> : <>
+    {showsHostedContext && <section className="hosted-operational-context" aria-label="Authenticated hosted operational context">
       <article><span>Runtime commit</span><code title={deployedRuntimeCommit}>{deployedRuntimeCommit}</code></article>
       <article><span>Gateway transport</span><StatusPill value={state} /></article>
       <article><span>Capability state</span><StatusPill value={hostedCapability.state} /></article>
@@ -378,9 +447,9 @@ export function App() {
     {active === "edge" && <><EdgeRuntime snapshot={snapshot} /><RuntimeTopology snapshot={snapshot} /></>}
     {active === "mission-control" && <OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />}
     {active === "settings" && <div className="settings-workspaces"><AppearanceWorkspace appearance={appearance} /><RuntimeInformation snapshot={snapshot} connectionState={state} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
-    {active === "documents" && (hostedOperationalConfigured ? <HostedContractUnavailable title="Document Intelligence" /> : <DocumentIntake />)}
-    {active === "projects" && (hostedOperationalConfigured ? <HostedContractUnavailable title="Projects" /> : <ProjectStudio />)}
-    {active === "voice" && (hostedOperationalConfigured ? <HostedContractUnavailable title="Voice Operations" /> : <VoiceWorkspace />)}
+    {active === "documents" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Document Intelligence" capability={hostedCapability}><DocumentIntake /></HostedCapabilityBoundary>}
+    {active === "projects" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Projects" capability={hostedCapability}><ProjectStudio /></HostedCapabilityBoundary>}
+    {active === "voice" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Voice Operations" capability={hostedCapability}><VoiceWorkspace /></HostedCapabilityBoundary>}
     {active === "providers" && <Providers snapshot={snapshot} />}
     {active === "evidence" && <Evidence snapshot={snapshot} />}
   </>;

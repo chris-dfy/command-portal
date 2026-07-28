@@ -1,6 +1,6 @@
 # Hosted Operational Gateway
 
-The Hosted Operational Gateway is the authenticated mutation lane of the NEXUS Experience Gateway. It is separate from the existing `/api/runtime` hosted observation lane, which remains read-only by design.
+The Hosted Operational Gateway is the authenticated operational lane of the NEXUS Experience Gateway. It is separate from the `/api/runtime` hosted observation and bounded interaction lanes.
 
 ## Current classification
 
@@ -21,6 +21,8 @@ Browser
 ```
 
 The browser never receives the Runtime bearer token or session-signing secret. Session state is signed and stored in an HttpOnly, SameSite=Strict cookie. Mutations require a session-derived CSRF token and an idempotency key. The gateway forwards deployment-fixed identity, tenant, workspace, role, scope, and request identifiers. Browser-supplied NEXUS identity, role, or scope headers are never forwarded. Arbitrary paths and browser query parameters are rejected.
+
+The exact allowlist includes capability readiness, the versioned Runtime Client Capability Contract, Missions, Conclave, Operational Replay, Knowledge, Runtime Coordination, Document Intelligence, Projects, and Voice Operator. Document upload requires `evidence:write`; other workspace mutations require `operations:write`. The Human Interaction Framework and Realtime SDP exchange remain exact `/api/runtime` routes, but in hosted operational mode they require the same signed session and CSRF proof before the gateway contacts Runtime.
 
 In this alpha, the portal's operator identity is also the fixed Runtime ingress identity. This is a bounded single-operator compatibility arrangement, not a distinct gateway service principal, enterprise identity, multi-user RBAC, or an Authority Grant.
 

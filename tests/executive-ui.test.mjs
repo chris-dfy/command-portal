@@ -302,7 +302,8 @@ test("canonical shell bootstraps the hosted operational session before mounting 
   assert.match(app, /operationalSessionClient\.use\(session\)/);
   assert.match(app, /operationalSessionClient\.use\(\{ authenticated: false \}\)/);
   assert.match(app, /!sessionBootstrapComplete \|\| \(loading && !Object\.keys\(snapshot\)\.length\)/);
-  assert.match(app, /OPERATIONAL_AREAS\.has\(active\) && !operationalSession\.authenticated/);
+  assert.match(app, /const requiresOperationalSession = OPERATIONAL_AREAS\.has\(active\) \|\| \(hostedOperationalConfigured && HOSTED_CONTRACT_AREAS\.has\(active\)\)/);
+  assert.match(app, /requiresOperationalSession && !operationalSession\.authenticated/);
   assert.match(app, /<OperationalAccessGate workspace=\{current\.label\}/);
   assert.match(gate, /operationalSessionClient\.login\(accessKey\)/);
   assert.match(gate, /HttpOnly, scoped session/);
@@ -407,8 +408,12 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(missions, /\["active", "in_progress", "running", "executing"\]/);
   assert.match(missions, /step\.reversible === true/);
   assert.doesNotMatch(missions, /step\.reversible !== false/);
-  assert.match(app, /HostedContractUnavailable/);
-  assert.match(app, /will not fall back to a local-only gateway/);
+  assert.match(app, /HostedCapabilityBoundary/);
+  assert.match(app, /knowledge\.document_intake/);
+  assert.match(app, /projects\.nexicron_planning/);
+  assert.match(app, /interaction\.human/);
+  assert.match(app, /NEXUS will not substitute local state or infer readiness/);
+  assert.doesNotMatch(app, /HostedContractUnavailable/);
   assert.match(edge, /Edge status is unavailable/);
   assert.match(edge, /Array\.isArray\(capabilityData\)/);
   assert.match(edge, /EDGE_CAPABILITY_IDS/);
