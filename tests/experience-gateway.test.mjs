@@ -1489,6 +1489,126 @@ test("hosted mode cannot coexist with local or legacy Replay gateways", () => {
   assert.throws(() => loadConfig({ ...hosted, replayEnabled: true }), /cannot coexist/);
 });
 
+test("published Replit mode requires its private domain boundary and no operator access key", () => {
+  const hosted = {
+    runtimeBaseUrl: "https://runtime.invalid",
+    runtimeToken: "server-only-test-token",
+    operationalEnabled: true,
+    operationalApiBaseUrl: "https://nexus-runtime-dev.fly.dev",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    replitDeployment: true,
+    replitDomains: "command-portal.replit.app",
+  };
+  const config = loadConfig(hosted);
+  assert.equal(config.operationalSessionMode, "automatic_private_workspace");
+  assert.equal(config.operationalPrincipalType, "workspace_service");
+  assert.equal(config.operationalAccessBasis, "replit_private_deployment");
+  assert.equal(config.operationalAccessKey, "automatic-session-no-access-key");
+  assert.deepEqual(config.replitDomains, ["command-portal.replit.app"]);
+
+  assert.throws(
+    () => loadConfig({ ...hosted, replitDomains: "" }),
+    /Automatic hosted sessions require/,
+  );
+  assert.throws(
+    () => loadConfig({ ...hosted, replitDeployment: false, operationalSessionMode: "automatic_private_workspace" }),
+    /Automatic hosted sessions require/,
+  );
+  assert.throws(
+    () => loadConfig({ ...hosted, operationalCookieSecure: false }),
+    /Automatic hosted sessions require/,
+  );
+});
+
+test("private Replit ingress automatically establishes one server-derived workspace session", async () => {
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "nexus-workspace-service",
+    operationalRole: "operator",
+    operationalScopes: ["operations:read", "operations:write", "evidence:write"],
+    operationalCookieSecure: true,
+    replitDeployment: true,
+    replitDomains: "command-portal.replit.app",
+  };
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), async () => localResponse({ connected: true }));
+  const trustedHeaders = {
+    Host: "command-portal.replit.app",
+    "X-Forwarded-Host": "command-portal.replit.app",
+    "X-Forwarded-Proto": "https",
+    "Sec-Fetch-Site": "same-origin",
+  };
+
+  const status = await fetch(`${base}/api/session`, { headers: trustedHeaders });
+  assert.equal(status.status, 200);
+  const body = await status.json();
+  assert.equal(body.session.authenticated, true);
+  assert.equal(body.session.userId, "nexus-workspace-service");
+  assert.equal(body.session.tenantId, "tenant-alpha");
+  assert.equal(body.session.workspaceId, "workspace-alpha");
+  assert.equal(body.session.role, "operator");
+  assert.deepEqual(body.session.scopes, ["operations:read", "operations:write", "evidence:write"]);
+  assert.equal(body.session.connectionMode, "automatic_private_workspace");
+  assert.equal(body.session.principalType, "workspace_service");
+  assert.equal(body.session.accessBasis, "replit_private_deployment");
+  assert.equal(body.session.managed, true);
+  const cookie = status.headers.get("set-cookie").split(";")[0];
+  assert.equal(cookie.includes("operator"), false);
+
+  const repeated = await fetch(`${base}/api/session`, { headers: { ...trustedHeaders, Cookie: cookie } });
+  assert.equal(repeated.status, 200);
+  assert.equal(repeated.headers.get("set-cookie"), null);
+  assert.equal((await repeated.json()).session.csrfToken, body.session.csrfToken);
+
+  const operation = await fetch(`${base}/api/operations/capabilities/readiness`, {
+    headers: { ...trustedHeaders, Cookie: cookie },
+  });
+  assert.equal(operation.status, 200);
+  assert.equal((await operation.json()).operational.userId, "nexus-workspace-service");
+
+  const keyLogin = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { ...trustedHeaders, Origin: "https://command-portal.replit.app", "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: "browser-key-must-not-be-accepted" }),
+  });
+  assert.equal(keyLogin.status, 404);
+});
+
+test("automatic workspace issuance fails closed outside the exact private Replit ingress", async () => {
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalCookieSecure: true,
+    replitDeployment: true,
+    replitDomains: "command-portal.replit.app",
+  };
+  const base = await start(async () => runtimeResponse({}), config);
+  const valid = {
+    Host: "command-portal.replit.app",
+    "X-Forwarded-Host": "command-portal.replit.app",
+    "X-Forwarded-Proto": "https",
+    "Sec-Fetch-Site": "same-origin",
+  };
+  const attempts = [
+    {},
+    { ...valid, Host: "lookalike.replit.app", "X-Forwarded-Host": "lookalike.replit.app" },
+    { ...valid, "X-Forwarded-Proto": "http" },
+    { ...valid, "Sec-Fetch-Site": "cross-site" },
+  ];
+  for (const headers of attempts) {
+    const response = await fetch(`${base}/api/session`, { headers });
+    assert.equal(response.status, 401, JSON.stringify(headers));
+    assert.equal(response.headers.get("set-cookie"), null);
+  }
+});
+
 test("secure hosted mutations require an exact same-origin Origin header", async () => {
   const config = {
     operationalEnabled: true,

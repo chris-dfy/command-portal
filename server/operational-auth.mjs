@@ -15,6 +15,11 @@ const cookieMap = (header = "") => Object.fromEntries(String(header).split(";").
 export function createSessionAuthority(config, clock = () => Date.now()) {
   const failures = new Map();
   const revokedSessions = new Map();
+  const sessionMode = config.operationalSessionMode ?? "access_key";
+  const principalType = config.operationalPrincipalType
+    ?? (sessionMode === "automatic_private_workspace" ? "workspace_service" : "named_operator");
+  const accessBasis = config.operationalAccessBasis
+    ?? (sessionMode === "automatic_private_workspace" ? "replit_private_deployment" : "operator_access_key");
   const sessionCookie = (value, maxAge) => `${COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${config.operationalCookieSecure ? "; Secure" : ""}`;
   const encode = (claims) => { const payload = b64(JSON.stringify(claims)); return `${payload}.${sign(payload, config.operationalSessionSecret)}`; };
   const nowSeconds = () => Math.floor(clock() / 1000);
@@ -45,6 +50,9 @@ export function createSessionAuthority(config, clock = () => Date.now()) {
         && claims.tenantId === config.operationalTenantId
         && claims.workspaceId === config.operationalWorkspaceId
         && claims.role === config.operationalRole
+        && claims.connectionMode === sessionMode
+        && claims.principalType === principalType
+        && claims.accessBasis === accessBasis
         && scopesMatch(claims.scopes)
         && Number.isSafeInteger(claims.iat)
         && Number.isSafeInteger(claims.exp)
@@ -56,7 +64,22 @@ export function createSessionAuthority(config, clock = () => Date.now()) {
   };
   const authenticate = (request) => decode(cookieMap(request.headers.cookie)[COOKIE_NAME]);
   const csrf = (claims) => sign(`csrf:${claims.sid}:${claims.exp}`, config.operationalSessionSecret);
+  const issue = () => {
+    const issued = nowSeconds();
+    const claims = {
+      sid: randomBytes(18).toString("base64url"), sub: config.operationalUserId,
+      tenantId: config.operationalTenantId, workspaceId: config.operationalWorkspaceId,
+      role: config.operationalRole, scopes: config.operationalScopes,
+      connectionMode: sessionMode, principalType, accessBasis, iat: issued,
+      exp: issued + config.operationalSessionTtlSeconds
+    };
+    return { status: 200, claims, csrfToken: csrf(claims), cookie: sessionCookie(encode(claims), config.operationalSessionTtlSeconds) };
+  };
+  const establish = () => sessionMode === "automatic_private_workspace"
+    ? issue()
+    : { status: 403, error: "automatic_session_disabled" };
   const login = (accessKey, remoteAddress = "unknown") => {
+    if (sessionMode !== "access_key") return { status: 404, error: "access_key_login_disabled" };
     const now = clock();
     const recent = (failures.get(remoteAddress) ?? []).filter((at) => now - at < 15 * 60_000);
     if (recent.length >= 5) return { status: 429, error: "login_rate_limited" };
@@ -65,17 +88,10 @@ export function createSessionAuthority(config, clock = () => Date.now()) {
       return { status: 401, error: "credentials_invalid" };
     }
     failures.delete(remoteAddress);
-    const issued = Math.floor(now / 1000);
-    const claims = {
-      sid: randomBytes(18).toString("base64url"), sub: config.operationalUserId,
-      tenantId: config.operationalTenantId, workspaceId: config.operationalWorkspaceId,
-      role: config.operationalRole, scopes: config.operationalScopes, iat: issued,
-      exp: issued + config.operationalSessionTtlSeconds
-    };
-    return { status: 200, claims, csrfToken: csrf(claims), cookie: sessionCookie(encode(claims), config.operationalSessionTtlSeconds) };
+    return issue();
   };
   return {
-    login, authenticate, csrf, revoke,
+    establish, login, authenticate, csrf, revoke,
     csrfValid: (request, claims) => {
       if (!claims || revoked(claims, nowSeconds()) || !safeEqual(request.headers["x-csrf-token"], csrf(claims))) return false;
       let pathname = "";
@@ -86,7 +102,9 @@ export function createSessionAuthority(config, clock = () => Date.now()) {
     clearCookie: () => sessionCookie("", 0),
     publicSession: (claims) => claims ? {
       authenticated: true, userId: claims.sub, tenantId: claims.tenantId, workspaceId: claims.workspaceId,
-      role: claims.role, scopes: claims.scopes, expiresAt: new Date(claims.exp * 1000).toISOString(), csrfToken: csrf(claims)
+      role: claims.role, scopes: claims.scopes, expiresAt: new Date(claims.exp * 1000).toISOString(), csrfToken: csrf(claims),
+      connectionMode: claims.connectionMode, principalType: claims.principalType,
+      accessBasis: claims.accessBasis, managed: claims.connectionMode === "automatic_private_workspace"
     } : { authenticated: false }
   };
 }

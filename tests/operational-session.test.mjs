@@ -11,6 +11,9 @@ const config = Object.freeze({
   operationalWorkspaceId: "workspace-alpha",
   operationalRole: "admin",
   operationalScopes: ["operations:read", "operations:write", "knowledge:promote"],
+  operationalSessionMode: "access_key",
+  operationalPrincipalType: "named_operator",
+  operationalAccessBasis: "operator_access_key",
   operationalSessionTtlSeconds: 3600,
   operationalCookieSecure: true,
 });
@@ -50,7 +53,40 @@ test("session claims are server-derived and the cookie is signed, HttpOnly, stri
     scopes: config.operationalScopes,
     expiresAt: "2026-07-22T13:00:00.000Z",
     csrfToken: login.csrfToken,
+    connectionMode: "access_key",
+    principalType: "named_operator",
+    accessBasis: "operator_access_key",
+    managed: false,
   });
+});
+
+test("private-workspace mode establishes a managed session without accepting an access key", () => {
+  const automaticConfig = {
+    ...config,
+    operationalAccessKey: undefined,
+    operationalUserId: "nexus-workspace-service",
+    operationalRole: "operator",
+    operationalScopes: ["operations:read", "operations:write", "evidence:write"],
+    operationalSessionMode: "automatic_private_workspace",
+    operationalPrincipalType: "workspace_service",
+    operationalAccessBasis: "replit_private_deployment",
+  };
+  const authority = createSessionAuthority(automaticConfig, () => BASE_TIME);
+  const result = authority.establish();
+
+  assert.equal(result.status, 200);
+  assert.equal(authority.login("browser-supplied-key", "127.0.0.1").status, 404);
+  assert.equal(result.cookie.includes("browser-supplied-key"), false);
+  const claims = authority.authenticate(request(cookieHeader(result.cookie)));
+  assert.ok(claims);
+  assert.equal(claims.sub, "nexus-workspace-service");
+  assert.equal(claims.connectionMode, "automatic_private_workspace");
+  assert.equal(claims.principalType, "workspace_service");
+  assert.equal(claims.accessBasis, "replit_private_deployment");
+  const session = authority.publicSession(claims);
+  assert.equal(session.managed, true);
+  assert.equal(session.connectionMode, "automatic_private_workspace");
+  assert.equal(session.csrfToken, result.csrfToken);
 });
 
 test("the signed session survives ordinary navigation and page refresh within its lifetime", () => {
@@ -112,6 +148,11 @@ test("sessions are invalidated when any active server identity or privilege bind
     { operationalRole: "operator" },
     { operationalScopes: ["operations:read"] },
     { operationalScopes: [...config.operationalScopes].reverse() },
+    {
+      operationalSessionMode: "automatic_private_workspace",
+      operationalPrincipalType: "workspace_service",
+      operationalAccessBasis: "replit_private_deployment",
+    },
   ];
 
   for (const change of changes) {

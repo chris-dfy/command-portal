@@ -13,7 +13,7 @@ Configure these server-only secrets and variables in the hosting environment:
 - `COMMAND_PORTAL_CACHE_TTL_MS=15000`
 - `COMMAND_PORTAL_MAX_RESPONSE_BYTES=1048576`
 
-To enable the single-workspace Hosted Operational Gateway, provision every server-only operational variable from `.env.example`, deploy the execution Runtime behind HTTPS, and provision the matching Runtime token, tenant, workspace, and fixed service bindings:
+To enable the fixed-workspace Hosted Operational Gateway, publish the app as a **Workspace only** private deployment, provision every server-only operational variable from `.env.example`, deploy the execution Runtime behind HTTPS, and provision the matching Runtime token, tenant, workspace, and fixed service bindings:
 
 - `NEXUS_HOSTED_OPERATIONAL_TOKEN` matches `COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN`;
 - `NEXUS_HOSTED_TENANT_ID` matches `COMMAND_PORTAL_TENANT_ID`;
@@ -22,7 +22,9 @@ To enable the single-workspace Hosted Operational Gateway, provision every serve
 - `NEXUS_HOSTED_SERVICE_ROLE` matches `COMMAND_PORTAL_OPERATOR_ROLE`; and
 - `NEXUS_HOSTED_SERVICE_SCOPES` matches `COMMAND_PORTAL_OPERATIONAL_SCOPES` using the same comma-separated values.
 
-Never enable operational mode while any ingress or fixed-binding value is absent or mismatched. This is a fixed single-operator compatibility boundary, not enterprise identity, multi-user RBAC, or an Authority Grant. `productionMultiTenantReady` remains `false`.
+Published Replit deployments select the automatic workspace-session contract from Replit's predefined `REPLIT_DEPLOYMENT=1` marker and require the exact `REPLIT_DOMAINS` binding, HTTPS, and a same-origin browser request. The browser receives only a signed HttpOnly session cookie and CSRF token; it never receives or submits an operator access key. Non-Replit development retains the explicit `access_key` compatibility mode.
+
+Never enable operational mode while any ingress or fixed-binding value is absent or mismatched. This is a fixed workspace-service compatibility boundary, not individual human identity, enterprise identity, multi-user RBAC, or an Authority Grant. `productionMultiTenantReady` remains `false`.
 
 Build with `npm run build` and start with `npm run start`. Never create a browser-visible `VITE_` runtime variable. After deployment, verify every allowlisted route, mutation rejection, secret isolation, failure rendering, and the live topology.
 

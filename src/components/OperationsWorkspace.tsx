@@ -163,9 +163,9 @@ export function OperationsWorkspace({
 
   return <div className="experience-grid operations-workspace">
     <DataPanel eyebrow="Hosted Operational Gateway" title="Authenticated operational session" icon={<ShieldAlert size={18} />} className="span-2">
-      <div className="session-strip"><article><span>User</span><strong>{session.userId}</strong></article><article><span>Tenant</span><strong>{session.tenantId}</strong></article><article><span>Workspace</span><strong>{session.workspaceId}</strong></article><article><span>Role</span><strong>{session.role}</strong></article><StatusPill value="authenticated" /><button className="secondary-action" onClick={() => void logout()} disabled={busy}>Sign out</button></div>
+      <div className="session-strip"><article><span>Principal</span><strong>{session.userId}</strong></article><article><span>Tenant</span><strong>{session.tenantId}</strong></article><article><span>Workspace</span><strong>{session.workspaceId}</strong></article><article><span>Role</span><strong>{session.role}</strong></article><article><span>Connection</span><strong>{session.managed ? "Private workspace managed" : "Operator established"}</strong></article><StatusPill value="authenticated" />{!session.managed && <button className="secondary-action" onClick={() => void logout()} disabled={busy}>Sign out</button>}</div>
       <p className="boundary-note">Scopes: {session.scopes?.join(", ") || "none supplied"}. Session expiration: {session.expiresAt ?? "not supplied"}.</p>
-      <p className="boundary-note">The browser submits operator intent. Tenant, workspace, principal, role, scope, policy, and Authority remain server-derived.</p>
+      <p className="boundary-note">The browser submits operator intent. Tenant, workspace, service principal, role, and scope remain server-derived. Authentication and access scope do not create operational Authority.</p>
     </DataPanel>
 
     <DataPanel eyebrow="Capability-specific readiness" title="Canonical Runtime v26 contract" icon={<ShieldCheck size={18} />} className="span-2">
