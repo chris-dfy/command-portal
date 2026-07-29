@@ -13,7 +13,7 @@ const SKILLS: Array<{ label: string; prompt: string; area: AreaId }> = [
   { label: "Summarize operational readiness", prompt: "Summarize operational readiness and identify the highest-priority constraint.", area: "center" },
   { label: "Show the highest-priority recommendations", prompt: "What are the highest-priority recommendations, and why do they matter?", area: "center" },
   { label: "Explain the Runtime topology", prompt: "Explain the current Runtime topology and any unverified connection boundaries.", area: "topology" },
-  { label: "Help plan a Nexicron project", prompt: "Help me plan, scope, and price a Nexicron project. Begin with the essential discovery questions.", area: "projects" },
+  { label: "Help plan a NEXUS project", prompt: "Help me plan, scope, and price a NEXUS project. Begin with the essential discovery questions.", area: "projects" },
   { label: "Review governance and evidence", prompt: "Review the current governance, proof, and receipt posture without claiming evidence that is not registered.", area: "evidence" },
   { label: "Challenge a decision in Conclave", prompt: "Help me frame the decision I should pressure-test in Conclave, including the evidence and authority it would require.", area: "conclave" },
   { label: "Generate an executive briefing", prompt: "Generate a concise executive briefing from the registered Operational Context.", area: "center" },
