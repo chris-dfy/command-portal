@@ -20,6 +20,15 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
+COMMAND_PORTAL_RUNTIME_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"
+COMMAND_PORTAL_TRUST_BOOTSTRAP_REQUIRED = "false"
+COMMAND_PORTAL_RUNTIME_READ_TOKEN_KEY_ID = "runtime-read-current"
+COMMAND_PORTAL_RUNTIME_READ_TOKEN_REF = "secret-manager:experience-gateway/mission-1/runtime-read-current"
+COMMAND_PORTAL_CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway"
+COMMAND_PORTAL_CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime"
+COMMAND_PORTAL_CONTEXT_ASSERTION_CLIENT_IDS = "nexus-web"
+NEXUS_CONTEXT_ASSERTION_KEY_ID = "context-assertion-current"
+NEXUS_CONTEXT_ASSERTION_SECRET_REF = "secret-manager:experience-gateway/mission-1/context-assertion-current"
 COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"
 COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"
 COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,actions:simulate,evidence:write,edge:node_admission:request"

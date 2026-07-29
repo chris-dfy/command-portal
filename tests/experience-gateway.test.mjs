@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { afterEach, test } from "node:test";
 import {
   CANONICAL_OPERATIONAL_ROUTES,
   createPortalServer,
   loadConfig,
   LOCAL_CAPABILITY_ROUTES,
+  publicTrustBootstrap,
   REPLAY_ROUTES,
   RUNTIME_MUTATION_ROUTES,
   RUNTIME_ROUTES,
@@ -153,7 +154,7 @@ test("hosted conversational reasoning has a dedicated bounded timeout", async ()
 });
 
 test("Experience Gateway signs authoritative Runtime tenant context without exposing the secret", async () => {
-  const secret = "shared-context-assertion-secret-at-least-thirty-two-characters";
+  const secret = randomBytes(48).toString("base64url");
   let observed;
   const base = await start(async (url, options) => {
     observed = { url, options };
@@ -173,18 +174,105 @@ test("Experience Gateway signs authoritative Runtime tenant context without expo
   const token = observed.options.headers["X-NEXUS-Context-Assertion"];
   const [encodedPayload, signature] = token.split(".");
   const assertion = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+  assert.equal(assertion.v, 2);
+  assert.equal(assertion.contract, "nexus.context-assertion@2.0.0");
+  assert.equal(assertion.alg, "hmac-sha256");
+  assert.equal(assertion.kid, "context-assertion-current");
   assert.equal(assertion.iss, "command-portal-experience-gateway");
   assert.equal(assertion.aud, "nexus-runtime");
   assert.equal(assertion.tid, "nexicron");
-  assert.equal(assertion.sub, "command-portal-observer");
+  assert.equal(assertion.wid, "primary");
+  assert.equal(assertion.sub, "command-portal-experience-gateway");
   assert.deepEqual(assertion.roles, ["observer"]);
   assert.equal(assertion.clientId, "nexus-web");
+  assert.equal(assertion.trustBindingId, "runtime-experience-trust-bootstrap");
+  assert.equal(assertion.authorityGranted, false);
   assert.equal(assertion.exp - assertion.iat, 60);
   assert.equal(signature, createHmac("sha256", secret).update(encodedPayload).digest("base64url"));
   const forwarded = JSON.parse(observed.options.body);
   assert.equal(forwarded.metadata.tenantId, "nexicron");
   assert.equal(forwarded.metadata.contextAssemblyOwner, "nexus-runtime");
   assert.equal(JSON.stringify(await response.json()).includes(secret), false);
+});
+
+test("redacted trust bootstrap requires secret-manager references but never returns material", () => {
+  const runtimeCredential = randomBytes(48).toString("base64url");
+  const assertionKey = randomBytes(48).toString("base64url");
+  const config = loadConfig({
+    runtimeBaseUrl: "https://runtime.invalid",
+    runtimeToken: runtimeCredential,
+    runtimeTokenRef: "secret-manager:nexus/runtime/experience-gateway-read",
+    contextAssertionSecret: assertionKey,
+    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-current",
+    trustBootstrapRequired: true
+  });
+  const trust = publicTrustBootstrap(config);
+  assert.equal(trust.state, "configured_not_verified");
+  assert.equal(trust.provisioningReady, true);
+  assert.equal(trust.targetEnvironmentVerified, false);
+  assert.equal(trust.secureRuntimeTransport, true);
+  assert.equal(trust.publicBindingsValid, true);
+  assert.equal(trust.assertionSubjectId, "command-portal-experience-gateway");
+  assert.deepEqual(trust.assertionRoles, ["observer"]);
+  assert.equal(trust.runtimeCredentialKeyId, "runtime-read-current");
+  assert.equal(trust.authenticationGrantsAuthority, false);
+  assert.equal(trust.provisioningContractGrantsAuthority, false);
+  assert.equal(trust.secretValuesExposed, false);
+  assert.equal(JSON.stringify(trust).includes(runtimeCredential), false);
+  assert.equal(JSON.stringify(trust).includes(assertionKey), false);
+  assert.equal(JSON.stringify(trust).includes(config.runtimeTokenRef), false);
+  assert.equal(JSON.stringify(trust).includes(config.contextAssertionSecretRef), false);
+
+  assert.throws(() => loadConfig({
+    runtimeBaseUrl: "https://runtime.invalid",
+    runtimeToken: runtimeCredential,
+    contextAssertionSecret: assertionKey,
+    trustBootstrapRequired: true
+  }), /opaque secret-provider references/);
+  assert.throws(() => loadConfig({
+    runtimeBaseUrl: "https://runtime.invalid",
+    runtimeToken: runtimeCredential,
+    contextAssertionSecret: runtimeCredential
+  }), /distinct by purpose/);
+  assert.throws(() => loadConfig({
+    runtimeBaseUrl: "https://runtime.invalid",
+    runtimeToken: runtimeCredential,
+    runtimeTokenRef: "secret-manager:nexus/runtime/experience-gateway-read",
+    contextAssertionSecret: assertionKey,
+    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-current",
+    contextAssertionIssuer: "unregistered-experience-gateway",
+    trustBootstrapRequired: true
+  }), /registered Mission 1 binding/);
+  assert.throws(() => loadConfig({
+    runtimeBaseUrl: "http://runtime.invalid",
+    runtimeToken: runtimeCredential,
+    runtimeTokenRef: "secret-manager:nexus/runtime/experience-gateway-read",
+    contextAssertionSecret: assertionKey,
+    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-current",
+    trustBootstrapRequired: true
+  }), /HTTPS Runtime endpoint/);
+  assert.throws(() => loadConfig({
+    runtimeBaseUrl: "https://runtime.invalid",
+    runtimeToken: runtimeCredential,
+    runtimeTokenRef: "file:local/runtime-read",
+    contextAssertionSecret: assertionKey,
+    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-current"
+  }), /opaque secret-provider reference/);
+
+  const disabled = publicTrustBootstrap({
+    ...config,
+    trustBootstrapRequired: false
+  });
+  assert.equal(disabled.state, "disabled");
+  assert.equal(disabled.provisioningReady, false);
+
+  const invalidPublicBinding = publicTrustBootstrap({
+    ...config,
+    contextAssertionAudience: "unregistered-runtime"
+  });
+  assert.equal(invalidPublicBinding.state, "invalid");
+  assert.equal(invalidPublicBinding.publicBindingsValid, false);
+  assert.equal(invalidPublicBinding.provisioningReady, false);
 });
 
 test("hosted conversational reasoning reports its own timeout truthfully", async () => {

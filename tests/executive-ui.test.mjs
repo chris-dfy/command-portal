@@ -74,7 +74,8 @@ test("Replit publishes the fixed hosted binding without committing server secret
     "COMMAND_PORTAL_OPERATOR_ACCESS_KEY",
     "COMMAND_PORTAL_RUNTIME_READ_TOKEN",
     "COMMAND_PORTAL_SESSION_SECRET",
-  ]) assert.doesNotMatch(replit, new RegExp(secretName));
+    "NEXUS_CONTEXT_ASSERTION_SECRET",
+  ]) assert.doesNotMatch(replit, new RegExp(`^${secretName}\\s*=`, "m"));
 });
 
 test("hosted workspaces bootstrap automatically without a browser credential form", async () => {
