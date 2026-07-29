@@ -1,0 +1,29 @@
+.release-revision {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.release-revision strong,
+.release-revision code {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.release-revision code {
+  overflow-wrap: anywhere;
+  color: inherit;
+  font: 650 0.72rem/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.012em;
+  text-transform: none;
+}
+
+.release-provenance-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 760px) {
+  .release-provenance-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
