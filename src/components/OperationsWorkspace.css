@@ -1,0 +1,73 @@
+.operations-workspace {
+  container-name: operations-workspace;
+  container-type: inline-size;
+}
+
+.operations-workspace .operations-summary {
+  min-width: 0;
+}
+
+.operations-workspace .operations-summary > article {
+  min-width: 0;
+  min-height: 6.2rem;
+  overflow: hidden;
+}
+
+.operations-workspace .operations-summary strong,
+.operations-workspace .operations-summary code {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.operations-workspace .operations-summary strong {
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.operations-workspace .operations-summary code {
+  overflow: hidden;
+  color: inherit;
+  font: 650 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operations-workspace .compact-records article {
+  grid-template-columns: minmax(11rem, 0.75fr) minmax(0, 1.6fr) auto;
+  min-width: 0;
+  padding: 0.9rem 1rem;
+}
+
+.operations-workspace .compact-records article > span:not(.nx-status) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+@container operations-workspace (max-width: 48rem) {
+  .operations-workspace .operations-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operations-workspace .compact-records article {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .operations-workspace .compact-records article > span:not(.nx-status) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .operations-workspace .compact-records article > .nx-status {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@container operations-workspace (max-width: 30rem) {
+  .operations-workspace .operations-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

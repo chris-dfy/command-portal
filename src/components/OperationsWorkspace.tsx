@@ -3,6 +3,7 @@ import { Activity, ClipboardCheck, FileCheck2, Network, RefreshCw, Route, Shield
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 import { localNexusClient, operationalSessionClient, type OperationalSession } from "../lib/local-client";
+import "./OperationsWorkspace.css";
 
 type RuntimeRecord = Record<string, unknown>;
 
@@ -27,6 +28,7 @@ const text = (value: unknown, fallback = "Unavailable") => {
 };
 const strings = (value: unknown) => Array.isArray(value) ? value.map((item) => text(item, "")).filter(Boolean) : [];
 const missionId = (mission: RuntimeRecord) => text(mission.missionId ?? mission.mission_id ?? mission.id, "");
+const revisionLabel = (value: string) => /^[0-9a-f]{32,}$/i.test(value) ? value.slice(0, 12) : value;
 
 export function OperationsWorkspace({
   session,
@@ -169,7 +171,18 @@ export function OperationsWorkspace({
     </DataPanel>
 
     <DataPanel eyebrow="Capability-specific readiness" title="Canonical Runtime v26 contract" icon={<ShieldCheck size={18} />} className="span-2">
-      <div className="operations-summary"><article><span>Deployed commit</span><strong>{deployedCommit}</strong></article><article><span>Program Alpha</span><strong>{embeddedProgramAlphaCommit}</strong></article><article><span>Capability records</span><strong>{readiness ? readinessCapabilities.length : "—"}</strong></article><article><span>Readiness source</span><strong>{readiness ? "authenticated Runtime" : "Unavailable"}</strong></article></div>
+      <div className="operations-summary">
+        <article>
+          <span>Deployed commit</span>
+          <strong><code title={deployedCommit} aria-label={`Deployed commit ${deployedCommit}`}>{revisionLabel(deployedCommit)}</code></strong>
+        </article>
+        <article>
+          <span>Program Alpha</span>
+          <strong><code title={embeddedProgramAlphaCommit} aria-label={`Program Alpha commit ${embeddedProgramAlphaCommit}`}>{revisionLabel(embeddedProgramAlphaCommit)}</code></strong>
+        </article>
+        <article><span>Capability records</span><strong>{readiness ? readinessCapabilities.length : "—"}</strong></article>
+        <article><span>Readiness source</span><strong>{readiness ? "authenticated Runtime" : "Unavailable"}</strong></article>
+      </div>
       <div className="compact-records">{readinessCapabilities.length ? readinessCapabilities.map((capability, index) => { const id = text(capability.capabilityId ?? capability.capability_id ?? capability.id ?? capability.name, `Capability ${index + 1}`); return <article key={id}><strong>{id}</strong><span>{text(capability.reason ?? capability.requiredNextAction ?? capability.required_next_action, "Runtime supplied no readiness reason")}</span><StatusPill value={text(capability.state ?? capability.status ?? capability.availability, "unknown")} /></article>; }) : <EmptyRecord>Capability-specific readiness is unavailable or contains no capability records.</EmptyRecord>}</div>
       <p className="boundary-note">Governance and Authority are displayed as independent capability records. Authentication and role never establish operational Authority.</p>
     </DataPanel>
