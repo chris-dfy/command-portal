@@ -1,3 +1,5 @@
+import { OPERATIONAL_SESSION_INVALID_EVENT, operationalSessionClient } from "./local-client";
+
 export type RealtimeVoiceState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "interrupted" | "error";
 
 export type RealtimeVoiceCallbacks = {
@@ -67,10 +69,15 @@ export class RealtimeVoiceClient {
       const response = await fetch("/api/runtime/realtime/call", {
         method: "POST",
         credentials: "same-origin",
-        headers: { Accept: "application/sdp", "Content-Type": "application/sdp" },
+        headers: {
+          Accept: "application/sdp",
+          "Content-Type": "application/sdp",
+          ...operationalSessionClient.hostedMutationHeaders(),
+        },
         body: offer.sdp,
       });
       if (!response.ok) {
+        if (response.status === 401) window.dispatchEvent(new Event(OPERATIONAL_SESSION_INVALID_EVENT));
         let message = `Live voice session could not start (${response.status}).`;
         try {
           const body = await response.json() as { error?: { message?: string } };

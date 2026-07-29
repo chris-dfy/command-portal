@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { afterEach, test } from "node:test";
-import { createPortalServer, LOCAL_CAPABILITY_ROUTES, REPLAY_ROUTES, RUNTIME_MUTATION_ROUTES, RUNTIME_ROUTES } from "../server/portal-server.mjs";
+import {
+  CANONICAL_OPERATIONAL_ROUTES,
+  createPortalServer,
+  loadConfig,
+  LOCAL_CAPABILITY_ROUTES,
+  REPLAY_ROUTES,
+  RUNTIME_MUTATION_ROUTES,
+  RUNTIME_ROUTES,
+} from "../server/portal-server.mjs";
 
 const servers = [];
 afterEach(async () => Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve)))));
@@ -108,6 +116,10 @@ test("Conclave, Executive Briefing, and HIF lifecycle are bounded hosted Runtime
   });
   assert.equal(resumed.status, 200);
   assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/resume");
+  const events = await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`);
+  assert.equal(events.status, 200);
+  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/events");
+  assert.equal(observed.at(-1).options.method, "GET");
 
   const conclave = await fetch(`${base}/api/runtime/conclave/reviews`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -217,6 +229,72 @@ test("Realtime gateway rejects non-SDP and unsafe methods before contacting Runt
   assert.equal(invalid.status, 415);
   assert.equal((await fetch(`${base}/api/runtime/realtime/call`)).status, 405);
   assert.equal(calls, 0);
+});
+
+test("hosted HIF and Realtime voice require the signed operational session and CSRF proof", async () => {
+  const calls = [];
+  const answer = "v=0\r\na=answer\r\n".repeat(12);
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "operations:write"],
+    operationalCookieSecure: false,
+  };
+  const base = await start(async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith("/runtime/voice/realtime/call")) {
+      return new Response(answer, { status: 201, headers: { "Content-Type": "application/sdp" } });
+    }
+    return runtimeResponse({ interaction: { responseText: "Verified response" }, events: [] });
+  }, config);
+  const interactionBody = JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" });
+  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: interactionBody,
+  })).status, 401);
+  assert.equal(calls.length, 0);
+
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: interactionBody,
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken },
+    body: interactionBody,
+  })).status, 200);
+  assert.equal((await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`)).status, 401);
+  assert.equal((await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`, {
+    headers: { Cookie: cookie },
+  })).status, 200);
+
+  const offer = "v=0\r\na=offer\r\n".repeat(12);
+  assert.equal((await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST", headers: { "Content-Type": "application/sdp" }, body: offer,
+  })).status, 401);
+  assert.equal((await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/sdp" }, body: offer,
+  })).status, 403);
+  const realtime = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/sdp", "X-CSRF-Token": session.session.csrfToken },
+    body: offer,
+  });
+  assert.equal(realtime.status, 201);
+  assert.equal(await realtime.text(), answer);
+  assert.equal(calls.length, 3);
 });
 
 test("runtime credential is server-only and never serialized", async () => {
@@ -777,28 +855,28 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
     "X-NEXUS-Role": "observer",
     "X-NEXUS-Scopes": "operations:write"
   } })).status, 200);
-  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/missions/history?limit=8");
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/missions");
   assert.equal(observed.at(-1).options.headers.Authorization, `Bearer ${config.operationalRuntimeToken}`);
   assert.equal(observed.at(-1).options.headers["X-NEXUS-User-ID"], "operator-1");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Role"], "admin");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,actions:simulate");
+  const callsBeforeLegacyPlan = observed.length;
   assert.equal((await fetch(`${base}/api/operations/missions/plan`, {
     method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ objective: "Plan alpha" })
-  })).status, 403);
+  })).status, 404);
   assert.equal((await fetch(`${base}/api/operations/missions/plan`, {
-    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken }, body: JSON.stringify({ objective: "Plan alpha" })
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken, "Idempotency-Key": "legacy-plan-12345" }, body: JSON.stringify({ objective: "Plan alpha" })
+  })).status, 404);
+  assert.equal(observed.length, callsBeforeLegacyPlan);
+
+  assert.equal((await fetch(`${base}/api/operations/conclave/workspaces`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ proposal: "Investigate an unfamiliar asset through an Edge Runtime." })
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/conclave/workspaces`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken }, body: JSON.stringify({ proposal: "Investigate an unfamiliar asset through an Edge Runtime." })
   })).status, 400);
-  const mutation = await fetch(`${base}/api/operations/missions/plan`, {
-    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken, "Idempotency-Key": "operation-12345" },
-    body: JSON.stringify({ objective: "Plan alpha" })
-  });
-  assert.equal(mutation.status, 200);
-  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "operation-12345");
-  const body = await mutation.json();
-  assert.equal(body.operational.productionMultiTenantReady, false);
-  assert.equal(JSON.stringify(body).includes(config.operationalRuntimeToken), false);
 
   const conclaveMutation = await fetch(`${base}/api/operations/conclave/workspaces`, {
     method: "POST",
@@ -810,6 +888,428 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "conclave-operation-12345");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
   assert.deepEqual(JSON.parse(observed.at(-1).options.body), { proposal: "Investigate an unfamiliar asset through an Edge Runtime." });
+  const body = await conclaveMutation.json();
+  assert.equal(body.operational.productionMultiTenantReady, false);
+  assert.equal(JSON.stringify(body).includes(config.operationalRuntimeToken), false);
+});
+
+test("authenticated hosted reads use the canonical Runtime contracts without Replay fallback", async () => {
+  const observed = [];
+  let replayFallbackCalls = 0;
+  let localFallbackCalls = 0;
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "operations:write", "knowledge:promote"],
+    operationalCookieSecure: false,
+    replayEnabled: false,
+  };
+  const base = await start(
+    async () => runtimeResponse({}),
+    config,
+    async () => { localFallbackCalls += 1; return localResponse({ fabricatedLocalFallback: true }); },
+    async (url, options) => {
+      observed.push({ url, options });
+      return localResponse({ recordType: "canonical_runtime_projection", secretValuesExposed: false });
+    },
+    async () => {
+      replayFallbackCalls += 1;
+      return localResponse({ fabricatedFallback: true });
+    },
+  );
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const routes = [
+    ["/capabilities/readiness", "/capabilities/readiness"],
+    ["/client-capabilities", "/client-capabilities"],
+    ["/intake/history", "/intake/history"],
+    ["/projects/artifact-types", "/projects/artifact-types"],
+    ["/projects/PROJECT-001/scope", "/projects/PROJECT-001/scope"],
+    ["/projects/PROJECT-001/estimate", "/projects/PROJECT-001/estimate"],
+    ["/projects/PROJECT-001/planning-model", "/projects/PROJECT-001/planning-model"],
+    ["/voice-operator/status", "/voice-operator/status"],
+    ["/voice-operator/history", "/voice-operator/history"],
+    ["/missions", "/missions"],
+    ["/missions/MISSION-001", "/missions/MISSION-001"],
+    ["/conclave/workspaces", "/conclave/workspaces"],
+    ["/conclave/workspaces/MISSION-001", "/conclave/workspaces/MISSION-001"],
+    ["/operational-replay", "/operational-replay"],
+    ["/operational-replay/REPLAY-001", "/operational-replay/REPLAY-001"],
+    ["/operational-replay/REPLAY-001/events", "/operational-replay/REPLAY-001/events"],
+    ["/operational-replay/REPLAY-001/stages/stage-17", "/operational-replay/REPLAY-001/stages/stage-17"],
+    ["/operational-replay/REPLAY-001/stages/stage-17/explain", "/operational-replay/REPLAY-001/stages/stage-17/explain"],
+    ["/operational-replay/failures", "/operational-replay/failures"],
+    ["/operational-replay/missions/MISSION-001", "/operational-replay/missions/MISSION-001"],
+    ["/operational-replay/receipts/RECEIPT-001", "/operational-replay/receipts/RECEIPT-001"],
+    ["/receipts", "/receipts"],
+    ["/receipts/RECEIPT-001", "/receipts/RECEIPT-001"],
+    ["/receipts/missions/MISSION-001", "/receipts/missions/MISSION-001"],
+    ["/mission-store", "/mission-store"],
+    ["/mission-store/MISSION-001", "/mission-store/MISSION-001"],
+    ["/knowledge/acquisitions", "/knowledge/acquisitions"],
+    ["/knowledge/acquisitions/MISSION-001", "/knowledge/acquisitions/MISSION-001"],
+    ["/knowledge/promotion-candidates", "/knowledge/promotion-candidates"],
+    ["/knowledge/promotion-candidates/CANDIDATE-001", "/knowledge/promotion-candidates/CANDIDATE-001"],
+    ["/knowledge/promotions", "/knowledge/promotions"],
+    ["/knowledge/store", "/knowledge/store"],
+    ["/knowledge/store/KNOWLEDGE-001", "/knowledge/store/KNOWLEDGE-001"],
+    ["/knowledge/store/KNOWLEDGE-001/versions", "/knowledge/store/KNOWLEDGE-001/versions"],
+    ["/knowledge/receipts", "/knowledge/receipts"],
+    ["/knowledge/receipts/RECEIPT-001", "/knowledge/receipts/RECEIPT-001"],
+    ["/runtime/baselines", "/runtime/baselines"],
+    ["/runtime/baselines/BASELINE-001", "/runtime/baselines/BASELINE-001"],
+    ["/governance/readiness", "/governance/readiness"],
+    ["/authority/readiness", "/authority/readiness"],
+    ["/runtime-coordination/nodes", "/runtime-coordination/nodes"],
+    ["/runtime-coordination/events", "/runtime-coordination/events"],
+    ["/runtime-coordination/admissions", "/runtime-coordination/admissions"],
+    ["/runtime-coordination/admissions/ADMISSION-001", "/runtime-coordination/admissions/ADMISSION-001"],
+  ];
+  for (const [portalPath, runtimePath] of routes) {
+    const response = await fetch(`${base}/api/operations${portalPath}`, { headers: { Cookie: cookie } });
+    assert.equal(response.status, 200, portalPath);
+    const call = observed.at(-1);
+    assert.equal(call.url, `http://127.0.0.1:9876${runtimePath}`, portalPath);
+    assert.equal(call.options.method, "GET", portalPath);
+    assert.equal(call.options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha", portalPath);
+    assert.equal(call.options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha", portalPath);
+  }
+  assert.equal(replayFallbackCalls, 0);
+  assert.equal(localFallbackCalls, 0);
+  const callsBeforeStaleRoutes = observed.length;
+  for (const stale of ["work-sessions", "approvals", "connectors", "actions/dry-run"]) {
+    assert.equal((await fetch(`${base}/api/operations/${stale}`, { headers: { Cookie: cookie } })).status, 404, stale);
+  }
+  assert.equal(observed.length, callsBeforeStaleRoutes);
+  assert.equal(localFallbackCalls, 0);
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/missions"].GET, "/missions");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/client-capabilities"].GET, "/client-capabilities");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/intake/upload"].POST, "/intake/upload");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/projects"].POST, "/projects");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/voice-operator/status"].GET, "/voice-operator/status");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/runtime/baselines"].POST, "/runtime/baselines");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/knowledge/promotions"].POST, "/knowledge/promotions");
+
+  const baselineKey = "runtime-baseline-0001";
+  const baseline = await fetch(`${base}/api/operations/runtime/baselines`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": baselineKey,
+    },
+    body: JSON.stringify({ expectedDeployedCommit: "0123456789abcdef0123456789abcdef01234567" }),
+  });
+  assert.equal(baseline.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/runtime/baselines");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], baselineKey);
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), {
+    expectedDeployedCommit: "0123456789abcdef0123456789abcdef01234567",
+  });
+
+  const promotionKey = "knowledge-promotion-0001";
+  const promotion = await fetch(`${base}/api/operations/knowledge/promotions`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": promotionKey,
+    },
+    body: JSON.stringify({ candidateId: "candidate-runtime-baseline-001" }),
+  });
+  assert.equal(promotion.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/knowledge/promotions");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], promotionKey);
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,knowledge:promote");
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { candidateId: "candidate-runtime-baseline-001" });
+
+  const candidateKey = "promotion-candidate-0001";
+  const candidate = await fetch(`${base}/api/operations/knowledge/acquisitions/MISSION-001/promotion-candidates`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": candidateKey,
+    },
+    body: JSON.stringify({ expectedMissionVersion: 7 }),
+  });
+  assert.equal(candidate.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/knowledge/acquisitions/MISSION-001/promotion-candidates");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], candidateKey);
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { expectedMissionVersion: 7 });
+
+  const callsBeforeRejectedMutations = observed.length;
+  assert.equal((await fetch(`${base}/api/operations/runtime/baselines`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "Idempotency-Key": "runtime-baseline-0002" },
+    body: JSON.stringify({ expectedDeployedCommit: "0123456789abcdef0123456789abcdef01234567" }),
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/knowledge/promotions`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": "knowledge-promotion-0002",
+    },
+    body: JSON.stringify({ candidateId: "candidate-runtime-baseline-001", tenantId: "browser-tenant" }),
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/knowledge/acquisitions/MISSION-001/promotion-candidates`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": "promotion-candidate-0002",
+    },
+    body: JSON.stringify({ expectedMissionVersion: { metadata: { tenantId: "browser-tenant" } } }),
+  })).status, 403);
+  assert.equal(observed.length, callsBeforeRejectedMutations);
+});
+
+test("hosted Document, Project, and Voice workspaces use authenticated Runtime-owned contracts", async () => {
+  const observed = [];
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "operations:write", "evidence:write"],
+    operationalCookieSecure: false,
+  };
+  const base = await start(
+    async () => runtimeResponse({}),
+    config,
+    async () => localResponse({ fabricatedLocalFallback: true }),
+    async (url, options) => {
+      observed.push({ url, options });
+      return localResponse({ recordType: "workspace_runtime_result", secretValuesExposed: false });
+    },
+  );
+  assert.equal((await fetch(`${base}/api/operations/client-capabilities`)).status, 401);
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const mutationHeaders = (key) => ({
+    Cookie: cookie,
+    "Content-Type": "application/json",
+    "X-CSRF-Token": session.session.csrfToken,
+    "Idempotency-Key": key,
+  });
+
+  assert.equal((await fetch(`${base}/api/operations/intake/upload`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "Idempotency-Key": "intake-upload-0000" },
+    body: JSON.stringify({ filename: "requirements.txt", contentBase64: "SGVsbG8=" }),
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/intake/upload`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken },
+    body: JSON.stringify({ filename: "requirements.txt", contentBase64: "SGVsbG8=" }),
+  })).status, 400);
+
+  const operations = [
+    ["/intake/upload", "/intake/upload", "intake-upload-0001", { filename: "requirements.txt", contentBase64: "SGVsbG8=", projectId: "PROJECT-001" }],
+    ["/intake/query", "/intake/query", "intake-query-0001", { question: "What requirements are supported?", projectId: "PROJECT-001" }],
+    ["/projects", "/projects", "project-create-0001", { name: "Project Alpha" }],
+    ["/projects/PROJECT-001/compile", "/projects/PROJECT-001/compile", "project-compile-0001", { artifactType: "roadmap", options: { defaultPhaseDurationWeeks: 2, assumptions: [] } }],
+    ["/voice-operator/route-transcript", "/voice-operator/route-transcript", "voice-route-0001", { transcript: "Summarize project Alpha", source: "text_fallback" }],
+  ];
+  for (const [portalPath, runtimePath, key, body] of operations) {
+    const response = await fetch(`${base}/api/operations${portalPath}`, {
+      method: "POST",
+      headers: mutationHeaders(key),
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 200, portalPath);
+    const call = observed.at(-1);
+    assert.equal(call.url, `http://127.0.0.1:9876${runtimePath}`, portalPath);
+    assert.equal(call.options.headers["Idempotency-Key"], key, portalPath);
+    assert.equal(call.options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha", portalPath);
+    assert.equal(call.options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha", portalPath);
+    assert.deepEqual(JSON.parse(call.options.body), body, portalPath);
+  }
+
+  const callsBeforeRejectedIdentity = observed.length;
+  assert.equal((await fetch(`${base}/api/operations/projects`, {
+    method: "POST",
+    headers: mutationHeaders("project-create-0002"),
+    body: JSON.stringify({ name: "Project Beta", tenantId: "browser-selected" }),
+  })).status, 403);
+  assert.equal(observed.length, callsBeforeRejectedIdentity);
+});
+
+test("hosted Knowledge intake is canonical, scoped, CSRF-protected, idempotent, and server-bound", async () => {
+  const observed = [];
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "evidence:write"],
+    operationalCookieSecure: false,
+  };
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), async (url, options) => {
+    observed.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    return localResponse({ recordType: "nexus_knowledge_intake_result", evidenceId: "EVIDENCE-001", secretValuesExposed: false }, 201);
+  });
+  const payload = {
+    missionId: "MISSION-001",
+    taskId: "TASK-001",
+    origin: "runtime://edge-node/observation-001",
+    sourceClassification: "runtime_evidence",
+    confidence: 0.94,
+    claim: "The authenticated Runtime admitted this evidence-bound observation.",
+    supportingArtifacts: ["OBSERVATION-001"],
+    relationships: ["supports"],
+    operationalContext: { observationType: "runtime_state" },
+    completeTask: false,
+  };
+  assert.equal((await fetch(`${base}/api/operations/knowledge/intake`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  })).status, 401);
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  assert.equal((await fetch(`${base}/api/operations/knowledge/intake`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "Idempotency-Key": "knowledge-intake-0001" }, body: JSON.stringify(payload),
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/knowledge/intake`, {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken }, body: JSON.stringify(payload),
+  })).status, 400);
+  const response = await fetch(`${base}/api/operations/knowledge/intake`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": "knowledge-intake-0001",
+      "X-NEXUS-Tenant-ID": "browser-tenant",
+      "X-NEXUS-Workspace-ID": "browser-workspace",
+    },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(response.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/knowledge/intake");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "knowledge-intake-0001");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
+  assert.deepEqual(observed.at(-1).body, payload);
+  const callsBeforeRejected = observed.length;
+  const rejected = await fetch(`${base}/api/operations/knowledge/intake`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "knowledge-intake-0002" },
+    body: JSON.stringify({ ...payload, authorityGrantId: "browser-invented-authority" }),
+  });
+  assert.equal(rejected.status, 403);
+  assert.equal(observed.length, callsBeforeRejected);
+  for (const operationalContext of [
+    { verificationState: "VERIFIED" },
+    { verified: true },
+    { principalRole: "admin" },
+    { nested: { authorizationRole: "approver" } },
+  ]) {
+    const denied = await fetch(`${base}/api/operations/knowledge/intake`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": `knowledge-intake-${globalThis.crypto.randomUUID()}` },
+      body: JSON.stringify({ ...payload, operationalContext }),
+    });
+    assert.equal(denied.status, 403);
+  }
+  const invalidIdempotency = await fetch(`${base}/api/operations/knowledge/intake`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "knowledge@intake@0004" },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(invalidIdempotency.status, 400);
+  assert.equal(observed.length, callsBeforeRejected);
+  const badOrigin = await fetch(`${base}/api/operations/knowledge/intake`, {
+    method: "POST",
+    headers: { Cookie: cookie, Origin: "https://untrusted.invalid", "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "knowledge-intake-0003" },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(badOrigin.status, 403);
+  assert.equal(observed.length, callsBeforeRejected);
+});
+
+test("canonical hosted failures retain structured reasons while upstream secrets are removed", async () => {
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalCookieSecure: false,
+  };
+  let fail = false;
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), async () => fail
+    ? localResponse({
+      recordType: "nexus_capability_unavailable", error: "capability_unavailable", capabilityId: "knowledge_store",
+      state: "unavailable", reason: "Mandatory dependencies are unavailable.", missingDependencies: ["knowledgeGraph"],
+      retryable: true, requiredNextAction: "Restore and verify knowledgeGraph.", sessionSecret: "must-not-reach-browser",
+      secretValuesExposed: false,
+    }, 503)
+    : localResponse({
+      recordType: "nexus_operational_replay_list", replays: [], runtimeToken: "must-not-reach-browser",
+      token: "must-not-reach-browser", accessToken: "must-not-reach-browser", refreshToken: "must-not-reach-browser",
+      authorization: "must-not-reach-browser", secret: "must-not-reach-browser", signingKey: "must-not-reach-browser",
+      secretValuesExposed: false,
+    }));
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const replayText = await (await fetch(`${base}/api/operations/operational-replay`, { headers: { Cookie: cookie } })).text();
+  assert.equal(replayText.includes("must-not-reach-browser"), false);
+  fail = true;
+  const unavailable = await fetch(`${base}/api/operations/knowledge/store`, { headers: { Cookie: cookie } });
+  const body = await unavailable.json();
+  assert.equal(unavailable.status, 503);
+  assert.equal(body.error.code, "capability_unavailable");
+  assert.deepEqual(body.error.details.missingDependencies, ["knowledgeGraph"]);
+  assert.equal(body.error.details.requiredNextAction, "Restore and verify knowledgeGraph.");
+  assert.equal(JSON.stringify(body).includes("must-not-reach-browser"), false);
+});
+
+test("absent service-worker and manifest routes fail closed without SPA fallback", async () => {
+  const base = await start(async () => runtimeResponse({}));
+  for (const path of ["/service-worker.js", "/sw.js", "/manifest.json", "/manifest.webmanifest"]) {
+    const response = await fetch(`${base}${path}`);
+    assert.equal(response.status, 404, path);
+    assert.equal(response.headers.get("cache-control"), "no-store", path);
+    assert.equal(await response.text(), "Not found", path);
+  }
 });
 
 test("hosted Runtime Coordination keeps fleet reads and requires the admission request scope", async () => {
@@ -851,6 +1351,41 @@ test("hosted Runtime Coordination keeps fleet reads and requires the admission r
   });
   assert.equal(denied.status, 403);
   assert.equal((await denied.json()).error.code, "scope_denied");
+  const reviewDenied = await fetch(`${base}/api/operations/runtime-coordination/admissions/ADMISSION-001/challenge/reissue`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "edge-admission:review-001" },
+    body: JSON.stringify({ expectedVersion: 1, reason: "Review permission must be independently verified." }),
+  });
+  assert.equal(reviewDenied.status, 403);
+  assert.equal((await reviewDenied.json()).error.code, "scope_denied");
+  const promotionDenied = await fetch(`${base}/api/operations/knowledge/promotions`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": "knowledge-promotion-0003",
+    },
+    body: JSON.stringify({ candidateId: "candidate-runtime-baseline-001" }),
+  });
+  assert.equal(promotionDenied.status, 403);
+  assert.equal((await promotionDenied.json()).error.code, "scope_denied");
+  const intakeDenied = await fetch(`${base}/api/operations/knowledge/intake`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": "knowledge-intake-denied-0001",
+    },
+    body: JSON.stringify({
+      missionId: "MISSION-001", taskId: "TASK-001", origin: "runtime://observation/1",
+      sourceClassification: "runtime_evidence", confidence: 1, claim: "Bounded claim",
+      supportingArtifacts: [], relationships: [], operationalContext: {}, completeTask: false,
+    }),
+  });
+  assert.equal(intakeDenied.status, 403);
+  assert.equal((await intakeDenied.json()).error.code, "scope_denied");
   assert.equal(observed.length, 1);
 });
 
@@ -866,7 +1401,7 @@ test("hosted admission proxy derives identity, preserves one idempotency key, an
     operationalWorkspaceId: "workspace-alpha",
     operationalUserId: "operator-1",
     operationalRole: "admin",
-    operationalScopes: ["operations:read", "edge:node_admission:request"],
+    operationalScopes: ["operations:read", "edge:node_admission:request", "edge:node_admission:review"],
     operationalCookieSecure: false
   };
   const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), async (url, options) => {
@@ -910,13 +1445,23 @@ test("hosted admission proxy derives identity, preserves one idempotency key, an
   assert.equal("idempotencyKey" in observed.at(-1).body, false);
   assert.deepEqual(observed.at(-1).body, { missionId: intent.missionId, intent: intent.intent });
 
+  const reissueKey = "edge-admission:review-001";
+  const reissued = await fetch(`${base}/api/operations/runtime-coordination/admissions/ADMISSION-001/challenge/reissue`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": reissueKey },
+    body: JSON.stringify({ expectedVersion: 1, reason: "Issue a governed replacement challenge." }),
+  });
+  assert.equal(reissued.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/runtime-coordination/admissions/ADMISSION-001/challenge/reissue");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], reissueKey);
+
   const callCount = observed.length;
   const trusted = await fetch(`${base}/api/operations/runtime-coordination/admissions`, {
     method: "POST",
     headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": key },
     body: JSON.stringify({ ...intent, tenantId: "browser-tenant" })
   });
-  assert.equal(trusted.status, 400);
+  assert.equal(trusted.status, 403);
   const mismatch = await fetch(`${base}/api/operations/runtime-coordination/admissions`, {
     method: "POST",
     headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": key },
@@ -928,6 +1473,177 @@ test("hosted admission proxy derives identity, preserves one idempotency key, an
     method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "edge-admission:proof-001" }, body: "{}"
   })).status, 404);
   assert.equal(observed.length, callCount);
+});
+
+test("hosted mode cannot coexist with local or legacy Replay gateways", () => {
+  const hosted = {
+    runtimeBaseUrl: "https://runtime.invalid",
+    runtimeToken: "server-only-test-token",
+    operationalEnabled: true,
+    operationalApiBaseUrl: "https://nexus-runtime-dev.fly.dev",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+  };
+  assert.throws(() => loadConfig({ ...hosted, localCapabilitiesEnabled: true }), /cannot coexist/);
+  assert.throws(() => loadConfig({ ...hosted, replayEnabled: true }), /cannot coexist/);
+});
+
+test("published Replit mode requires its private domain boundary and no operator access key", () => {
+  const hosted = {
+    runtimeBaseUrl: "https://runtime.invalid",
+    runtimeToken: "server-only-test-token",
+    operationalEnabled: true,
+    operationalApiBaseUrl: "https://nexus-runtime-dev.fly.dev",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    replitDeployment: true,
+    replitDomains: "command-portal.replit.app",
+  };
+  const config = loadConfig(hosted);
+  assert.equal(config.operationalSessionMode, "automatic_private_workspace");
+  assert.equal(config.operationalPrincipalType, "workspace_service");
+  assert.equal(config.operationalAccessBasis, "replit_private_deployment");
+  assert.equal(config.operationalAccessKey, "automatic-session-no-access-key");
+  assert.deepEqual(config.replitDomains, ["command-portal.replit.app"]);
+
+  assert.throws(
+    () => loadConfig({ ...hosted, replitDomains: "" }),
+    /Automatic hosted sessions require/,
+  );
+  assert.throws(
+    () => loadConfig({ ...hosted, replitDeployment: false, operationalSessionMode: "automatic_private_workspace" }),
+    /Automatic hosted sessions require/,
+  );
+  assert.throws(
+    () => loadConfig({ ...hosted, operationalCookieSecure: false }),
+    /Automatic hosted sessions require/,
+  );
+});
+
+test("private Replit ingress automatically establishes one server-derived workspace session", async () => {
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "nexus-workspace-service",
+    operationalRole: "operator",
+    operationalScopes: ["operations:read", "operations:write", "evidence:write"],
+    operationalCookieSecure: true,
+    replitDeployment: true,
+    replitDomains: "command-portal.replit.app",
+  };
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), async () => localResponse({ connected: true }));
+  const trustedHeaders = {
+    Host: "command-portal.replit.app",
+    "X-Forwarded-Host": "command-portal.replit.app",
+    "X-Forwarded-Proto": "https",
+    "Sec-Fetch-Site": "same-origin",
+  };
+
+  const status = await fetch(`${base}/api/session`, { headers: trustedHeaders });
+  assert.equal(status.status, 200);
+  const body = await status.json();
+  assert.equal(body.session.authenticated, true);
+  assert.equal(body.session.userId, "nexus-workspace-service");
+  assert.equal(body.session.tenantId, "tenant-alpha");
+  assert.equal(body.session.workspaceId, "workspace-alpha");
+  assert.equal(body.session.role, "operator");
+  assert.deepEqual(body.session.scopes, ["operations:read", "operations:write", "evidence:write"]);
+  assert.equal(body.session.connectionMode, "automatic_private_workspace");
+  assert.equal(body.session.principalType, "workspace_service");
+  assert.equal(body.session.accessBasis, "replit_private_deployment");
+  assert.equal(body.session.managed, true);
+  const cookie = status.headers.get("set-cookie").split(";")[0];
+  assert.equal(cookie.includes("operator"), false);
+
+  const repeated = await fetch(`${base}/api/session`, { headers: { ...trustedHeaders, Cookie: cookie } });
+  assert.equal(repeated.status, 200);
+  assert.equal(repeated.headers.get("set-cookie"), null);
+  assert.equal((await repeated.json()).session.csrfToken, body.session.csrfToken);
+
+  const operation = await fetch(`${base}/api/operations/capabilities/readiness`, {
+    headers: { ...trustedHeaders, Cookie: cookie },
+  });
+  assert.equal(operation.status, 200);
+  assert.equal((await operation.json()).operational.userId, "nexus-workspace-service");
+
+  const keyLogin = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { ...trustedHeaders, Origin: "https://command-portal.replit.app", "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: "browser-key-must-not-be-accepted" }),
+  });
+  assert.equal(keyLogin.status, 404);
+});
+
+test("automatic workspace issuance fails closed outside the exact private Replit ingress", async () => {
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalCookieSecure: true,
+    replitDeployment: true,
+    replitDomains: "command-portal.replit.app",
+  };
+  const base = await start(async () => runtimeResponse({}), config);
+  const valid = {
+    Host: "command-portal.replit.app",
+    "X-Forwarded-Host": "command-portal.replit.app",
+    "X-Forwarded-Proto": "https",
+    "Sec-Fetch-Site": "same-origin",
+  };
+  const attempts = [
+    {},
+    { ...valid, Host: "lookalike.replit.app", "X-Forwarded-Host": "lookalike.replit.app" },
+    { ...valid, "X-Forwarded-Proto": "http" },
+    { ...valid, "Sec-Fetch-Site": "cross-site" },
+  ];
+  for (const headers of attempts) {
+    const response = await fetch(`${base}/api/session`, { headers });
+    assert.equal(response.status, 401, JSON.stringify(headers));
+    assert.equal(response.headers.get("set-cookie"), null);
+  }
+});
+
+test("secure hosted mutations require an exact same-origin Origin header", async () => {
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalCookieSecure: true,
+    operationalScopes: ["operations:read", "operations:write"],
+  };
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), async () => localResponse({ recordType: "nexus_conclave_workspace" }, 201));
+  const missing = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  assert.equal(missing.status, 403);
+  const wrong = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { Origin: "https://untrusted.invalid", "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  assert.equal(wrong.status, 403);
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { Origin: base, "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  assert.equal(login.status, 200);
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  assert.equal((await fetch(`${base}/api/operations/conclave/workspaces`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "strict-origin-missing-001" },
+    body: JSON.stringify({ proposal: "Origin verification must fail closed." }),
+  })).status, 403);
+  assert.equal((await fetch(`${base}/api/operations/conclave/workspaces`, {
+    method: "POST",
+    headers: { Origin: base, Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken, "Idempotency-Key": "strict-origin-valid-001" },
+    body: JSON.stringify({ proposal: "Origin verification is enforced." }),
+  })).status, 200);
 });
 
 test("hosted operational gateway is disabled by default and rejects arbitrary forwarding", async () => {

@@ -1,5 +1,21 @@
 export type NexusPlatformAreaId = "dashboard" | "missions" | "replay" | "conclave" | "knowledge" | "edge" | "mission-control" | "settings";
 
+export const NEXUS_PLATFORM_PATHS: Readonly<Record<NexusPlatformAreaId, string>> = Object.freeze({
+  dashboard: "/",
+  missions: "/missions",
+  replay: "/operational-replay",
+  conclave: "/conclave",
+  knowledge: "/knowledge",
+  edge: "/edge-runtime",
+  "mission-control": "/mission-control",
+  settings: "/settings",
+});
+
+export const NEXUS_PLATFORM_PATH_ALIASES: Readonly<Record<string, NexusPlatformAreaId>> = Object.freeze({
+  "/replay": "replay",
+  "/edge": "edge",
+});
+
 export const NEXUS_PLATFORM_NAVIGATION = [
   { id: "dashboard", label: "Dashboard", detail: "Executive operating posture" },
   { id: "missions", label: "Missions", detail: "Portfolio and executor" },

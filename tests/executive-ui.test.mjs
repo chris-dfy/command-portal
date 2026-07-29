@@ -58,6 +58,44 @@ test("browser uses only same-origin allowlisted runtime routes and no token", as
   assert.equal(/VITE_.*TOKEN/.test(env), false);
 });
 
+test("Replit publishes the fixed hosted binding without committing server secrets", async () => {
+  const replit = await read("../.replit");
+  for (const binding of [
+    'COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"',
+    'COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"',
+    'COMMAND_PORTAL_OPERATOR_USER_ID = "nexus-workspace-service"',
+    'COMMAND_PORTAL_TENANT_ID = "nexicron"',
+    'COMMAND_PORTAL_WORKSPACE_ID = "primary"',
+    'COMMAND_PORTAL_OPERATOR_ROLE = "operator"',
+    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,actions:simulate,evidence:write,edge:node_admission:request"',
+  ]) assert.match(replit, new RegExp(binding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  for (const secretName of [
+    "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN",
+    "COMMAND_PORTAL_OPERATOR_ACCESS_KEY",
+    "COMMAND_PORTAL_RUNTIME_READ_TOKEN",
+    "COMMAND_PORTAL_SESSION_SECRET",
+  ]) assert.doesNotMatch(replit, new RegExp(secretName));
+});
+
+test("hosted workspaces bootstrap automatically without a browser credential form", async () => {
+  const [gate, client, app, operations] = await Promise.all([
+    read("../src/components/OperationalAccessGate.tsx"),
+    read("../src/lib/local-client.ts"),
+    read("../src/App.tsx"),
+    read("../src/components/OperationsWorkspace.tsx"),
+  ]);
+  assert.match(app, /operationalSessionClient\.status\(\)/);
+  assert.match(gate, /Retry secure connection/);
+  assert.match(gate, /private deployment admits the user/i);
+  assert.match(gate, /Connection grants API access—not operational Authority/i);
+  assert.doesNotMatch(gate, /password|accessKey|Operator access key|current-password|KeyRound/);
+  for (const forbidden of ['sessionRequest("/login"', "login:", "accessKey"]) {
+    assert.equal(client.includes(forbidden), false);
+  }
+  assert.match(operations, /Private workspace managed/);
+  assert.match(operations, /Authentication and access scope do not create operational Authority/);
+});
+
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
   const [app, intake, projects, voice, realtime, client, hif] = await Promise.all([
     read("../src/App.tsx"),
@@ -88,7 +126,8 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(voice, /model-native knowledge/i);
   assert.equal(/SpeechRecognition|speechSynthesis/.test(voice + realtime), false);
   for (const event of ["SpeechStarted", "SpeechInterrupted", "ConversationStarted", "AvatarMoveRequested", "NavigationRequested", "FocusRequested", "PresentationStarted", "StreamingChunk"]) assert.match(hif, new RegExp(event));
-  assert.match(voice, /hifClient\.start/);
+  assert.match(voice, /localNexusClient\.routeTranscript\(transcript\.trim\(\), "text_fallback"\)/);
+  assert.match(voice, /governed NEXUS Runtime Voice Operator/);
   assert.match(hif, /clientId: "nexus-web"/);
   for (const source of [app, intake, projects, voice, realtime, client, hif]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
@@ -99,13 +138,23 @@ test("mission control consumes the versioned Runtime parity contract", async () 
   const [app, workspace, client] = await Promise.all([
     read("../src/App.tsx"), read("../src/components/OperationsWorkspace.tsx"), read("../src/lib/local-client.ts")
   ]);
-  for (const label of ["Mission Control", "Work Sessions", "Approval queue", "Simulate before governed action", "Connector readiness"]) assert.match(`${app}\n${workspace}`, new RegExp(label));
-  for (const operation of ["clientCapabilities", "planMission", "startWorkSession", "controlWorkSession", "approve", "deny", "dryRunAction", "executeAction", "connectors"]) assert.match(client, new RegExp(operation));
-  assert.match(workspace, /Operational behavior, context assembly, governance decisions, proofs, and receipts remain owned by NEXUS Runtime/);
-  assert.match(workspace, /Runtime policy and approval gates remain authoritative/);
-  for (const boundary of ["Hosted Operational Gateway", "HttpOnly session", "CSRF verification", "single-workspace hosted alpha", "Production multi-tenant readiness remains false"]) assert.match(workspace, new RegExp(boundary));
+  for (const label of ["Mission Control", "Mission portfolio", "Mission Executor", "Mission receipts", "Operational Replay", "Capability-specific readiness"]) assert.match(`${app}\n${workspace}`, new RegExp(label));
+  for (const operation of ["capabilityReadiness", "missions", "mission", "missionReceipts", "operationalReplayForMission", "planMission"]) assert.match(client, new RegExp(operation));
+  assert.match(workspace, /Mission status, task graph, receipts, and Replay come from independent canonical Runtime routes/);
+  assert.match(workspace, /Authentication and role never establish operational Authority/);
+  for (const boundary of ["Hosted Operational Gateway", "Session expiration", "server-derived", "authenticated Runtime"]) assert.match(workspace, new RegExp(boundary));
+  for (const staleCall of ["clientCapabilities\\(\\)", "workSessions\\(\\)", "approvals\\(\\)", "connectors\\(\\)", "dryRunAction\\(", "executeAction\\("]) assert.doesNotMatch(workspace, new RegExp(staleCall));
   assert.match(client, /Idempotency-Key/);
   assert.match(client, /operationalSessionClient/);
+  assert.match(client, /capabilityTransport\.mode = session\.authenticated \? "hosted" : "local"/);
+  assert.match(app, /hosted-operational-context/);
+  assert.match(app, /localNexusClient\.capabilityReadiness\(\)/);
+  assert.match(app, /Capability state/);
+  assert.match(app, /Capability reason/);
+  assert.match(app, /AREA_CAPABILITY_IDS/);
+  assert.match(app, /Runtime commit/);
+  assert.match(app, /runtimeCommit=\{deployedRuntimeCommit\}/);
+  assert.match(workspace, /missionCreationAllowed/);
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(workspace), false);
 });
 
@@ -113,7 +162,7 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
   const [app, center, contract, portalClient] = await Promise.all([
     read("../src/App.tsx"), read("../src/components/OperationsCenter.tsx"), read("../src/lib/eox-client.ts"), read("../src/lib/portal-client.ts")
   ]);
-  assert.match(app, /return isAreaId\(pathValue\) \? pathValue : "dashboard"/);
+  assert.match(app, /areaFromPath\(window\.location\.pathname\)/);
   assert.match(app, /active === "dashboard"/);
   for (const label of ["Operations Center", "Executive Brief", "Operational Health", "Attention Queue", "Recommended Actions", "Operational Understanding", "Mission Timeline", "Executive state"]) assert.match(center, new RegExp(label));
   assert.match(center, /assessment\.loop\.map/);
@@ -127,12 +176,17 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
 });
 
 test("direct hosted workspace paths survive a fresh page load", async () => {
-  const app = await read("../src/App.tsx");
+  const [app, navigation] = await Promise.all([read("../src/App.tsx"), read("../src/platform/navigation.ts")]);
   assert.match(app, /window\.location\.pathname/);
   assert.match(app, /window\.location\.hash/);
-  assert.match(app, /if \(isAreaId\(hashValue\)\) return hashValue/);
+  for (const path of ["/missions", "/mission-control", "/conclave", "/operational-replay", "/knowledge", "/edge-runtime"]) {
+    assert.match(navigation, new RegExp(`"${path.replaceAll("/", "\\/")}"`));
+  }
   assert.match(app, /const \[active, setActive\] = useState<AreaId>\(routeFromLocation\)/);
   assert.match(app, /setActive\(routeFromLocation\(\)\)/);
+  assert.match(app, /window\.history\.pushState/);
+  assert.match(app, /window\.history\.replaceState/);
+  assert.match(app, /routePath=\{AREA_PATHS\[active\]\}/);
 });
 
 test("Conclave is a visible Runtime-owned decision challenge capability", async () => {
@@ -143,7 +197,11 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(navigation, /label: "Conclave"/);
   assert.match(app, /<ConclaveWorkspace/);
   for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
-  assert.match(client, /\/api\/runtime\/conclave\/reviews/);
+  assert.match(client, /localNexusClient\.createConclaveWorkspace/);
+  assert.doesNotMatch(client, /\/api\/runtime\/conclave\/reviews|runConclaveReview/);
+  assert.match(conclave, /localNexusClient\.conclaveWorkspaces\(\)/);
+  assert.match(conclave, /Durable Runtime workspace/);
+  assert.match(conclave, /does not substitute a static one-shot review/);
   assert.match(conclave, /useState\(""\)/);
   assert.match(conclave, /placeholder=\{suggestedProposal\}/);
   assert.doesNotMatch(client, /gateway\.data\.data/);
@@ -282,9 +340,11 @@ test("canonical shell bootstraps the hosted operational session before mounting 
   assert.match(app, /operationalSessionClient\.use\(session\)/);
   assert.match(app, /operationalSessionClient\.use\(\{ authenticated: false \}\)/);
   assert.match(app, /!sessionBootstrapComplete \|\| \(loading && !Object\.keys\(snapshot\)\.length\)/);
-  assert.match(app, /OPERATIONAL_AREAS\.has\(active\) && !operationalSession\.authenticated/);
+  assert.match(app, /const requiresOperationalSession = OPERATIONAL_AREAS\.has\(active\) \|\| \(hostedOperationalConfigured && HOSTED_CONTRACT_AREAS\.has\(active\)\)/);
+  assert.match(app, /requiresOperationalSession && !operationalSession\.authenticated/);
   assert.match(app, /<OperationalAccessGate workspace=\{current\.label\}/);
-  assert.match(gate, /operationalSessionClient\.login\(accessKey\)/);
+  assert.match(gate, /operationalSessionClient\.status\(\)/);
+  assert.doesNotMatch(gate, /accessKey|type="password"|Operator access key/);
   assert.match(gate, /HttpOnly, scoped session/);
   assert.doesNotMatch(gate, /localStorage|sessionStorage/);
   for (const mapping of ['replay: "replay"', 'missions: "missions"', 'knowledge: "knowledge"', 'edge: "edge"']) assert.match(app, new RegExp(mapping));
@@ -301,7 +361,7 @@ test("canonical consolidation exposes every permanent platform workspace", async
   for (const label of ["Dashboard", "Missions", "Operational Replay", "Conclave", "Knowledge", "Edge Runtime", "Mission Control", "Settings"]) assert.match(navigation, new RegExp(`label: "${label}"`));
   for (const label of ["Active Missions", "Blocked Missions", "Completed Missions", "Mission Health", "Mission Executor", "Mission receipts"]) assert.match(missions, new RegExp(label, "i"));
   for (const label of ["Replay pipeline visualization", "Stage Inspector", "Explain This Step", "Executive Mode", "Engineering Mode", "Failure Replay", "Export"]) assert.match(replay, new RegExp(label, "i"));
-  for (const label of ["Mission Store", "Knowledge Store", "Knowledge Promotion Engine", "Promotion Receipts"]) assert.match(knowledge, new RegExp(label, "i"));
+  for (const label of ["Mission Store", "Knowledge Store", "Knowledge Promotion", "Knowledge Receipts"]) assert.match(knowledge, new RegExp(label, "i"));
   for (const label of ["Mission", "Objectives", "Knowledge", "Unknowns", "Task Graph", "Specialists", "Evidence", "Knowledge Graph", "Operational Replay", "Executive Conclusions"]) assert.match(conclave, new RegExp(label));
   for (const component of ["NexusExecutiveNavigation", "NexusPlatformRail", "NexusWorkspaceCommandBar", "NexusWorkspaceFrame", "NexusActivityStream", "NexusContextInspector"]) assert.match(app, new RegExp(`<${component}`));
   assert.match(workspaceFrame, /<NexusPageHeader/);
@@ -322,20 +382,23 @@ test("Operational Replay surfaces Runtime-owned stage playback with truthful bou
     read("../src/App.tsx"),
     read("../src/platform/navigation.ts"),
     read("../src/components/OperationalReplay.tsx"),
-    read("../src/lib/replay-client.ts")
+    read("../src/lib/local-client.ts")
   ]);
   assert.match(navigation, /label: "Operational Replay"/);
   assert.match(app, /<OperationalReplay/);
-  for (const stage of ["Observation", "Evidence", "Representation", "Conclave", "Authority", "Decision", "Receipt"]) {
-    assert.match(replay, new RegExp(`label: "${stage}"`));
-  }
   for (const control of ["Restart", "Previous", "Play", "Pause", "Next"]) {
-    assert.match(replay, new RegExp(`<span>${control}</span>`));
+    assert.match(replay, new RegExp(control));
   }
   assert.match(replay, /Explain This Step/);
+  assert.match(replay, /supplied\.whatChanged/);
   assert.match(replay, /Runtime supplied no explanation for this stage\./);
   assert.match(replay, /STAGE_INTERVAL_BASE_MS \/ speed/);
-  assert.match(client, /\/api\/runtime\/replay/);
+  for (const operation of ["operationalReplays", "operationalReplayEvents", "operationalReplayStage", "explainOperationalReplayStage", "operationalReplayFailures", "operationalReplayForMission", "operationalReplayForReceipt"]) {
+    assert.match(client, new RegExp(operation));
+  }
+  assert.match(replay, /Canonical direct Replay/);
+  assert.match(replay, /No local-only Replay fallback is used/);
+  assert.doesNotMatch(replay, /replayClient|\/api\/replay|\/api\/runtime\/replay/);
   assert.equal(client.includes("COMMAND_PORTAL_RUNTIME_READ_TOKEN"), false);
   assert.equal(client.includes("Authorization"), false);
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(replay + client), false);
@@ -373,6 +436,25 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(client, /runtimeAdmissionReplay/);
   assert.match(knowledge, /Mission Store/);
   assert.match(knowledge, /Knowledge Store/);
+  for (const operation of ["knowledgeIntake", "knowledgeAcquisition", "knowledgePromotionCandidate", "knowledgeVersions", "knowledgeReceipt", "knowledgePromotions"]) assert.match(client, new RegExp(operation));
+  assert.match(knowledge, /policyEligible/);
+  for (const gate of ["intakeGate", "acquisitionGate", "promotionGate"]) assert.match(knowledge, new RegExp(gate));
+  assert.match(knowledge, /Mission completion never writes to Knowledge Store automatically/);
+  for (const field of ["operationalState", "awaitingNodeProof", "requiredNextAction", "replayId"]) assert.match(admission, new RegExp(field));
+  assert.match(admission, /Awaiting physical node proof/);
+  assert.match(admission, /ADMISSION_REVIEW_SCOPE/);
+  assert.match(admission, /reviewPermissionGranted/);
+  assert.match(missions, /\["active", "in_progress", "running", "executing"\]/);
+  assert.match(missions, /step\.reversible === true/);
+  assert.doesNotMatch(missions, /step\.reversible !== false/);
+  assert.match(app, /HostedCapabilityBoundary/);
+  assert.match(app, /if \(configured && capability\.state === "available"\) return children/);
+  assert.match(app, /Hosted operational mode is not configured for this deployment/);
+  assert.match(app, /knowledge\.document_intake/);
+  assert.match(app, /projects\.nexicron_planning/);
+  assert.match(app, /interaction\.human/);
+  assert.match(app, /NEXUS will not substitute local state or infer readiness/);
+  assert.doesNotMatch(app, /HostedContractUnavailable/);
   assert.match(edge, /Edge status is unavailable/);
   assert.match(edge, /Array\.isArray\(capabilityData\)/);
   assert.match(edge, /EDGE_CAPABILITY_IDS/);

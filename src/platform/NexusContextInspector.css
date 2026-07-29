@@ -1,0 +1,11 @@
+.nx-context-drawer .nx-context-drawer__revision {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}

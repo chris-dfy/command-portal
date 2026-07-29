@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Send, Volume2, VolumeX, Waves } from "lucide-react";
 import { DataPanel } from "./DataPanel";
 import { displayLabel } from "../lib/presentation";
-import { hifClient, initialHifPresentationState, presentHifEvents, type HifInteraction } from "../lib/hif-client";
+import { localNexusClient, type VoiceRouteResult } from "../lib/local-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
 
 type VoiceStatus = {
@@ -30,8 +30,7 @@ export function VoiceWorkspace() {
   const [history, setHistory] = useState<TranscriptEntry[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [interaction, setInteraction] = useState<HifInteraction | null>(null);
-  const [presentation, setPresentation] = useState(initialHifPresentationState);
+  const [routeResult, setRouteResult] = useState<VoiceRouteResult | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const liveClient = useRef<RealtimeVoiceClient | null>(null);
 
@@ -109,16 +108,24 @@ export function VoiceWorkspace() {
     setBusy(true);
     setMessage(null);
     try {
-      const response = await hifClient.start(transcript.trim(), "text", {});
-      setPresentation(presentHifEvents(response.events));
-      setInteraction(response.interaction);
-      setAssistantTranscript(response.interaction.responseText);
+      const response = await localNexusClient.routeTranscript(transcript.trim(), "text_fallback");
+      const responseText = response.spokenSummary?.trim()
+        || response.event?.failureReason?.trim()
+        || "NEXUS recorded the request without a spoken summary.";
+      const proofId = response.proof?.proofId ?? response.event?.proofId;
+      const receiptId = response.receipt?.receiptId ?? response.event?.receiptId;
+      setRouteResult(response);
+      setAssistantTranscript(responseText);
       setHistory((items) => [
-        { speaker: "NEXUS", text: response.interaction.responseText } as TranscriptEntry,
+        { speaker: "NEXUS", text: responseText } as TranscriptEntry,
         { speaker: "You", text: transcript.trim() } as TranscriptEntry,
         ...items,
       ].slice(0, 10));
-      setMessage("Text request was processed by the shared Runtime Human Interaction Framework.");
+      setMessage([
+        "Text request was processed by the governed NEXUS Runtime Voice Operator.",
+        proofId ? `Proof ${proofId}.` : "",
+        receiptId ? `Receipt ${receiptId}.` : "",
+      ].filter(Boolean).join(" "));
     } catch (error) {
       setMessage(messageFrom(error));
     } finally {
@@ -148,7 +155,7 @@ export function VoiceWorkspace() {
         </button>}
       </div>
       <div className="voice-text-fallback">
-        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder="Or type a request for the governed Runtime interaction framework" />
+        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder="Or type a request for the governed Runtime Voice Operator" />
         <button onClick={() => void sendText()} disabled={busy || !transcript.trim()}><Send size={17} /> Send text</button>
       </div>
       {message && <p className="workspace-message" role="status">{message}</p>}
@@ -162,7 +169,7 @@ export function VoiceWorkspace() {
         <div><dt>Voice / transport</dt><dd>{status?.voice && status?.transport ? `${status.voice} · ${status.transport}` : "Not reported"}</dd></div>
         <div><dt>Conversation</dt><dd>{status?.serverVAD ? "Server voice detection" : "Not verified"}{status?.interruptResponse ? " · interruption enabled" : ""}</dd></div>
         <div><dt>Context owner</dt><dd>{status?.contextAssemblyOwner ?? "NEXUS Runtime"}</dd></div>
-        <div><dt>Governed text state</dt><dd>{displayLabel(interaction?.state ?? `${presentation.avatarMode} · ${presentation.speech}`)}</dd></div>
+        <div><dt>Governed text state</dt><dd>{displayLabel(routeResult?.status ?? "idle")}</dd></div>
       </dl>
     </DataPanel>
 

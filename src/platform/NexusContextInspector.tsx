@@ -1,7 +1,9 @@
 import { BookOpen, FileCheck2, ShieldCheck, X } from "lucide-react";
 import { NexusStatus } from "../design-system/NexusPrimitives";
+import "./NexusContextInspector.css";
 
 type NexusTone = "neutral" | "info" | "success" | "attention" | "critical";
+const revisionLabel = (value: string) => /^[0-9a-f]{32,}$/i.test(value) ? value.slice(0, 12) : value;
 
 export function NexusContextInspector({
   featureLabel,
@@ -11,6 +13,7 @@ export function NexusContextInspector({
   connectionTone,
   environment,
   runtimeVersion,
+  runtimeRevision,
   failureCount,
   proofId,
   receiptId,
@@ -23,6 +26,7 @@ export function NexusContextInspector({
   connectionTone: NexusTone;
   environment: string;
   runtimeVersion: string;
+  runtimeRevision: string;
   failureCount: number;
   proofId?: string;
   receiptId?: string;
@@ -46,6 +50,7 @@ export function NexusContextInspector({
           <div><dt>Environment</dt><dd>{environment}</dd></div>
           <div><dt>Runtime</dt><dd>{connectionLabel}</dd></div>
           <div><dt>Version</dt><dd>{runtimeVersion}</dd></div>
+          <div><dt>Runtime revision</dt><dd><code className="nx-context-drawer__revision" title={runtimeRevision} aria-label={`Runtime revision ${runtimeRevision}`}>{revisionLabel(runtimeRevision)}</code></dd></div>
           <div><dt>Gateway signals</dt><dd>{failureCount ? `${failureCount} unavailable` : "clear"}</dd></div>
         </dl>
       </section>

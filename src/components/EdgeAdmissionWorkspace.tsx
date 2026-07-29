@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   NexusButton,
+  NexusCallout,
   NexusMetric,
   NexusPanel,
   NexusStateView,
@@ -39,6 +40,7 @@ import {
 
 const ADMISSION_REFRESH_INTERVAL_MS = 5_000;
 const ADMISSION_REQUEST_SCOPE = "edge:node_admission:request";
+const ADMISSION_REVIEW_SCOPE = "edge:node_admission:review";
 const TERMINAL_STATES = new Set(["ACTIVE", "DENIED", "EXPIRED", "FAILED", "CANCELLED"]);
 
 type AdmissionForm = {
@@ -112,7 +114,7 @@ function statusTone(value?: string | null): NexusTone {
   const normalized = (value ?? "").toLowerCase();
   if (["active", "admitted", "authorized", "bound", "complete", "completed", "current", "healthy", "issued", "passed", "ready", "recorded", "verified"].includes(normalized)) return "success";
   if (["cancelled", "denied", "expired", "failed", "invalid", "revoked"].includes(normalized)) return "critical";
-  if (["awaiting_authority", "challenge_issued", "degraded", "pending", "requested", "verification_pending"].includes(normalized)) return "attention";
+  if (["awaiting_authority", "awaiting_node_proof", "challenge_issued", "degraded", "pending", "requested", "verification_pending"].includes(normalized)) return "attention";
   return "info";
 }
 
@@ -169,6 +171,9 @@ function safeAdmission(value: RuntimeAdmission): RuntimeAdmission {
       evidenceRefs: stringList(intent.evidenceRefs),
     },
     lifecycleState: String(source.lifecycleState ?? ""),
+    operationalState: typeof source.operationalState === "string" ? source.operationalState : undefined,
+    awaitingNodeProof: typeof source.awaitingNodeProof === "boolean" ? source.awaitingNodeProof : undefined,
+    requiredNextAction: typeof source.requiredNextAction === "string" ? source.requiredNextAction : undefined,
     taskGraph: safeTasks(source.taskGraph),
     policy: safeRecord(source.policy, POLICY_KEYS),
     authority: safeRecord(source.authority, AUTHORITY_KEYS),
@@ -178,6 +183,7 @@ function safeAdmission(value: RuntimeAdmission): RuntimeAdmission {
     firstHeartbeat: safeRecord(source.firstHeartbeat, HEARTBEAT_KEYS),
     proofRefs: stringList(source.proofRefs),
     receiptRefs: stringList(source.receiptRefs),
+    replayId: typeof source.replayId === "string" ? source.replayId : undefined,
     replayRefs: stringList(source.replayRefs),
     failure: source.failure ? {
       category: source.failure.category,
@@ -281,6 +287,7 @@ function lifecycleStages(admission: RuntimeAdmission) {
     { label: "Asset contract", state: recordText(admission.operationalAsset, "lifecycleStatus", "lifecycleState", "state", "status") ?? "not_recorded", detail: recordText(admission.operationalAsset, "operationalAssetId", "nodeId") },
     { label: "First heartbeat", state: recordText(admission.firstHeartbeat, "state", "status") ?? "not_recorded", detail: recordText(admission.firstHeartbeat, "reason", "receivedAt", "observedAt") },
     { label: "Admission", state: admission.lifecycleState, detail: `Updated ${timestamp(admission.updatedAt)}` },
+    { label: "Operational state", state: admission.operationalState ?? "not_recorded", detail: admission.requiredNextAction ?? undefined },
   ];
 }
 
@@ -344,6 +351,7 @@ export function EdgeAdmissionWorkspace({
   const dependenciesReady = dependencies.length > 0 && dependencies.every(dependencyReady);
   const sessionAuthenticated = session.authenticated === true;
   const permissionGranted = session.scopes?.includes(ADMISSION_REQUEST_SCOPE) === true;
+  const reviewPermissionGranted = session.scopes?.includes(ADMISSION_REVIEW_SCOPE) === true;
   const requestedCapabilities = useMemo(() => [...new Set(form.requestedCapabilities.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))], [form.requestedCapabilities]);
   const evidenceRefs = useMemo(() => [...new Set(form.evidenceRefs.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))], [form.evidenceRefs]);
   const capabilitiesValid = requestedCapabilities.length > 0 && requestedCapabilities.every((item) => item.startsWith("nexus."));
@@ -481,6 +489,11 @@ export function EdgeAdmissionWorkspace({
 
   async function mutateAdmission(operation: "cancel" | "reissue") {
     if (!selectedAdmission) return;
+    const requiredPermission = operation === "reissue" ? ADMISSION_REVIEW_SCOPE : ADMISSION_REQUEST_SCOPE;
+    if (!session.scopes?.includes(requiredPermission)) {
+      setActionError(`The authenticated session lacks required permission: ${requiredPermission}.`);
+      return;
+    }
     const idempotencyKey = pendingMutation?.operation === operation && pendingMutation.requestId === selectedAdmission.admissionRequestId
       ? pendingMutation.key
       : `edge-admission-${operation}:${globalThis.crypto.randomUUID()}`;
@@ -536,6 +549,11 @@ export function EdgeAdmissionWorkspace({
   const selectedMission = missions.find((mission) => mission.missionId === form.missionId);
   const stages = selectedAdmission ? lifecycleStages(selectedAdmission) : [];
   const tasks = selectedAdmission ? safeTasks(selectedAdmission.taskGraph) : [];
+  const replayReferences = selectedAdmission
+    ? (selectedAdmission.replayRefs?.length
+      ? stringList(selectedAdmission.replayRefs)
+      : selectedAdmission.replayId ? [selectedAdmission.replayId] : [])
+    : [];
 
   return <section className="edge-admission span-2" aria-label="Governed Edge node admission">
     <NexusPanel className="edge-admission-capability" eyebrow="Constitutional capability" title="Governed node admission" description="Request a vendor-neutral Edge Runtime node through Mission, policy, Authority, independent verification, an Operational Asset Contract, and first signed state." actions={<NexusStatus tone={capability?.available ? "success" : "attention"}>{readable(capability?.availability ?? (capability?.available ? "available" : "unavailable"))}</NexusStatus>}>
@@ -585,14 +603,15 @@ export function EdgeAdmissionWorkspace({
       <NexusPanel className="edge-admission-list" eyebrow="Mission execution" title="Admission requests" description="Select a request to watch its persisted lifecycle. Runtime state remains authoritative." actions={<NexusButton variant="ghost" type="button" onClick={() => void loadAdmissions(true)} loading={refreshing}><RefreshCw />Refresh</NexusButton>}>
         {loading ? <NexusStateView state="loading" title="Resolving governed admissions" detail="NEXUS is reading the tenant- and workspace-scoped Mission Store projection." />
           : loadError && !admissions.length ? <NexusStateView state="failure" title="Admission service unavailable" detail={loadError} />
-            : admissions.length ? <div role="list" className="edge-admission-list-items">{admissions.map((admission) => <button key={admission.admissionRequestId} type="button" role="listitem" data-active={selectedId === admission.admissionRequestId} onClick={() => { setSelectedId(admission.admissionRequestId); setReceipt(null); setReplayEvents([]); }}><span><Waypoints /></span><div><strong>{admission.intent.displayName || admission.admissionRequestId}</strong><small>{admission.admissionRequestId}</small><p>{admission.intent.operationalPurpose}</p></div><aside><NexusStatus tone={statusTone(admission.lifecycleState)}>{readable(admission.lifecycleState)}</NexusStatus><small>{timestamp(admission.updatedAt ?? admission.createdAt)}</small></aside></button>)}</div>
+            : admissions.length ? <div role="list" className="edge-admission-list-items">{admissions.map((admission) => <button key={admission.admissionRequestId} type="button" role="listitem" data-active={selectedId === admission.admissionRequestId} onClick={() => { setSelectedId(admission.admissionRequestId); setReceipt(null); setReplayEvents([]); }}><span><Waypoints /></span><div><strong>{admission.intent.displayName || admission.admissionRequestId}</strong><small>{admission.admissionRequestId}</small><p>{admission.intent.operationalPurpose}</p></div><aside><NexusStatus tone={statusTone(admission.operationalState ?? admission.lifecycleState)}>{readable(admission.operationalState ?? admission.lifecycleState)}</NexusStatus><small>{timestamp(admission.updatedAt ?? admission.createdAt)}</small></aside></button>)}</div>
               : <NexusStateView state="empty" title="No admission requests" detail={capability?.available ? "Submit descriptive intent to begin the governed admission lifecycle." : capability?.reason ?? "Governed node admission is unavailable."} />}
         {loadError && admissions.length ? <p className="edge-admission-warning"><TriangleAlert />Latest admission refresh failed: {loadError}</p> : null}
       </NexusPanel>
     </div>
 
-    <NexusPanel className="edge-admission-inspector" eyebrow="Operational evolution" title={selectedAdmission?.intent.displayName ?? "No admission selected"} description={selectedAdmission ? `${selectedAdmission.admissionRequestId} · Mission ${selectedAdmission.missionId}` : "Select an admission request to inspect policy, Authority, verification, proof, receipt, and Replay lineage."} actions={selectedAdmission && <><NexusStatus tone={statusTone(selectedAdmission.lifecycleState)}>{readable(selectedAdmission.lifecycleState)}</NexusStatus><NexusButton size="sm" variant="ghost" disabled={!operationAllowed(selectedAdmission, "challenge.reissue") || mutating !== null} loading={mutating === "reissue"} onClick={() => void mutateAdmission("reissue")}><RotateCcw />Reissue challenge</NexusButton><NexusButton size="sm" variant="danger" disabled={!operationAllowed(selectedAdmission, "cancel") || mutating !== null} loading={mutating === "cancel"} onClick={() => void mutateAdmission("cancel")}><Ban />Cancel request</NexusButton></>}>
+    <NexusPanel className="edge-admission-inspector" eyebrow="Operational evolution" title={selectedAdmission?.intent.displayName ?? "No admission selected"} description={selectedAdmission ? `${selectedAdmission.admissionRequestId} · Mission ${selectedAdmission.missionId}` : "Select an admission request to inspect policy, Authority, verification, proof, receipt, and Replay lineage."} actions={selectedAdmission && <><NexusStatus tone={statusTone(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}>{readable(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}</NexusStatus><NexusButton size="sm" variant="ghost" title={reviewPermissionGranted ? "Reissue the governed challenge" : `Requires ${ADMISSION_REVIEW_SCOPE}`} disabled={!reviewPermissionGranted || !operationAllowed(selectedAdmission, "challenge.reissue") || mutating !== null} loading={mutating === "reissue"} onClick={() => void mutateAdmission("reissue")}><RotateCcw />Reissue challenge</NexusButton><NexusButton size="sm" variant="danger" title={permissionGranted ? "Cancel the admission request" : `Requires ${ADMISSION_REQUEST_SCOPE}`} disabled={!permissionGranted || !operationAllowed(selectedAdmission, "cancel") || mutating !== null} loading={mutating === "cancel"} onClick={() => void mutateAdmission("cancel")}><Ban />Cancel request</NexusButton></>}>
       {selectedAdmission ? <>
+        {selectedAdmission.awaitingNodeProof && <NexusCallout tone="attention" title="Awaiting physical node proof">{selectedAdmission.requiredNextAction ?? "The real node must claim its challenge and submit independently verifiable proof before NEXUS can verify, admit, or activate it."}</NexusCallout>}
         {selectedAdmission.failure && <aside className="edge-admission-failure"><TriangleAlert /><div><strong>{readable(selectedAdmission.failure.category ?? selectedAdmission.failure.code ?? "Admission failed")}</strong><p>{selectedAdmission.failure.message ?? selectedAdmission.failure.reason ?? "The Runtime recorded a failure without a public explanation."}</p><small>{selectedAdmission.failure.remediation ?? selectedAdmission.failure.nextAction ?? (selectedAdmission.failure.retryable ? "A governed retry may be available." : "Review policy and Evidence before taking further action.")}</small></div><NexusStatus tone="critical">{selectedAdmission.failure.retryable ? "retryable" : "action required"}</NexusStatus></aside>}
         <div className="edge-admission-stages">{stages.map((stage, index) => <article key={stage.label}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{stage.label}</strong><small>{stage.detail || "No public detail recorded"}</small></div><NexusStatus tone={statusTone(stage.state)}>{readable(stage.state)}</NexusStatus></article>)}</div>
         <div className="edge-admission-details">
@@ -601,12 +620,12 @@ export function EdgeAdmissionWorkspace({
           <section><header><ListChecks />Mission task graph</header>{tasks.length ? <ol>{tasks.map((task, index) => <li key={task.taskId || String(index)}><span>{index + 1}</span><div><strong>{task.title}</strong><small>{task.reason || `${task.evidenceRefs.length} Evidence reference(s)`}</small></div><NexusStatus tone={statusTone(task.state)}>{readable(task.state)}</NexusStatus></li>)}</ol> : <p>No task graph has been published for this request.</p>}</section>
           <section><header><FileKey2 />Challenge and verification</header><dl><div><dt>Challenge state</dt><dd>{readable(selectedAdmission.challenge?.state ?? selectedAdmission.challenge?.status)}</dd></div><div><dt>Issued</dt><dd>{timestamp(selectedAdmission.challenge?.issuedAt)}</dd></div><div><dt>Expires</dt><dd>{timestamp(selectedAdmission.challenge?.expiresAt)}</dd></div><div><dt>Attempts remaining</dt><dd>{selectedAdmission.challenge?.attemptsRemaining ?? "Not recorded"}</dd></div><div><dt>Verifier</dt><dd>{recordText(selectedAdmission.verification, "verifierId") ?? "Not recorded"}</dd></div><div><dt>Verification</dt><dd>{readable(recordText(selectedAdmission.verification, "state", "status", "outcome"))}</dd></div></dl><small className="edge-admission-safety">Secure enrollment values, private keys, and signing material never enter this client.</small></section>
           <section><header><HeartPulse />Operational Asset and first state</header><dl><div><dt>Operational Asset</dt><dd>{recordText(selectedAdmission.operationalAsset, "operationalAssetId") ?? "Not created"}</dd></div><div><dt>Canonical node</dt><dd>{recordText(selectedAdmission.operationalAsset, "nodeId") ?? "Derived only after verification"}</dd></div><div><dt>Trust</dt><dd>{readable(recordText(selectedAdmission.operationalAsset, "trustState"))}</dd></div><div><dt>Heartbeat</dt><dd>{readable(recordText(selectedAdmission.firstHeartbeat, "state", "status"))}</dd></div><div><dt>Received</dt><dd>{timestamp(recordText(selectedAdmission.firstHeartbeat, "receivedAt", "observedAt"))}</dd></div></dl></section>
-          <section><header><MapPin />Server-derived accountability</header><dl><div><dt>Tenant</dt><dd>{selectedAdmission.tenantId ?? "Not returned"}</dd></div><div><dt>Workspace</dt><dd>{selectedAdmission.workspaceId ?? "Not returned"}</dd></div><div><dt>Mission</dt><dd>{selectedAdmission.missionId}</dd></div><div><dt>Requesting principal</dt><dd>{selectedAdmission.requestingPrincipalId ?? "Not returned"}</dd></div><div><dt>Projection version</dt><dd>{String(selectedAdmission.version ?? "Not returned")}</dd></div></dl></section>
+          <section><header><MapPin />Server-derived accountability</header><dl><div><dt>Tenant</dt><dd>{selectedAdmission.tenantId ?? "Not returned"}</dd></div><div><dt>Workspace</dt><dd>{selectedAdmission.workspaceId ?? "Not returned"}</dd></div><div><dt>Mission</dt><dd>{selectedAdmission.missionId}</dd></div><div><dt>Requesting principal</dt><dd>{selectedAdmission.requestingPrincipalId ?? "Not returned"}</dd></div><div><dt>Operational state</dt><dd>{readable(selectedAdmission.operationalState)}</dd></div><div><dt>Physical proof</dt><dd>{selectedAdmission.awaitingNodeProof === true ? "Awaiting node proof" : selectedAdmission.awaitingNodeProof === false ? "Not awaiting node proof" : "Not reported"}</dd></div><div><dt>Required next action</dt><dd>{selectedAdmission.requiredNextAction ?? "No next action recorded"}</dd></div><div><dt>Projection version</dt><dd>{String(selectedAdmission.version ?? "Not returned")}</dd></div></dl></section>
         </div>
         <div className="edge-admission-lineage">
           <section><header><FileCheck2 />Proof</header>{stringList(selectedAdmission.proofRefs).map((reference) => <code key={reference}>{reference}</code>)}{!selectedAdmission.proofRefs?.length && <small>No proof reference recorded.</small>}</section>
           <section><header><ReceiptText />Receipt</header>{stringList(selectedAdmission.receiptRefs).map((reference) => <code key={reference}>{reference}</code>)}{receipt && <article><strong>{receipt.id}</strong><span>{readable(receipt.status)} · {receipt.result}</span><small>{timestamp(receipt.recordedAt)}</small></article>}<NexusButton size="sm" variant="ghost" disabled={!selectedAdmission.receiptRefs?.length || artifactLoading !== null} loading={artifactLoading === "receipt"} onClick={() => void loadReceipt()}><ReceiptText />Inspect receipt</NexusButton></section>
-          <section><header><Activity />Operational Replay</header>{stringList(selectedAdmission.replayRefs).map((reference) => <code key={reference}>{reference}</code>)}<NexusButton size="sm" variant="ghost" disabled={!selectedAdmission.replayRefs?.length || artifactLoading !== null} loading={artifactLoading === "replay"} onClick={() => void loadReplay()}><Link2 />Inspect Replay</NexusButton>{replayEvents.length ? <ol>{replayEvents.map((event) => <li key={event.eventId}><div><strong>{readable(event.stage)}</strong><small>{event.summary}</small></div><NexusStatus tone={statusTone(event.status)}>{readable(event.status)}</NexusStatus><time>{timestamp(event.occurredAt)}</time></li>)}</ol> : <small>{selectedAdmission.replayRefs?.length ? "Load the human-readable operational evolution." : "No Replay reference recorded."}</small>}</section>
+          <section><header><Activity />Operational Replay</header>{replayReferences.map((reference) => <code key={reference}>{reference}</code>)}<NexusButton size="sm" variant="ghost" disabled={!replayReferences.length || artifactLoading !== null} loading={artifactLoading === "replay"} onClick={() => void loadReplay()}><Link2 />Inspect Replay</NexusButton>{replayEvents.length ? <ol>{replayEvents.map((event) => <li key={event.eventId}><div><strong>{readable(event.stage)}</strong><small>{event.summary}</small></div><NexusStatus tone={statusTone(event.status)}>{readable(event.status)}</NexusStatus><time>{timestamp(event.occurredAt)}</time></li>)}</ol> : <small>{replayReferences.length ? "Load the human-readable operational evolution." : "No Replay reference recorded."}</small>}</section>
         </div>
       </> : <NexusStateView state="idle" title="Admission inspector standing by" detail="No admission state is inferred before a Runtime projection is selected." />}
     </NexusPanel>

@@ -68,7 +68,7 @@ export function ProjectStudio() {
         <button onClick={() => void analyze()} disabled={busy || !projectId.trim()}><RefreshCw size={15} /> Build project context</button>
       </div>
       {message && <p className="workspace-message" role="status">{message}</p>}
-      <p className="boundary-note">Scope, plan, and price are assembled by the private Runtime from linked evidence. The browser performs no project calculation.</p>
+      <p className="boundary-note">Scope, plan, and price are assembled by the workspace-scoped Runtime from linked evidence. The browser performs no project calculation.</p>
     </DataPanel>
 
     <DataPanel eyebrow="Evidence-backed scope" title="Scope" icon={<FileCheck2 size={18} />}>

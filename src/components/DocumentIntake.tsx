@@ -26,7 +26,7 @@ export function DocumentIntake() {
         await localNexusClient.intakeUpload(file.name, await fileAsBase64(file), projectId.trim() || undefined);
       }
       await refresh();
-      setMessage(`${files.length} document${files.length === 1 ? "" : "s"} ingested by the private NEXUS Runtime with evidence and proof.`);
+      setMessage(`${files.length} document${files.length === 1 ? "" : "s"} ingested by the workspace-scoped NEXUS Runtime with evidence and proof.`);
     } catch (error) { setMessage(messageFrom(error)); }
     finally { setBusy(false); if (input.current) input.current.value = ""; }
   }
@@ -43,8 +43,8 @@ export function DocumentIntake() {
   const unsupported = useMemo(() => sources.filter((source) => source.extractionStatus === "unsupported").length, [sources]);
 
   return <div className="experience-grid local-workspace">
-    <DataPanel eyebrow="Private Runtime capability" title="Document intelligence" icon={<UploadCloud size={18} />} className="span-2">
-      <p className="workspace-intro">Add project documents through the Experience Gateway. The private Runtime extracts evidence, scans sensitive content, records proof, and treats source text as data—not instructions.</p>
+    <DataPanel eyebrow="Runtime-owned capability" title="Document intelligence" icon={<UploadCloud size={18} />} className="span-2">
+      <p className="workspace-intro">Add project documents through the authenticated Experience Gateway. The workspace-scoped Runtime extracts evidence, scans sensitive content, records proof, and treats source text as data—not instructions.</p>
       <div className={`upload-zone${dragging ? " is-dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); void upload(Array.from(event.dataTransfer.files)); }}>
         <UploadCloud size={28} /><div><strong>Drop Nexicron project documents</strong><span>PDF, Office files, CSV, JSON, HTML, text, Markdown, and exported email</span></div>
         <button type="button" onClick={() => input.current?.click()} disabled={busy}>Choose files</button>
@@ -65,8 +65,8 @@ export function DocumentIntake() {
     </DataPanel>
 
     <DataPanel eyebrow="Evidence viewer" title="Recent documents" icon={<FileText size={18} />} className="span-2">
-      <div className="source-list">{sources.length ? sources.slice(0, 12).map((source) => <article key={source.sourceId}><div><strong>{source.normalizedTitle || source.originalFilename || source.sourceId}</strong><span>{source.sourceType || "source"} · {source.extractionStatus || "unknown"}</span></div><code>{source.projectId || "Unlinked"}</code><small>{source.proofId || "Proof unavailable"}</small></article>) : <p>No documents have been ingested in the private Runtime.</p>}</div>
-      <p className="boundary-note"><ShieldAlert size={14} /> Local source of truth · Raw document text remains private · No cloud upload is performed by the portal</p>
+      <div className="source-list">{sources.length ? sources.slice(0, 12).map((source) => <article key={source.sourceId}><div><strong>{source.normalizedTitle || source.originalFilename || source.sourceId}</strong><span>{source.sourceType || "source"} · {source.extractionStatus || "unknown"}</span></div><code>{source.projectId || "Unlinked"}</code><small>{source.proofId || "Proof unavailable"}</small></article>) : <p>No documents have been ingested in this workspace Runtime.</p>}</div>
+      <p className="boundary-note"><ShieldAlert size={14} /> Workspace-scoped source of truth · The portal forwards only operator-selected files · Retention and provider use remain Runtime policy</p>
     </DataPanel>
   </div>;
 }

@@ -1,0 +1,22 @@
+.nx-primary-workspace .hosted-operational-context {
+  grid-template-columns:
+    repeat(2, minmax(110px, 0.8fr))
+    minmax(220px, 1.8fr)
+    repeat(3, minmax(110px, 0.8fr));
+}
+
+@media (max-width: 1180px) {
+  .nx-primary-workspace .hosted-operational-context {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nx-primary-workspace .hosted-operational-context article:first-child {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .nx-primary-workspace .hosted-operational-context {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
