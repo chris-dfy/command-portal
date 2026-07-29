@@ -1,5 +1,9 @@
-import { Activity, Menu, PanelRightClose, PanelRightOpen, RefreshCw, Sparkles } from "lucide-react";
+import { useSyncExternalStore } from "react";
+import { Activity, Menu, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
 import { NexusIconButton } from "../design-system/NexusPrimitives";
+import { assistantPresence } from "../lib/assistant-presence";
+import { NexusAvatar, NEXUS_AVATAR_STATE_LABELS } from "../components/NexusAvatar";
+import "../components/NexusAvatar.css";
 
 export function NexusWorkspaceCommandBar({
   activeLabel,
@@ -39,12 +43,7 @@ export function NexusWorkspaceCommandBar({
         <NexusIconButton label="Refresh Runtime signals" onClick={onRefresh} disabled={loading}>
           <RefreshCw className={loading ? "spin" : ""} aria-hidden="true" />
         </NexusIconButton>
-        <NexusIconButton
-          label={copilotOpen ? "Close NEXUS interaction panel" : "Open NEXUS interaction panel"}
-          onClick={onToggleCopilot}
-          aria-controls="nexus-copilot"
-          aria-expanded={copilotOpen}
-        ><Sparkles aria-hidden="true" /></NexusIconButton>
+        <NexusAssistantLauncher copilotOpen={copilotOpen} onToggleCopilot={onToggleCopilot} />
         <NexusIconButton
           label={inspectorOpen ? "Close context inspector" : "Open context inspector"}
           onClick={onToggleInspector}
@@ -53,6 +52,24 @@ export function NexusWorkspaceCommandBar({
         >{inspectorOpen ? <PanelRightClose aria-hidden="true" /> : <PanelRightOpen aria-hidden="true" />}</NexusIconButton>
       </div>
     </header>
+  );
+}
+
+/**
+ * Assistant launcher: mirrors the copilot's truthful avatar state (voice,
+ * text, mute, interruption, error) through the presentation-only presence
+ * store. It owns no session, credential, or Runtime state.
+ */
+function NexusAssistantLauncher({ copilotOpen, onToggleCopilot }: { copilotOpen: boolean; onToggleCopilot: () => void }) {
+  const presence = useSyncExternalStore(assistantPresence.subscribe, assistantPresence.get, assistantPresence.get);
+  return (
+    <NexusIconButton
+      label={`${copilotOpen ? "Close" : "Open"} NEXUS interaction panel — ${NEXUS_AVATAR_STATE_LABELS[presence.state]}`}
+      onClick={onToggleCopilot}
+      aria-controls="nexus-copilot"
+      aria-expanded={copilotOpen}
+      className="nx-assistant-launcher"
+    ><NexusAvatar state={presence.state} amplitude={presence.amplitude} size="xs" label="" /></NexusIconButton>
   );
 }
 

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, ChevronRight, Maximize2, Mic, MicOff, Minimize2, Send, ShieldCheck, Sparkles, Volume2, VolumeX, X } from "lucide-react";
+import { ChevronRight, Maximize2, Mic, MicOff, Minimize2, Send, ShieldCheck, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import { hifClient } from "../lib/hif-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
+import { assistantPresence } from "../lib/assistant-presence";
+import { deriveAssistantAvatarState, NexusAvatar, NEXUS_AVATAR_STATE_LABELS } from "./NexusAvatar";
+import "./NexusAvatar.css";
 
 type Message = { speaker: "operator" | "nexus"; text: string; limitation?: string };
 type AreaId = "center" | "intake" | "projects" | "voice" | "operations" | "replay" | "missions" | "knowledge" | "edge" | "conclave" | "information" | "health" | "topology" | "providers" | "evidence";
@@ -53,7 +56,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       .then(async (response) => ({ response, body: await response.json() as { ok?: boolean; data?: { state?: string } } }))
       .then(({ response, body }) => setVoiceAvailable(response.ok && Boolean(body.ok) && body.data?.state === "available"))
       .catch(() => setVoiceAvailable(false));
-    return () => { liveClient.current?.stop(); };
+    return () => { liveClient.current?.stop(); assistantPresence.reset(); };
   }, []);
 
   useEffect(() => {
@@ -128,14 +131,21 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     void ask(skill.prompt);
   }
 
+  const voiceConnected = !["idle", "error"].includes(voiceState);
+  const avatarState = deriveAssistantAvatarState({ voiceState, textBusy: busy, hasError: Boolean(error) });
+  const runtimeHealthy = runtimeState === "Healthy";
+
+  useEffect(() => {
+    assistantPresence.set({ state: avatarState, amplitude, voiceConnected });
+  }, [avatarState, amplitude, voiceConnected]);
+
   if (!open) return null;
 
-  const voiceConnected = !["idle", "error"].includes(voiceState);
   return <>
     <aside id="nexus-copilot" className={`nexus-copilot${expanded ? " is-expanded" : ""}`} aria-label="NEXUS executive copilot">
       <audio ref={audio} autoPlay muted={nexusMuted} className="voice-audio" aria-hidden="true" />
       <header className="nexus-copilot__header">
-        <div className="nexus-copilot__mark"><Bot size={23} /></div>
+        <div className="nexus-copilot__mark"><NexusAvatar state={avatarState} amplitude={amplitude} size="sm" micMuted={microphoneMuted && voiceConnected} unavailable={!runtimeHealthy && !voiceConnected && !busy} /></div>
         <div><strong>NEXUS</strong><span>Enterprise executive operating intelligence</span></div>
         <button onClick={() => onExpandedChange(!expanded)} aria-label={expanded ? "Restore NEXUS panel" : "Expand NEXUS panel"}>{expanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
         <button onClick={() => { if (voiceConnected) stopVoice(); onExpandedChange(false); onOpenChange(false); }} aria-label="Close NEXUS panel"><X size={18} /></button>
@@ -155,7 +165,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       </section>
 
       <div className="nexus-copilot__voice">
-        <div><span className="voice-dot" style={{ transform: `scale(${1 + amplitude * 1.8})` }} /><strong>{voiceConnected ? microphoneMuted ? "Microphone muted" : voiceState : voiceAvailable ? "Voice ready" : "Voice unavailable"}</strong></div>
+        <div><NexusAvatar state={avatarState} amplitude={amplitude} size="xs" micMuted={microphoneMuted && voiceConnected} unavailable={!voiceAvailable && !voiceConnected} label={voiceConnected ? NEXUS_AVATAR_STATE_LABELS[avatarState] : voiceAvailable ? "Voice ready" : "Voice unavailable"} /><strong>{voiceConnected ? microphoneMuted ? "Microphone muted" : voiceState : voiceAvailable ? "Voice ready" : "Voice unavailable — Runtime voice cannot be established"}</strong></div>
         <div className="nexus-copilot__voice-controls">
           {voiceConnected && <>
             <button type="button" data-active={microphoneMuted} aria-pressed={microphoneMuted} onClick={toggleMicrophoneMute}>{microphoneMuted ? <MicOff size={15} /> : <Mic size={15} />}{microphoneMuted ? "Unmute mic" : "Mute mic"}</button>
@@ -192,6 +202,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     {introduced && <div className="nexus-introduction" role="dialog" aria-modal="true" aria-labelledby="nexus-introduction-title">
       <section>
         <button className="nexus-introduction__close" onClick={dismissIntroduction} aria-label="Dismiss introduction"><X size={20} /></button>
+        <div className="nexus-introduction__avatar"><NexusAvatar state="idle" size="lg" label="NEXUS assistant avatar" /></div>
         <span>Meet NEXUS</span>
         <h2 id="nexus-introduction-title">Your enterprise executive operating intelligence</h2>
         <p>NEXUS observes registered operational context, explains what it understands, recommends governed next steps, and coordinates bounded work across the platform.</p>
