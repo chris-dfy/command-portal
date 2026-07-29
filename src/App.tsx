@@ -13,6 +13,7 @@ import { OperationsCenter } from "./components/OperationsCenter";
 import { OperationsWorkspace } from "./components/OperationsWorkspace";
 import { OperationalAccessGate } from "./components/OperationalAccessGate";
 import { ProjectStudio } from "./components/ProjectStudio";
+import { ReleaseRevision } from "./components/ReleaseRevision";
 import { RuntimeHealth } from "./components/RuntimeHealth";
 import { RuntimeInformation } from "./components/RuntimeInformation";
 import { RuntimeTopology } from "./components/RuntimeTopology";
@@ -46,6 +47,7 @@ import "./design-system/nexus-tokens.css";
 import "./design-system/nexus-foundation.css";
 import "./appearance/appearance-workspace.css";
 import "./platform/nexus-platform.css";
+import "./components/HostedOperationalContext.css";
 
 type AreaId = NexusPlatformAreaId | "documents" | "projects" | "voice" | "providers" | "evidence";
 type Area = { id: AreaId; label: string; detail: string; icon: LucideIcon; group: "Platform" | "Capabilities" };
@@ -242,12 +244,26 @@ function HostedCapabilityBoundary({
   </DataPanel>;
 }
 
-function Evidence({ snapshot }: { snapshot: RuntimeSnapshot }) {
+function Evidence({
+  snapshot,
+  runtimeCommit,
+  programAlphaCommit,
+}: {
+  snapshot: RuntimeSnapshot;
+  runtimeCommit: string;
+  programAlphaCommit: string;
+}) {
   const proofs = list(snapshot.proofs?.data);
   const receipts = list(snapshot.receipts?.data);
   return <div className="experience-grid">
     <DataPanel eyebrow="Decision Flight Recorder" title="Proof references" icon={<FileCheck2 size={18} />}>{proofs.length ? <div className="reference-list">{proofs.map((proof, index) => <article key={String(proof.id ?? index)}><strong>{String(proof.id ?? "Proof")}</strong><StatusPill value={proof.verified ? "verified" : "recorded"} /></article>)}</div> : <EmptyRecord />}</DataPanel>
     <DataPanel eyebrow="Outcome Ledger" title="Execution receipts" icon={<FileCheck2 size={18} />}>{receipts.length ? <div className="reference-list">{receipts.map((receipt, index) => <article key={String(receipt.id ?? index)}><strong>{String(receipt.id ?? "Receipt")}</strong></article>)}</div> : <EmptyRecord>No execution receipts are available.</EmptyRecord>}</DataPanel>
+    <DataPanel eyebrow="Release provenance" title="Verified deployment revisions" icon={<ShieldCheck size={18} />} className="span-2">
+      <div className="information-grid release-provenance-grid">
+        <ReleaseRevision label="Runtime commit" value={runtimeCommit} />
+        <ReleaseRevision label="Program Alpha commit" value={programAlphaCommit} />
+      </div>
+    </DataPanel>
   </div>;
 }
 
@@ -258,7 +274,7 @@ export function App() {
   const [active, setActive] = useState<AreaId>(routeFromLocation);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [copilotExpanded, setCopilotExpanded] = useState(false);
@@ -436,7 +452,6 @@ export function App() {
   const showsHostedContext = operationalSession.authenticated && (OPERATIONAL_AREAS.has(active) || HOSTED_CONTRACT_AREAS.has(active));
   const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length) ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section> : requiresOperationalSession && !operationalSession.authenticated ? <OperationalAccessGate workspace={current.label} onAuthenticated={acceptOperationalSession} /> : <>
     {showsHostedContext && <section className="hosted-operational-context" aria-label="Authenticated hosted operational context">
-      <article><span>Runtime commit</span><code title={deployedRuntimeCommit}>{deployedRuntimeCommit}</code></article>
       <article><span>Gateway transport</span><StatusPill value={state} /></article>
       <article><span>Capability state</span><StatusPill value={hostedCapability.state} /></article>
       <article className="hosted-operational-context__reason"><span>Capability reason</span><strong>{hostedCapability.reason}</strong></article>
@@ -451,12 +466,12 @@ export function App() {
     {active === "knowledge" && <KnowledgeWorkspace snapshot={snapshot} session={operationalSession} />}
     {active === "edge" && <><EdgeRuntime snapshot={snapshot} /><RuntimeTopology snapshot={snapshot} /></>}
     {active === "mission-control" && <OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />}
-    {active === "settings" && <div className="settings-workspaces"><AppearanceWorkspace appearance={appearance} /><RuntimeInformation snapshot={snapshot} connectionState={state} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
+    {active === "settings" && <div className="settings-workspaces"><AppearanceWorkspace appearance={appearance} /><RuntimeInformation snapshot={snapshot} connectionState={state} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
     {active === "documents" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Document Intelligence" capability={hostedCapability}><DocumentIntake /></HostedCapabilityBoundary>}
     {active === "projects" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Projects" capability={hostedCapability}><ProjectStudio /></HostedCapabilityBoundary>}
     {active === "voice" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Voice Operations" capability={hostedCapability}><VoiceWorkspace /></HostedCapabilityBoundary>}
     {active === "providers" && <Providers snapshot={snapshot} />}
-    {active === "evidence" && <Evidence snapshot={snapshot} />}
+    {active === "evidence" && <Evidence snapshot={snapshot} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />}
   </>;
 
   return <div
@@ -524,6 +539,7 @@ export function App() {
         connectionTone={connectionTone}
         environment={environment}
         runtimeVersion={runtimeVersion}
+        runtimeRevision={deployedRuntimeCommit}
         failureCount={failures.length}
         proofId={proofId ? String(proofId) : undefined}
         receiptId={receiptId ? String(receiptId) : undefined}

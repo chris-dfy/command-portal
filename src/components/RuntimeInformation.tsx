@@ -2,11 +2,22 @@ import { Boxes, FileWarning, ServerCog, ShieldCheck } from "lucide-react";
 import type { ConnectionState, RuntimeSnapshot } from "../lib/types";
 import { displayLabel } from "../lib/presentation";
 import { DataPanel, EmptyRecord } from "./DataPanel";
+import { ReleaseRevision } from "./ReleaseRevision";
 import { StatusPill } from "./StatusPill";
 
 const record = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
-export function RuntimeInformation({ snapshot, connectionState }: { snapshot: RuntimeSnapshot; connectionState: ConnectionState }) {
+export function RuntimeInformation({
+  snapshot,
+  connectionState,
+  runtimeCommit,
+  programAlphaCommit,
+}: {
+  snapshot: RuntimeSnapshot;
+  connectionState: ConnectionState;
+  runtimeCommit: string;
+  programAlphaCommit: string;
+}) {
   const status = record(snapshot.status?.data);
   const environment = record(snapshot.environment?.data);
   const providers = Array.isArray(snapshot.providers?.data) ? snapshot.providers.data as Record<string, unknown>[] : [];
@@ -24,6 +35,8 @@ export function RuntimeInformation({ snapshot, connectionState }: { snapshot: Ru
         <article><span>Connection</span><strong>{connectionState}</strong></article>
         <article><span>Provider registry</span><strong>{providers.length} entries</strong></article>
         <article><span>Capabilities</span><strong>{capabilities.length} registered</strong></article>
+        <ReleaseRevision label="Runtime commit" value={runtimeCommit} />
+        <ReleaseRevision label="Program Alpha commit" value={programAlphaCommit} />
       </div>
     </DataPanel>
     <DataPanel eyebrow="Truth state" title="Preserved boundaries" icon={<ShieldCheck size={18} />}>
