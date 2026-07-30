@@ -229,7 +229,7 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.match(copilot, /hifClient\.start\(request, "text", \{\}, conversationId\.current\)/);
   assert.match(copilot, /RealtimeVoiceClient/);
   assert.match(copilot, /Model-native reasoning is labeled\. Runtime evidence remains authoritative/);
-  assert.match(copilot, /plan, scope, and price a Nexicron project/i);
+  assert.match(copilot, /plan, scope, and price a NEXUS project/i);
   for (const control of ["Mute mic", "Mute NEXUS", "Unmute mic", "Unmute NEXUS"]) assert.match(copilot, new RegExp(control));
   assert.match(copilot, /if \(voiceConnected\) stopVoice\(\)/);
   assert.match(hif, /conversationId/);
@@ -561,4 +561,25 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
     "VoiceWorkspace must reject unavailable typed text routing before forwarding",
   );
   assert.match(voice, /disabled=\{!textAction\.available/);
+});
+
+test("active assistant and Experience presentation copy carries no legacy product identity", async () => {
+  // Migrated surfaces: user-facing assistant and Experience copy must use canonical NEXUS language.
+  // Preserved on purpose: config/brand.json parentBrand (compatibility data), tenant identifiers,
+  // URLs, external contract fixtures in gateway tests, docs, and historical CSS commentary.
+  const activePresentationSources = [
+    "../src/components/NexusCopilot.tsx",
+    "../src/components/VoiceWorkspace.tsx",
+    "../src/components/DocumentIntake.tsx",
+    "../src/components/ProjectStudio.tsx",
+    "../src/components/NexusAvatar.tsx",
+    "../src/platform/NexusWorkspaceChrome.tsx",
+    "../src/appearance/themes.ts",
+  ];
+  for (const path of activePresentationSources) {
+    const source = await read(path);
+    assert.equal(/Nexicron/i.test(source), false, `${path} must not reintroduce the legacy product identity in active copy`);
+  }
+  const copilot = await read("../src/components/NexusCopilot.tsx");
+  assert.match(copilot, /Help plan a NEXUS project/);
 });

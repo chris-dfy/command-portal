@@ -30,7 +30,7 @@ export const NEXUS_THEMES: readonly NexusTheme[] = [
   {
     id: "nexus-noir",
     name: "NEXUS Noir",
-    description: "Nexicron charcoal with restrained mint intelligence light.",
+    description: "Executive charcoal with restrained mint intelligence light.",
     colorScheme: "dark",
     colors: {
       background: "#1e1e1e",
