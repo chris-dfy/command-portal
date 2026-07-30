@@ -8,12 +8,21 @@ This project is a standalone command portal: a React frontend served by a Node.j
 
 - **Runtime read credential** -- `COMMAND_PORTAL_RUNTIME_READ_TOKEN` lets the BFF read from the upstream runtime API. Exposure would let an attacker query the upstream system directly within that token's scope.
 - **Runtime-derived operational data** -- status, readiness, claims, proofs, receipts, and related portal data may be sensitive even in read-only form because it reflects internal system state.
-- **Managed human identity ingress** -- Replit identity headers are trusted only
-  on the provider-managed deployment and bound host, with the canonical issuer
-  and provider-owned `REPL_ID` audience. Wrong-host, unmanaged, forged,
-  duplicated, missing, or service-principal identities fail closed. Session
-  cookies retain only a keyed registration fingerprint, never the provider
-  subject binding.
+- **Managed human identity ingress** -- the authoritative Replit path is the
+  Agent-provisioned authorization-code flow with PKCE, state, nonce, bounded
+  `max_age`, and signed `auth_time`. It is accepted only on the exact
+  provider-owned development host or the configured published host in its
+  matching deployment mode, with forwarded HTTPS, canonical issuer, and the
+  provider-owned `REPL_ID` audience. Bare or forged identity headers never
+  participate in this path. The callback immediately reduces the raw provider
+  subject to an opaque binding and retains neither provider tokens nor the raw
+  subject.
+- **Provider transaction and session cookies** -- the short-lived OIDC
+  transaction and provider session are authenticated-encrypted independently
+  with AES-256-GCM and HKDF-separated keys. Their exact contracts,
+  configuration digest, key ID, expiry, and purpose must match; neither cookie
+  can substitute for the other, and the opaque provider binding is not exposed
+  to the browser.
 - **Portal integrity and truth posture** -- the portal is expected to preserve its declared truth boundary (`productionReady=false`, `secretValuesExposed=false`, non-live fixture labeling). Incorrect or forged values could mislead operators.
 - **Service availability** -- the BFF fans out to multiple upstream routes for `/api/portal/snapshot`; resource exhaustion or hanging upstream calls can degrade portal availability.
 - **Static browser bundle and visible configuration** -- frontend assets in `dist/` and browser-visible config from `config/brand.json` must not contain secrets or dangerous active content.
@@ -32,10 +41,19 @@ This project is a standalone command portal: a React frontend served by a Node.j
 ## Trust Boundaries
 
 - **Browser to BFF** -- all browser input crosses into `server/portal-server.mjs`. The browser is untrusted, so route, method, origin, and query validation must be enforced server-side.
-- **Replit Auth to BFF** -- provider identity is accepted only through the
-  Agent-provisioned server verifier or strict configured JWT/JWKS verification.
-  Browser-supplied user headers, provider subjects, and privilege claims are
-  untrusted.
+- **Replit Auth to BFF** -- the interactive Agent-provisioned OIDC
+  authorization-code callback is authoritative when enabled. It binds the
+  callback to the sealed transaction's exact origin, state, nonce, PKCE verifier,
+  issuer, `REPL_ID` audience, and recent provider authentication time. The
+  strict configured JWT/JWKS verifier is a compatibility fallback only when
+  interactive auth is disabled. Browser-supplied user headers, provider
+  subjects, and privilege claims are untrusted.
+- **Bootstrap to final configuration** -- interactive provider authentication
+  may be enabled while Registered Executive sessions remain disabled. That
+  bootstrap may establish only the encrypted provider session. After the
+  server-owned registration exists in both provider secret managers and the
+  exact Runtime is deployed, the same attested Experience source may enable the
+  final gate; only then may the provider session reach Runtime verification.
 - **Registration boundary** -- a verified opaque provider subject maps to one
   active server-owned non-production registration. The registration fixes
   human principal, tenant, workspace, role, scopes, policy, version,
@@ -65,12 +83,13 @@ This project is a standalone command portal: a React frontend served by a Node.j
 ### Spoofing
 
 An attacker may forge a Replit token or bare user header, substitute issuer or
-audience, select a registered principal, or replay an assertion. The BFF must
-verify provider identity server-side and derive all scope from the exact
-registration. The Runtime must verify service authentication, signature,
-algorithm, key ID, issuer, audience, service/client binding, session version,
-revocation checkpoint, expiry, policy, and single-use identifier. Unknown or
-inactive registrations fail closed.
+audience, alter or replay the OIDC transaction, change callback state, reuse a
+cookie for the wrong purpose, select a registered principal, or replay a human
+assertion. The BFF must verify provider identity server-side and derive all
+scope from the exact registration. The Runtime must verify service
+authentication, signature, algorithm, key ID, issuer, audience, service/client
+binding, session version, revocation checkpoint, expiry, policy, and single-use
+identifier. Unknown or inactive registrations fail closed.
 
 ### Tampering
 
@@ -84,7 +103,8 @@ session, and failed revoke must still clear the local cookie.
 ### Information Disclosure
 
 Runtime tokens, provider tokens, raw provider subjects, subject bindings,
-cookie-signing secrets, assertion secrets, and assertion tokens must never
+provider-session secrets, cookie-signing secrets, assertion secrets, and
+assertion tokens must never
 appear in client bundles, API responses, logs, source maps, receipts, or
 browser-visible configuration. The UI retains only the HttpOnly cookie
 implicitly and the CSRF value in memory. Upstream errors remain normalized;
@@ -92,12 +112,13 @@ static serving remains confined to `dist/`.
 
 ### Denial of Service
 
-The portal depends on provider JWKS and Runtime responsiveness. Provider JWKS
-fetches use bounded timeouts, incrementally enforced byte ceilings, cache
-lifetime, coalesced refresh, and a bounded unknown-key refresh interval.
-Runtime responses are read incrementally through a one-MiB ceiling. Login,
-read, and revoke do not retry unboundedly. Private deployment visibility
-reduces public reachability but does not replace these bounds.
+The portal depends on bounded provider OIDC discovery/exchange and Runtime
+responsiveness. The compatibility JWT path's provider JWKS fetches use bounded
+timeouts, incrementally enforced byte ceilings, cache lifetime, coalesced
+refresh, and a bounded unknown-key refresh interval. Runtime responses are read
+incrementally through a one-MiB ceiling. Login, read, and revoke do not retry
+unboundedly. Private deployment visibility reduces public reachability but does
+not replace these bounds.
 
 ### Elevation of Privilege
 
@@ -111,11 +132,19 @@ authorization, receipt, and postcondition.
 
 ## Mission 3 required negative matrix
 
-Verification covers forged signature, unsupported algorithm, unknown key,
-issuer/audience mismatch, expired/not-yet-valid or overlong provider token,
-bare or client-selected identity claims, unknown/inactive/duplicate
-registration, raw subject retention, tenant/workspace/role/scope mismatch,
-policy ID/version/digest mismatch, session-version and revocation-checkpoint
-mismatch, expired/revoked cookie, assertion replay, assertion expiry, CSRF
-failure, and Authority/Decision/Mission/action injection. Each rejection must
-be sanitized and must preserve `secretValuesExposed=false`.
+Verification covers callback transaction absence, tamper, expiry, state
+mismatch, configuration drift, and cookie-purpose substitution; wrong host,
+wrong deployment mode, missing or non-HTTPS forwarding; issuer/audience
+mismatch; missing, future, or stale `auth_time`; forged identity headers;
+provider-session confidentiality, tamper, expiry, and configuration drift; and
+the bootstrap-cookie transition into the final exact Runtime verification.
+The compatibility JWT path additionally covers forged signatures, unsupported
+algorithms, unknown keys, and expired/not-yet-valid or overlong tokens.
+Registration and Runtime verification cover bare or client-selected identity
+claims, unknown/inactive/duplicate registration, raw subject retention,
+tenant/workspace/role/scope mismatch, policy ID/version/digest mismatch,
+session-version and revocation-checkpoint mismatch, expired/revoked cookies,
+assertion replay, assertion expiry, executive-session CSRF failure, provider
+logout GET/cross-origin/no-session rejection, active-session logout interlock,
+and Authority/Decision/Mission/action injection. Each rejection must be
+sanitized and must preserve `secretValuesExposed=false`.

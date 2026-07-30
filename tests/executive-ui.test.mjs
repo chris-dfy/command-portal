@@ -68,12 +68,23 @@ test("Replit publishes the fixed hosted binding without committing server secret
     'COMMAND_PORTAL_WORKSPACE_ID = "primary"',
     'COMMAND_PORTAL_OPERATOR_ROLE = "operator"',
     'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,actions:simulate,evidence:write,edge:node_admission:request"',
+    'COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED = "true"',
+    'COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF = "secret-manager:experience-gateway/mission-3/provider-session-current"',
+    'COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID = "provider-session-current"',
+    'COMMAND_PORTAL_REPLIT_AUTH_ISSUER = "https://replit.com/oidc"',
+    'COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_ID = "registered-executive-session-policy"',
+    'COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION = "1.0.0"',
+    'COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST = "sha256:b1f6a2cdf2153ac48236867e5e1aeab794842256410f3f314fc2655008a2be78"',
   ]) assert.match(replit, new RegExp(binding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   for (const secretName of [
     "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN",
     "COMMAND_PORTAL_OPERATOR_ACCESS_KEY",
     "COMMAND_PORTAL_RUNTIME_READ_TOKEN",
     "COMMAND_PORTAL_SESSION_SECRET",
+    "COMMAND_PORTAL_PROVIDER_SESSION_SECRET",
+    "COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET",
+    "COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON",
+    "NEXUS_HUMAN_SESSION_ASSERTION_SECRET",
     "NEXUS_CONTEXT_ASSERTION_SECRET",
   ]) assert.doesNotMatch(replit, new RegExp(`^${secretName}\\s*=`, "m"));
 });
@@ -95,6 +106,24 @@ test("hosted workspaces bootstrap automatically without a browser credential for
   }
   assert.match(operations, /Private workspace managed/);
   assert.match(operations, /Authentication and access scope do not create operational Authority/);
+});
+
+test("provider sign-out stays within the CSP-closed same-origin request boundary", async () => {
+  const [component, server] = await Promise.all([
+    read("../src/components/RegisteredExecutiveSession.tsx"),
+    read("../server/portal-server.mjs"),
+  ]);
+  assert.match(
+    component,
+    /fetch\("\/api\/auth\/logout", \{\s*method: "POST"/,
+  );
+  assert.match(
+    component,
+    /window\.location\.assign\(payload\.providerLogoutUrl\)/,
+  );
+  assert.doesNotMatch(component, /action="\/api\/auth\/logout"/);
+  assert.doesNotMatch(component, /href="\/api\/auth\/logout"/);
+  assert.match(server, /form-action 'none'/);
 });
 
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {

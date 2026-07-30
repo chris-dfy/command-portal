@@ -911,7 +911,7 @@ test("configuration pins the accepted policy and purpose-bound identities and re
   }
 });
 
-test("managed Replit configuration derives provider trust only from canonical issuer and REPL_ID", () => {
+test("published interactive Replit configuration derives provider trust only from canonical issuer and REPL_ID", () => {
   const managedIssuer = "https://replit.com/oidc";
   const managedAudience = "repl-managed-nonproduction";
   const managedRegistration = {
@@ -929,6 +929,12 @@ test("managed Replit configuration derives provider trust only from canonical is
     replitDomains: "portal.example.replit.app",
     replitAuthIssuer: managedIssuer,
     replitAuthAudience: managedAudience,
+    providerInteractiveAuthEnabled: true,
+    providerSessionSecret:
+      "managed-interactive-provider-session-secret-material-0001",
+    providerSessionSecretRef:
+      "secret-manager:experience/provider-session-current",
+    providerSessionKeyId: "provider-session-current",
     executiveRegistrations: {
       ...registryDocument,
       principals: [managedRegistration],

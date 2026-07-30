@@ -97,6 +97,44 @@ export function RegisteredExecutiveSession() {
     }
   }
 
+  async function providerLogout() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+      const payload = await response.json() as {
+        providerLogoutUrl?: string;
+        error?: { message?: string };
+      };
+      if (
+        !response.ok
+        || typeof payload.providerLogoutUrl !== "string"
+        || !payload.providerLogoutUrl.startsWith("https://replit.com/")
+      ) {
+        throw new Error(
+          payload.error?.message
+            ?? "Provider sign-out could not be completed safely.",
+        );
+      }
+      window.location.assign(payload.providerLogoutUrl);
+    } catch (caught) {
+      setMessage(
+        caught instanceof Error
+          ? caught.message
+          : "Provider sign-out could not be completed safely.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const session = envelope?.session;
   const canonical = isRegisteredExecutiveSessionRecord(session) ? session : null;
   const active = canonical?.state === "active";
@@ -149,9 +187,16 @@ export function RegisteredExecutiveSession() {
       only by server verification and registration; this client stores no provider token or provider subject.
     </p>
     <p className="boundary-note">
-      Need a provider sign-in first? <a href="/api/auth/login">Sign in with Replit</a> or{" "}
-      <a href="/api/auth/logout">sign out</a>. Signing in only authenticates you at the provider;
-      it grants no Authority, Decision, Mission, approval, or action authorization.
+      Need a provider sign-in first? <a href="/api/auth/login">Sign in with Replit</a>
+      {!active && <> or use the verified same-origin provider sign-out control below</>}.
+      {active && <> Revoke the NEXUS session before signing out of Replit.</>} Signing in only
+      authenticates you at the provider; it grants no Authority, Decision, Mission, approval,
+      or action authorization.
     </p>
+    {!active && <div className="operation-actions">
+      <button type="button" className="secondary-action" onClick={() => void providerLogout()} disabled={busy}>
+        <ShieldX size={15} /> Sign out of Replit
+      </button>
+    </div>}
   </DataPanel>;
 }

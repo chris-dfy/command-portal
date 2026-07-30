@@ -24,6 +24,7 @@ import {
   ExecutiveSessionRuntimeFailure,
 } from "./executive-session-runtime.mjs";
 import {
+  createReplitAuthIdentityVerifier,
   REPLIT_AUTH_CANONICAL_ISSUER,
 } from "./replit-auth-provider.mjs";
 import {
@@ -72,7 +73,10 @@ const HUMAN_SESSION_ASSERTION_AUDIENCE = "nexus-runtime";
 const HUMAN_SESSION_ASSERTION_KEY_ID = "executive-session-current";
 const HUMAN_SESSION_SERVICE_BINDING_ID = "command-portal-experience-gateway";
 const EXECUTIVE_SESSION_COOKIE_KEY_ID = "executive-session-cookie-current";
+const PROVIDER_SESSION_KEY_ID = "provider-session-current";
 const STABLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{2,191}$/;
+const HOST_PATTERN =
+  /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 const SECRET_REFERENCE_PATTERN = /^(?:env|secret-manager):[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/;
 
 export const RUNTIME_ROUTES = Object.freeze({
@@ -641,6 +645,21 @@ export function loadConfig(overrides = {}) {
   const operationalApiBaseUrl = safeOperationalApiUrl(String(
     overrides.operationalApiBaseUrl ?? process.env.COMMAND_PORTAL_OPERATIONAL_API_BASE_URL ?? "https://nexus-operations.invalid"
   ));
+  const operationalRuntimeToken = operationalEnabled
+    ? requiredSecret(
+      overrides.operationalRuntimeToken
+        ?? process.env.COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN,
+      "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN",
+    )
+    : "";
+  const operationalSessionSecret = operationalEnabled
+    ? requiredSecret(
+      overrides.operationalSessionSecret
+        ?? process.env.COMMAND_PORTAL_SESSION_SECRET,
+      "COMMAND_PORTAL_SESSION_SECRET",
+      32,
+    )
+    : "";
   const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,actions:simulate,actions:execute,approvals:decide,evidence:write,knowledge:promote,edge:node_admission:request")
     .split(",").map((item) => item.trim()).filter(Boolean);
   const replitDeployment = enabled(overrides.replitDeployment ?? process.env.REPLIT_DEPLOYMENT);
@@ -658,6 +677,23 @@ export function loadConfig(overrides = {}) {
     .split(",")
     .map((item) => item.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, ""))
     .filter(Boolean);
+  const replitDevDomain = String(
+    overrides.replitDevDomain ?? process.env.REPLIT_DEV_DOMAIN ?? "",
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "");
+  if (
+    replitDevDomain
+    && (
+      !HOST_PATTERN.test(replitDevDomain)
+      || !replitDevDomain.endsWith(".replit.dev")
+    )
+  ) {
+    throw new Error("REPLIT_DEV_DOMAIN must be an exact Replit development host.");
+  }
   if (operationalEnabled && operationalSessionMode === "automatic_private_workspace") {
     if (!replitDeployment || !operationalCookieSecure || replitDomains.length === 0) {
       throw new Error("Automatic hosted sessions require REPLIT_DEPLOYMENT=1, at least one REPLIT_DOMAINS binding, and Secure cookies.");
@@ -667,6 +703,19 @@ export function loadConfig(overrides = {}) {
     overrides.executiveSessionEnabled
       ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED,
   );
+  const providerInteractiveAuthEnabled = enabled(
+    overrides.providerInteractiveAuthEnabled
+      ?? process.env.COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED,
+  );
+  if (
+    executiveSessionEnabled
+    && replitDeployment
+    && !providerInteractiveAuthEnabled
+  ) {
+    throw new Error(
+      "Published Registered Executive sessions require the attested interactive Replit Auth path.",
+    );
+  }
   const executiveSessionCookieSecure = operationalCookieSecure;
   const executiveSessionTtlSeconds = integer(
     overrides.executiveSessionTtlSeconds
@@ -756,7 +805,7 @@ export function loadConfig(overrides = {}) {
       "Managed Replit Auth requires a stable provider-owned REPL_ID.",
     );
   }
-  const replitAuthIssuer = executiveSessionEnabled
+  const replitAuthIssuer = executiveSessionEnabled || providerInteractiveAuthEnabled
     ? stablePublicIdentifier(
       overrides.replitAuthIssuer
         ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_ISSUER
@@ -764,7 +813,7 @@ export function loadConfig(overrides = {}) {
       "COMMAND_PORTAL_REPLIT_AUTH_ISSUER",
     )
     : "";
-  const replitAuthAudience = executiveSessionEnabled
+  const replitAuthAudience = executiveSessionEnabled || providerInteractiveAuthEnabled
     ? stablePublicIdentifier(
       overrides.replitAuthAudience
         ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_AUDIENCE
@@ -825,17 +874,25 @@ export function loadConfig(overrides = {}) {
       "COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST",
     )
     : "";
-  const providerInteractiveAuthEnabled = enabled(
-    overrides.providerInteractiveAuthEnabled
-      ?? process.env.COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED,
-  );
   const providerSessionSecret = providerInteractiveAuthEnabled
     ? requiredSecret(
-      overrides.providerSessionSecret ?? process.env.SESSION_SECRET,
-      "SESSION_SECRET",
+      overrides.providerSessionSecret
+        ?? process.env.COMMAND_PORTAL_PROVIDER_SESSION_SECRET,
+      "COMMAND_PORTAL_PROVIDER_SESSION_SECRET",
       32,
     )
     : "";
+  const providerSessionSecretRef = optionalSecretReference(
+    overrides.providerSessionSecretRef
+      ?? process.env.COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF,
+    "COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF",
+  );
+  const providerSessionKeyId = stablePublicIdentifier(
+    overrides.providerSessionKeyId
+      ?? process.env.COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID
+      ?? PROVIDER_SESSION_KEY_ID,
+    "COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID",
+  );
   const providerSessionTtlSeconds = integer(
     overrides.providerSessionTtlSeconds
       ?? process.env.COMMAND_PORTAL_PROVIDER_SESSION_TTL_SECONDS,
@@ -843,8 +900,10 @@ export function loadConfig(overrides = {}) {
     60,
   );
   if (providerInteractiveAuthEnabled) {
-    if (!executiveSessionEnabled) {
-      throw new Error("Interactive Replit Auth requires registered executive sessions to be enabled.");
+    if (!providerSessionSecretRef) {
+      throw new Error(
+        "Interactive Replit Auth requires a provider-session secret-manager reference.",
+      );
     }
     if (!STABLE_ID_PATTERN.test(replitId)) {
       throw new Error("Interactive Replit Auth requires a stable provider-owned REPL_ID.");
@@ -858,15 +917,17 @@ export function loadConfig(overrides = {}) {
     if (providerSessionTtlSeconds > 86_400) {
       throw new Error("Interactive provider session lifetime exceeds the accepted bound.");
     }
-    if (
-      new Set([
+    const purposeBoundSecrets = [
         runtimeToken,
         contextAssertionSecret,
-        executiveSessionCookieSecret,
-        humanSessionAssertionSecret,
         providerSessionSecret,
-      ]).size !== 5
-    ) {
+        ...(operationalRuntimeToken ? [operationalRuntimeToken] : []),
+        ...(operationalSessionSecret ? [operationalSessionSecret] : []),
+        ...(executiveSessionEnabled
+          ? [executiveSessionCookieSecret, humanSessionAssertionSecret]
+          : []),
+      ];
+    if (new Set(purposeBoundSecrets).size !== purposeBoundSecrets.length) {
       throw new Error("The interactive provider session secret must be purpose-bound and distinct.");
     }
   }
@@ -959,8 +1020,9 @@ export function loadConfig(overrides = {}) {
     localTimeoutMs: integer(overrides.localTimeoutMs ?? process.env.COMMAND_PORTAL_LOCAL_REQUEST_TIMEOUT_MS, 30_000),
     operationalEnabled,
     operationalApiBaseUrl,
-    operationalRuntimeToken: operationalEnabled ? requiredSecret(overrides.operationalRuntimeToken ?? process.env.COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN, "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN") : "",
-    operationalSessionSecret: operationalEnabled ? requiredSecret(overrides.operationalSessionSecret ?? process.env.COMMAND_PORTAL_SESSION_SECRET, "COMMAND_PORTAL_SESSION_SECRET", 32) : "disabled-session-secret-not-used",
+    operationalRuntimeToken,
+    operationalSessionSecret:
+      operationalSessionSecret || "disabled-session-secret-not-used",
     operationalSessionMode,
     operationalPrincipalType: operationalSessionMode === "automatic_private_workspace" ? "workspace_service" : "named_operator",
     operationalAccessBasis: operationalSessionMode === "automatic_private_workspace" ? "replit_private_deployment" : "operator_access_key",
@@ -983,6 +1045,7 @@ export function loadConfig(overrides = {}) {
     replitDeployment,
     replitId,
     replitDomains,
+    replitDevDomain,
     executiveSessionEnabled,
     executiveSessionTtlSeconds,
     executiveSessionCookieSecure,
@@ -999,6 +1062,8 @@ export function loadConfig(overrides = {}) {
     humanSessionAssertionClientId,
     providerInteractiveAuthEnabled,
     providerSessionSecret,
+    providerSessionSecretRef,
+    providerSessionKeyId,
     providerSessionTtlSeconds,
     replitAuthIssuer,
     replitAuthAudience,
@@ -4044,12 +4109,16 @@ export function createPortalServer(options = {}) {
       fetchImpl: options.providerFetch ?? globalThis.fetch,
       clock: options.clock,
       providerIdentityVerifier: options.providerIdentityVerifier
-        ?? (providerInteractiveAuth && !config.replitDeployment
+        ?? (providerInteractiveAuth
           ? createProviderSessionIdentityVerifier(
             config,
             providerInteractiveAuth.sessionService,
           )
-          : undefined),
+          : config.replitDeployment
+            ? createReplitAuthIdentityVerifier(config, {
+              clock: options.clock,
+            })
+            : undefined),
     })
     : null;
   const executiveSessionAuthority = config.executiveSessionEnabled
@@ -4076,6 +4145,29 @@ export function createPortalServer(options = {}) {
             code: "route_not_allowlisted",
             message: "Interactive provider authentication is not enabled.",
           },
+          truth: TRUTH,
+        });
+      }
+      const authPath = new URL(
+        request.url,
+        "http://portal.invalid",
+      ).pathname;
+      if (
+        authPath === "/api/auth/logout"
+        && executiveSessionAuthority?.authenticate(request)
+      ) {
+        return sendJson(response, 409, {
+          ok: false,
+          error: {
+            code: "executive_session_revocation_required",
+            message:
+              "Revoke the active Registered Executive session before provider sign-out.",
+          },
+          providerLogoutCompleted: false,
+          executiveSessionRevoked: false,
+          authorityGranted: false,
+          actionAuthorized: false,
+          secretValuesExposed: false,
           truth: TRUTH,
         });
       }

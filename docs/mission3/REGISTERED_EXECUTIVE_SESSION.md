@@ -44,8 +44,9 @@ evidence; this Experience document retains the governing pins with the code.
 
 Mission 3 establishes one non-production human Executive session:
 
-1. Replit Auth verifies a human identity server-side through a provider-neutral
-   adapter.
+1. Agent-provisioned Replit Auth verifies a human identity server-side with
+   authorization code, PKCE, state, nonce, `max_age`, and signed
+   `auth_time` validation through a provider-neutral adapter.
 2. A stable opaque provider subject maps to one active, server-owned
    registration. Raw provider subjects are neither retained nor exposed.
 3. The registration fixes principal, tenant, workspace, role, scopes, policy,
@@ -64,7 +65,9 @@ Mission 3 establishes one non-production human Executive session:
    action, and the current 300-second verification window.
 
 The browser supplies no identity or privilege selector and retains no provider
-token or provider subject. Human principal, Gateway service principal,
+token, provider subject, or provider-subject binding. Its short-lived provider
+cookie is purpose-bound authenticated ciphertext tied to the exact issuer,
+audience, `REPL_ID`, key ID, and configured lifetime. Human principal, Gateway service principal,
 tenant/workspace, session, policy, role/scopes, Decision, Mission, Authority,
 and action authorization remain separate. A valid session explicitly records
 no Decision, no Mission, no Authority Grant, no approval, and no action
@@ -81,6 +84,9 @@ metadata:
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET`
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET_REF`
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_KEY_ID`
+- `COMMAND_PORTAL_PROVIDER_SESSION_SECRET`
+- `COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF`
+- `COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID`
 - `NEXUS_HUMAN_SESSION_ASSERTION_SECRET`
 - `NEXUS_HUMAN_SESSION_ASSERTION_SECRET_REF`
 - `NEXUS_HUMAN_SESSION_ASSERTION_KEY_ID`
@@ -89,6 +95,8 @@ The non-secret bindings are:
 
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED`
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_TTL_SECONDS`
+- `COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED`
+- `COMMAND_PORTAL_PROVIDER_SESSION_TTL_SECONDS`
 - `COMMAND_PORTAL_COOKIE_SECURE`
 - `COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_ISSUER`
 - `COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_AUDIENCE`
@@ -104,23 +112,34 @@ The non-secret bindings are:
 - `COMMAND_PORTAL_REPLIT_AUTH_JWKS_TIMEOUT_MS`
 - `COMMAND_PORTAL_REPLIT_AUTH_JWKS_CACHE_SECONDS`
 - `REPL_ID` (provider-owned deployment metadata; also the exact audience)
+- `REPLIT_DEV_DOMAIN` (provider-owned development-origin metadata)
 - `COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON`
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_ID`
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION`
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST`
 
 Mission 1 trust bootstrap remains independently configured. The Runtime bearer,
-Mission 1 context assertion, Mission 3 browser cookie, and Mission 3 human
-assertion use distinct secrets and key IDs.
+Hosted Operational session, Mission 1 context assertion, Mission 3 provider
+session, Mission 3 Registered Executive cookie, and Mission 3 human assertion
+use distinct secrets and key IDs.
 
 Source completion leaves provider state `configured_not_verified` until Replit
 Agent provisions the supported Replit Auth integration, the exact source is
 deployed, and one provider-authenticated human interaction is verified. The
-deployed entrypoint accepts managed identity headers only when
-`REPLIT_DEPLOYMENT` is true, the request host belongs to `REPLIT_DOMAINS`, the
-issuer is exactly `https://replit.com/oidc`, and the audience equals the
-provider-owned `REPL_ID`. The strict JWT/JWKS fallback is separately bounded;
-the NEXUS browser client does not manufacture or retain a provider token.
+interactive path is authoritative when explicitly enabled in both development
+and published deployments. It admits only the exact provider-owned
+`REPLIT_DEV_DOMAIN` or a published `REPLIT_DOMAINS` host, issuer
+`https://replit.com/oidc`, and audience `REPL_ID`; forged Replit identity
+headers are ignored and rejected. Interactive auth may run with Registered
+Executive sessions disabled for fail-closed recovery/bootstrap, but no NEXUS
+session can be created until the server-owned registration is configured and
+the Mission 3 gate is enabled. The accepted Mission deployment derives the
+binding from the existing authenticated provider control-plane session in
+server memory, deploys Runtime first and Experience second, and performs one
+fresh interactive login only after both exact identities are live. A published
+Registered Executive deployment fails startup if interactive auth is disabled;
+the legacy managed-header and strict JWT/JWKS adapters remain disabled
+alternatives unless independently proven.
 
 ## Verification
 
@@ -141,10 +160,11 @@ codes, secret names/key IDs/presence, and rollback targets.
 
 ## Rollback
 
-Disable `COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED`, restore the accepted Mission
-2 Runtime and Experience releases without rewriting history, and rerun the
-Mission 2 service handshake and trust negatives. Retain Mission 3 registrations,
-secret-manager entries, and receipts as inactive historical evidence unless a
-proven compromise requires rotation. Record active-session revocation state and
-the exact restored release/image identities. No release, receipt, competing
-commit, or unrelated work is deleted.
+Disable `COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED` and
+`COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED`, restore the accepted
+Mission 2 Runtime and Experience releases without rewriting history, and rerun
+the Mission 2 service handshake and trust negatives. Retain Mission 3
+registrations, secret-manager entries, and receipts as inactive historical
+evidence unless a proven compromise requires rotation. Record active-session
+revocation state and the exact restored release/image identities. No release,
+receipt, competing commit, or unrelated work is deleted.

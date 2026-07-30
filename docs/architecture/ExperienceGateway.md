@@ -52,24 +52,29 @@ ignored. The gateway rejects arbitrary forwarding, unknown routes, query
 parameters, oversized bodies, unsafe origins, and unallowlisted methods before
 contacting the NEXUS Runtime Gateway.
 
-The Replit path uses a server-side, provider-neutral authentication adapter
-backed by Replit Auth. The managed-ingress verifier is admitted only on a
-Replit deployment and bound domain, pins issuer
-`https://replit.com/oidc`, and derives the only valid audience from the
-provider-owned `REPL_ID`. The strict JWT/JWKS fallback permits only its exact
+The Replit path uses Agent-provisioned, server-side Replit Auth with
+authorization code, PKCE, state, nonce, bounded `max_age`, and verified
+`auth_time`. The interactive verifier is authoritative when explicitly enabled
+in both development and published deployments, pins issuer
+`https://replit.com/oidc`, derives the only valid audience from the
+provider-owned `REPL_ID`, and binds requests to the exact provider-owned
+development or published host. The strict JWT/JWKS fallback permits only its exact
 issuer and audience, advertised `RS256` or `PS256` with algorithm-specific RSA
 padding, a known key ID, valid signature and times, bounded lifetime, opaque
-subject, and verified authentication methods. Bare Replit user headers on an
-unmanaged or wrong-host ingress and all client privilege claims are rejected.
+subject, and verified authentication methods. Bare Replit user headers,
+wrong-host requests, stale provider authentication, and all client privilege
+claims are rejected.
 
-Until Replit Agent provisions Auth and the deployed managed ingress passes its
+Until Replit Agent provisions Auth and the deployed interactive path passes its
 positive and forged-header/host negatives, provider state is
 `configured_not_verified`; local injected-verifier tests are not evidence of a
 live provider handshake.
 
-The provider subject is never stored in the browser session, response, receipt,
-or log. Its deterministic server-side binding selects exactly one active
-registration. The cookie contains only a keyed registration fingerprint, so a
+The provider subject and deterministic provider binding are never stored in
+browser-visible plaintext, a response, receipt, or log. Its deterministic
+server-side binding selects exactly one active registration. The provider
+cookie is authenticated-encrypted and configuration-bound; the Registered
+Executive cookie contains only a keyed registration fingerprint, so a
 provider-subject, issuer/audience, registration, or registry-version change
 invalidates the prior cookie without disclosing the binding.
 That registration, not the browser, fixes the principal ID, tenant, workspace,

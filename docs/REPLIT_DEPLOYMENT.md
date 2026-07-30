@@ -52,14 +52,16 @@ reinterpret the Hosted Operational Gateway service session. The human principal
 is `registered_human_executive`; the Gateway remains the distinct
 `experience_gateway_service` principal.
 
-Provision Replit Auth through Replit Agent and retain its server-side
-verification path. Replit documents Agent as the supported provisioning path
-for Replit Auth. The Gateway accepts managed identity only on
-`REPLIT_DEPLOYMENT`, on a host bound by `REPLIT_DOMAINS`, with issuer exactly
-`https://replit.com/oidc` and audience exactly the provider-owned `REPL_ID`.
-Until the deployed ingress passes the real login and forged-header/host
-negative matrix, the Gateway remains `configured_not_verified`; local verifier
-injection is test evidence only.
+Provision Replit Auth through Replit Agent and retain its server-side OIDC
+authorization-code path. Replit documents Agent as the supported provisioning
+path for Replit Auth. The Gateway accepts the interactive session only on the
+exact provider-owned `REPLIT_DEV_DOMAIN` during development or a published
+`REPLIT_DOMAINS` host, with issuer `https://replit.com/oidc`, audience
+`REPL_ID`, PKCE, state, nonce, bounded `max_age`, and signed `auth_time`.
+Forged identity headers do not participate in this mode. Until the deployed
+flow passes the real login and forged-header/host negative matrix, the Gateway
+remains `configured_not_verified`; injected OIDC tests are source evidence
+only.
 The browser POSTs an empty body to `/api/executive-session/login`; it never
 submits a provider subject, tenant, workspace, role, scope, policy, or provider
 token. The stable opaque provider subject is hashed into a provider binding and
@@ -69,22 +71,43 @@ server-owned non-production registration.
 Configure the Mission 3 names listed in `.env.example` through the Replit
 deployment configuration and secret manager. Secret values must never be
 placed in `.replit`, repository files, browser-visible `VITE_` variables,
-deployment receipts, logs, or operator transcripts. The two new purpose-bound
+deployment receipts, logs, or operator transcripts. The three purpose-bound
 secret values are:
 
+- `COMMAND_PORTAL_PROVIDER_SESSION_SECRET`, used only to
+  authenticated-encrypt the short-lived provider session and transaction
+  cookies;
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET`, used only to sign the
   short-lived HttpOnly browser session cookie; and
 - `NEXUS_HUMAN_SESSION_ASSERTION_SECRET`, shared only with the Runtime to sign
   the at-most-60-second, single-use human-session assertion.
 
 Their provider references and public key IDs are
+`COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF`,
+`COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID`,
 `COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET_REF`,
 `COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_KEY_ID`,
 `NEXUS_HUMAN_SESSION_ASSERTION_SECRET_REF`, and
 `NEXUS_HUMAN_SESSION_ASSERTION_KEY_ID`. Inspect and record only names, key IDs,
-presence, and provider metadata. Do not read values. The cookie secret,
-human-assertion secret, Runtime bearer token, and Mission 1 context-assertion
-secret must be purpose-bound and distinct.
+presence, and provider metadata. Do not read values. The provider-session
+secret, Registered Executive cookie secret, human-assertion secret, Hosted
+Operational session secret, Runtime bearer tokens, and Mission 1
+context-assertion secret must be purpose-bound and distinct.
+
+The implementation supports a fail-closed recovery/bootstrap configuration in
+which `COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED=true` while
+`COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED=false`: provider login may establish
+only the encrypted provider session and every Registered Executive route
+remains disabled. The Mission 3 deployment does not use that mode for an early
+interactive login. It derives the opaque registration binding in server memory
+from the already-authenticated provider control-plane session, retains neither
+the raw subject nor the resulting binding in operator output, and configures
+the same server-owned registration in both provider secret managers before
+deployment. Runtime is then deployed first and Experience second, followed by
+one fresh interactive login within the five-minute provider-authentication
+bound. Provider sign-out is a same-origin POST, refuses while an active NEXUS
+session exists, and requires the NEXUS session to be revoked through its
+CSRF-protected Runtime route first.
 
 The accepted policy binding is immutable for this Mission:
 
@@ -109,12 +132,13 @@ creating a Decision, Mission, Authority Grant, approval, or action
 authorization.
 
 Rollback is additive and reversible: set
-`COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED=false`, restore the accepted Mission
-2 Runtime and Experience releases, and verify that the Mission 2 service
-handshake still passes. Retain the purpose-bound secrets and registration as
-inactive provider metadata unless compromise is proven; do not rotate or
-delete them merely because a release was superseded. Record the rolled-back
-release identities and revocation status in the sanitized receipt.
+`COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED=false` and
+`COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED=false`, restore the accepted
+Mission 2 Runtime and Experience releases, and verify that the Mission 2
+service handshake still passes. Retain the purpose-bound secrets and
+registration as inactive provider metadata unless compromise is proven; do not
+rotate or delete them merely because a release was superseded. Record the
+rolled-back release identities and revocation status in the sanitized receipt.
 
 Build with `npm run build` and start with `npm run start`. Never create a browser-visible `VITE_` runtime variable. After deployment, verify every allowlisted route, mutation rejection, secret isolation, failure rendering, and the live topology.
 
