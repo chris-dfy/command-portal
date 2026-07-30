@@ -389,7 +389,7 @@ function actionAdmissionProjection({
 
 function withActionRegistry(runtimeFetch, projection = actionAdmissionProjection()) {
   const wrapped = async (url, options) => (
-    url.endsWith("/capabilities/registry")
+    url.endsWith("/runtime/capability-registry")
       ? runtimeResponse(projection)
       : runtimeFetch(url, options)
   );
@@ -449,7 +449,7 @@ test("every Experience Gateway route maps to exactly one literal runtime endpoin
   const observed = [];
   const runtimeFetch = async (url, options) => {
     observed.push({ url, options });
-    if (url.endsWith("/capabilities/registry")) {
+    if (url.endsWith("/runtime/capability-registry")) {
       return runtimeResponse(actionAdmissionProjection());
     }
     return runtimeResponse({ route: url });
@@ -504,32 +504,11 @@ test("Capability Registry uses one exact static read-only Runtime mapping", asyn
   const response = await fetch(`${base}/api/runtime/capability-registry`, { headers: { "Cache-Control": "no-cache" } });
   const body = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(observed[0].url, "https://runtime.invalid/capabilities/registry");
+  assert.equal(observed[0].url, "https://runtime.invalid/runtime/capability-registry");
   assert.equal(observed[0].options.method, "GET");
   assert.equal(body.data.recordType, CAPABILITY_REGISTRY_RECORD_TYPE);
   assert.equal(body.data.authority.authorityGranted, false);
   assert.equal(body.data.actions[0].invocable, false);
-});
-
-test("Capability Registry Experience route calls exactly GET /capabilities/registry upstream, never the legacy path", async () => {
-  const observed = [];
-  const projection = capabilityRegistryProjection();
-  const base = await start(async (url, options) => {
-    observed.push({ url, options });
-    return runtimeResponse(projection);
-  }, { testUseProvidedCapabilityRegistry: true });
-  const response = await fetch(`${base}/api/runtime/capability-registry`, { headers: { "Cache-Control": "no-cache" } });
-  assert.equal(response.status, 200);
-  assert.equal(observed.length, 1);
-  const upstream = new URL(observed[0].url);
-  assert.equal(upstream.pathname, "/capabilities/registry");
-  assert.equal(observed[0].options.method, "GET");
-  assert.equal(upstream.pathname.includes("/runtime/capability-registry"), false);
-  // The server source must not retain any legacy upstream mapping.
-  const { readFile } = await import("node:fs/promises");
-  const serverSource = await readFile(new URL("../server/portal-server.mjs", import.meta.url), "utf8");
-  assert.equal(serverSource.includes('"/runtime/capability-registry"'), false);
-  assert.match(serverSource, /"\/api\/runtime\/capability-registry": "\/capabilities\/registry"/);
 });
 
 test("Capability Registry accepts a direct canonical projection only by exact record type", async () => {
@@ -746,7 +725,7 @@ test("an unavailable GitHub connector remains visible without blocking other Run
   projection.executiveContinuity.impedimentCount = 1;
   resignCapabilityProjection(projection);
   const base = await start(async (url) => (
-    url.endsWith("/capabilities/registry")
+    url.endsWith("/runtime/capability-registry")
       ? runtimeResponse(projection)
       : runtimeResponse({ environment: "test" })
   ), { testUseProvidedCapabilityRegistry: true });

@@ -44,7 +44,7 @@ export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/diagnostics": "/runtime/diagnostics",
   "/api/runtime/governance": "/runtime/governance",
   "/api/runtime/connectors": "/runtime/connectors",
-  "/api/runtime/capability-registry": "/capabilities/registry",
+  "/api/runtime/capability-registry": "/runtime/capability-registry",
   "/api/runtime/realtime-voice": "/runtime/voice/realtime/status",
   "/api/runtime/conclave": "/runtime/conclave/status",
   "/api/runtime/eox": "/runtime/executive-operating-loop",
@@ -140,7 +140,7 @@ export const FIXED_RUNTIME_ACTION_ALIASES = Object.freeze({
   "/api/runtime/diagnostics": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.diagnostics", "GET", "/runtime/diagnostics", { requiredSurfaces: ["api", "ui"] }) }),
   "/api/runtime/governance": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.governance", "GET", "/runtime/governance", { requiredSurfaces: ["api", "ui"] }) }),
   "/api/runtime/connectors": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.connectors", "GET", "/runtime/connectors", { requiredSurfaces: ["api", "ui"] }) }),
-  "/api/runtime/capability-registry": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.capability_registry", "GET", "/capabilities/registry", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/capability-registry": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.capability_registry", "GET", "/runtime/capability-registry", { requiredSurfaces: ["api", "ui"] }) }),
   "/api/runtime/realtime-voice": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.voice_realtime_status", "GET", "/runtime/voice/realtime/status", { requiredSurfaces: ["api", "ui", "voice"] }) }),
   "/api/runtime/conclave": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.conclave_status", "GET", "/runtime/conclave/status", { requiredSurfaces: ["api", "assistant", "ui"] }) }),
   "/api/runtime/eox": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.executive_operating_loop", "GET", "/runtime/executive-operating-loop", { requiredSurfaces: ["api", "ui"] }) }),
@@ -2507,7 +2507,7 @@ async function ensureRuntimeActionAdmission(alias, config, runtimeFetch, actionA
   }
   try {
     const envelope = await fetchRuntime(
-      "/capabilities/registry",
+      "/runtime/capability-registry",
       config,
       runtimeFetch,
     );
@@ -2571,7 +2571,7 @@ function validateRuntimeEnvelope(body) {
 }
 
 function validateRuntimeReadResponse(body, runtimePath) {
-  if (runtimePath !== "/capabilities/registry") return validateRuntimeEnvelope(body);
+  if (runtimePath !== "/runtime/capability-registry") return validateRuntimeEnvelope(body);
   const sanitized = sanitizeOperationalResponse(body);
   if (sanitized?.recordType === CAPABILITY_REGISTRY_RECORD_TYPE) {
     const projection = validateCapabilityRegistryProjection(sanitized);
@@ -2593,7 +2593,7 @@ function validateRuntimeReadResponse(body, runtimePath) {
 async function fetchRuntime(runtimePath, config, runtimeFetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
-  const maximumResponseBytes = runtimePath === "/capabilities/registry"
+  const maximumResponseBytes = runtimePath === "/runtime/capability-registry"
     ? CAPABILITY_REGISTRY_MAX_RESPONSE_BYTES
     : config.maxResponseBytes;
   try {
@@ -2987,7 +2987,7 @@ async function handleApi(request, response, config, runtimeFetch, cache, tracker
       ),
     );
   }
-  if (runtimePath !== "/capabilities/registry") {
+  if (runtimePath !== "/runtime/capability-registry") {
     const admission = await ensureRuntimeActionAdmission(
       alias,
       config,
@@ -3003,7 +3003,7 @@ async function handleApi(request, response, config, runtimeFetch, cache, tracker
     }
   }
   const result = await readThroughGateway(url.pathname, runtimePath, request, config, runtimeFetch, cache, tracker);
-  if (runtimePath === "/capabilities/registry") {
+  if (runtimePath === "/runtime/capability-registry") {
     if (result.status === 200 && result.body.ok && result.body.data) {
       try {
         actionAdmission.observe(result.body.data);
