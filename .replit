@@ -36,7 +36,3 @@ COMMAND_PORTAL_OPERATOR_ROLE = "operator"
 COMMAND_PORTAL_OPERATOR_USER_ID = "nexus-workspace-service"
 COMMAND_PORTAL_TENANT_ID = "nexicron"
 COMMAND_PORTAL_WORKSPACE_ID = "primary"
-
-[postMerge]
-path = "scripts/post-merge.sh"
-timeoutMs = 180000
