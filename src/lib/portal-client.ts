@@ -107,6 +107,9 @@ export function asCapabilityRegistryProjection(value: unknown): CapabilityRegist
     !validIdentity(item.actionId)
     || !validIdentity(item.capabilityId)
     || !validIdentity(item.handlerId)
+    || !validIdentity(item.operationId)
+    || !validIdentity(item.inputSchemaId)
+    || (item.fixedTarget !== undefined && !validIdentity(item.fixedTarget))
     || !CAPABILITY_CLASSIFICATIONS.has(item.classification as CapabilityClassification)
     || typeof item.invocable !== "boolean"
     || item.authorityGranted !== false

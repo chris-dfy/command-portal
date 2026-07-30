@@ -18,6 +18,20 @@ The general 1 MiB response limit remains unchanged. The exact
 the measured compact canonical projection exceeds 1 MiB; this exception is
 not configurable and does not apply to any other route.
 
+GitHub repository and CI verification is Runtime-owned. Do not provision
+`GITHUB_TOKEN` in Replit or expose it to the Experience Gateway or browser.
+The existing token belongs only in the Fly `nexus-runtime-dev` secret
+boundary, is limited to `chris-dfy/nexus-assistant`, and needs only:
+
+- Metadata: read-only (implicit);
+- Contents: read-only; and
+- Actions: read-only.
+
+The Gateway renders the Runtime-owned fixed read contract: repository
+metadata, the exact deployed commit, and workflow runs filtered to that
+commit. It does not require any additional permission, write access, or
+broader repository access.
+
 To enable the fixed-workspace Hosted Operational Gateway, publish the app as a **Workspace only** private deployment, provision every server-only operational variable from `.env.example`, deploy the execution Runtime behind HTTPS, and provision the matching Runtime token, tenant, workspace, and fixed service bindings:
 
 - `NEXUS_HOSTED_OPERATIONAL_TOKEN` matches `COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN`;

@@ -155,6 +155,8 @@ export function CapabilityRegistryProjection({
             <div>
               <strong>{action.actionId}</strong>
               <small>{action.handlerId ?? "No typed handler registered"}</small>
+              <small>{action.operationId} · {action.inputSchemaId}</small>
+              <small>Fixed target: {action.fixedTarget ?? action.pathTemplate ?? "No fixed target reported"}</small>
               <small>{action.invocationPaths?.length ? action.invocationPaths.join(" · ") : "No invocation path registered"}</small>
               <small>{limitationsText(action.limitations)}{action.requiredNextAction ? ` Next: ${action.requiredNextAction}` : ""}</small>
             </div>

@@ -154,8 +154,11 @@ export type CanonicalActionRecord = {
   capabilityId: string;
   connectorId?: string | null;
   handlerId: string;
+  operationId: string;
+  inputSchemaId: string;
   method?: string;
   pathTemplate?: string;
+  fixedTarget?: string;
   invocationSurfaces?: string[];
   invocationPaths: string[];
   classification: CapabilityClassification;

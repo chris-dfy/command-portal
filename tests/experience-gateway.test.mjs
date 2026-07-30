@@ -21,6 +21,40 @@ import {
 const servers = [];
 afterEach(async () => Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve)))));
 
+const GITHUB_READ_ONLY_AUTHORIZATION = (
+  "Fine-grained GitHub token scoped only to chris-dfy/nexus-assistant: "
+  + "Metadata read (implicit), Contents read, Actions read."
+);
+const GITHUB_READ_ONLY_LIMITATIONS = Object.freeze([
+  "Read-only repository metadata, exact deployed-commit, and Actions workflow-run inspection only.",
+  "The token is restricted to chris-dfy/nexus-assistant with Metadata read (implicit), Contents read, and Actions read only.",
+  "Connector health never grants execution Authority.",
+]);
+const GITHUB_TOKEN_NEXT_ACTION = (
+  "Confirm GITHUB_TOKEN is configured in the Runtime secret boundary for "
+  + "chris-dfy/nexus-assistant with Metadata read (implicit), Contents read, and Actions read only."
+);
+const GITHUB_READ_ONLY_OPERATIONS = Object.freeze([
+  Object.freeze({
+    actionId: "github.repository.read",
+    handlerId: "connectors.github.verify_repository",
+    fixedTarget: "https://api.github.com/repos/chris-dfy/nexus-assistant",
+    inputSchemaId: "contracts/capabilities/capability-registry-projection.schema.json#/$defs/githubRepositoryReadInput",
+  }),
+  Object.freeze({
+    actionId: "github.commit.read",
+    handlerId: "connectors.github.verify_commit",
+    fixedTarget: "https://api.github.com/repos/chris-dfy/nexus-assistant/commits/{deployedCommitSha}",
+    inputSchemaId: "contracts/capabilities/capability-registry-projection.schema.json#/$defs/githubCommitReadInput",
+  }),
+  Object.freeze({
+    actionId: "github.actions.runs.read",
+    handlerId: "connectors.github.verify_actions_runs",
+    fixedTarget: "https://api.github.com/repos/chris-dfy/nexus-assistant/actions/runs?head_sha={deployedCommitSha}&per_page=100",
+    inputSchemaId: "contracts/capabilities/capability-registry-projection.schema.json#/$defs/githubActionsRunsReadInput",
+  }),
+]);
+
 function runtimeEnvelope(data = { observed: true }, overrides = {}) {
   return {
     status: "ok",
@@ -115,13 +149,13 @@ function capabilityRegistryProjection(overrides = {}) {
     summary: {
       capabilityCount: 1,
       connectorCount: 1,
-      actionCount: 1,
+      actionCount: GITHUB_READ_ONLY_OPERATIONS.length,
       verificationReceiptCount: 0,
-      actionClassifications: { unavailable: 1 },
+      actionClassifications: { unavailable: GITHUB_READ_ONLY_OPERATIONS.length },
     },
     capabilityCount: 1,
     connectorCount: 1,
-    actionCount: 1,
+    actionCount: GITHUB_READ_ONLY_OPERATIONS.length,
     receiptCount: 0,
     capabilities: [{
       capabilityId: "observe.github_repository_ci",
@@ -131,8 +165,8 @@ function capabilityRegistryProjection(overrides = {}) {
       availabilityIndependent: true,
       evidenceRefs: [],
       receiptRefs: [],
-      limitations: ["GitHub configuration is absent."],
-      requiredNextAction: "Configure the existing read-only GitHub secret reference.",
+      limitations: [...GITHUB_READ_ONLY_LIMITATIONS, "GitHub configuration is absent."],
+      requiredNextAction: GITHUB_TOKEN_NEXT_ACTION,
     }],
     connectors: [{
       connectorId: "github",
@@ -143,41 +177,43 @@ function capabilityRegistryProjection(overrides = {}) {
       verification: "unverified",
       health: "unknown",
       operationalAvailability: "unavailable",
-      authorizationRequirement: "read-only GitHub App or fine-grained token",
+      authorizationRequirement: GITHUB_READ_ONLY_AUTHORIZATION,
       authorityGranted: false,
       lastSuccessfulVerification: null,
       verificationFresh: false,
       freshness: { policySeconds: 300, ageSeconds: null, state: "never" },
       evidenceReferences: [],
       receiptReferences: [],
-      limitations: ["GitHub configuration is absent."],
-      requiredNextAction: "Configure the existing read-only GitHub secret reference.",
+      limitations: [...GITHUB_READ_ONLY_LIMITATIONS, "GitHub configuration is absent."],
+      requiredNextAction: GITHUB_TOKEN_NEXT_ACTION,
     }],
-    actions: [{
-      actionId: "observe.github_repository_ci.status",
+    actions: GITHUB_READ_ONLY_OPERATIONS.map((operation) => ({
+      actionId: operation.actionId,
       capabilityId: "observe.github_repository_ci",
       connectorId: "github",
-      handlerId: "github_repository_ci.status",
-      operationId: "github.repository_ci.status",
-      inputSchemaId: "contracts.capabilities.githubRepositoryReadInput",
+      handlerId: operation.handlerId,
+      operationId: operation.actionId,
+      inputSchemaId: operation.inputSchemaId,
+      method: "GET",
+      fixedTarget: operation.fixedTarget,
       invocationSurfaces: ["api", "assistant", "ui", "voice", "model_tool"],
       invocationPaths: ["api", "assistant", "ui", "voice", "model_tool"],
       classification: "unavailable",
       operationalAvailability: false,
       invocable: false,
-      authorizationRequirement: "read-only GitHub App or fine-grained token",
+      authorizationRequirement: GITHUB_READ_ONLY_AUTHORIZATION,
       authorityGranted: false,
       receiptRefs: [],
-      limitations: ["GitHub configuration is absent."],
-      requiredNextAction: "Configure the existing read-only GitHub secret reference.",
-    }],
+      limitations: [...GITHUB_READ_ONLY_LIMITATIONS, "GitHub configuration is absent."],
+      requiredNextAction: GITHUB_TOKEN_NEXT_ACTION,
+    })),
     verificationReceipts: [],
     executiveContinuity: {
       impediments: [{
         impedimentId: "github-configuration",
         classification: "operator_action_required",
         limitation: "GitHub is not configured.",
-        requiredNextAction: "Configure the existing secret reference outside chat.",
+        requiredNextAction: GITHUB_TOKEN_NEXT_ACTION,
         remediationAction: {
           actionId: "provision.github.read_only",
           classification: "staged",
@@ -229,7 +265,7 @@ function liveCapabilityRegistryProjection() {
     operationalAvailability: true,
     evidenceRefs: [`runtime-evidence:${receiptId}`],
     receiptRefs: [`connector-receipt:${receiptId}`],
-    limitations: ["The probe is read-only and grants no Authority."],
+    limitations: [...GITHUB_READ_ONLY_LIMITATIONS],
     requiredNextAction: "No connector remediation is required.",
   };
   projection.connectors[0] = {
@@ -245,17 +281,17 @@ function liveCapabilityRegistryProjection() {
     freshness: { policySeconds: 300, ageSeconds: 0, state: "current" },
     evidenceReferences: [`runtime-evidence:${receiptId}`],
     receiptReferences: [`connector-receipt:${receiptId}`],
-    limitations: ["The probe is read-only and grants no Authority."],
+    limitations: [...GITHUB_READ_ONLY_LIMITATIONS],
     requiredNextAction: "No connector remediation is required.",
   };
-  projection.actions[0] = {
-    ...projection.actions[0],
+  projection.actions = projection.actions.map((action) => ({
+    ...action,
     classification: "live_verified",
     operationalAvailability: true,
     receiptRefs: [`connector-receipt:${receiptId}`],
-    limitations: ["Verification does not grant execution Authority."],
+    limitations: [...GITHUB_READ_ONLY_LIMITATIONS],
     requiredNextAction: "No connector remediation is required.",
-  };
+  }));
   projection.verificationReceipts = [{
     receiptId,
     receiptType: "connector_read_only_verification",
@@ -277,9 +313,9 @@ function liveCapabilityRegistryProjection() {
   projection.summary = {
     capabilityCount: 1,
     connectorCount: 1,
-    actionCount: 1,
+    actionCount: GITHUB_READ_ONLY_OPERATIONS.length,
     verificationReceiptCount: 1,
-    actionClassifications: { live_verified: 1 },
+    actionClassifications: { live_verified: GITHUB_READ_ONLY_OPERATIONS.length },
   };
   return resignCapabilityProjection(projection);
 }
@@ -542,6 +578,37 @@ test("Capability Registry accepts a live state only with a current sanitized suc
   assert.equal(body.data.executiveContinuity.dispatchAvailable, false);
 });
 
+test("Capability Registry preserves the bounded GitHub metadata, commit, and Actions read contract", async () => {
+  const projection = liveCapabilityRegistryProjection();
+  const base = await start(
+    async () => runtimeResponse(projection),
+    { testUseProvidedCapabilityRegistry: true },
+  );
+  const response = await fetch(`${base}/api/runtime/capability-registry`);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.data.connectors[0].authorizationRequirement, GITHUB_READ_ONLY_AUTHORIZATION);
+  assert.deepEqual(
+    body.data.actions.map(({ actionId, handlerId, fixedTarget, inputSchemaId }) => ({
+      actionId,
+      handlerId,
+      fixedTarget,
+      inputSchemaId,
+    })),
+    GITHUB_READ_ONLY_OPERATIONS,
+  );
+  for (const action of body.data.actions) {
+    assert.equal(action.method, "GET");
+    assert.equal(action.invocable, false);
+    assert.equal(action.authorityGranted, false);
+  }
+  const serialized = JSON.stringify(body.data);
+  assert.doesNotMatch(serialized, /check[-_. /]?runs|github\.ci\.read|githubCiReadInput/i);
+  assert.doesNotMatch(serialized, /\bwrite[-_. ]?(?:permission|access|operation)\b/i);
+  assert.equal(body.data.secretValuesExposed, false);
+});
+
 test("Capability Registry fails closed on invalid identity, Authority, or invocability claims", async () => {
   for (const projection of [
     capabilityRegistryProjection({ recordType: "presentation_only_registry" }),
@@ -720,7 +787,7 @@ test("an unavailable GitHub connector remains visible without blocking other Run
     impedimentId: "github.authorization.missing",
     classification: "operator_action_required",
     limitation: "GitHub authorization is absent.",
-    requiredNextAction: "Configure the existing read-only secret reference.",
+    requiredNextAction: GITHUB_TOKEN_NEXT_ACTION,
   }];
   projection.executiveContinuity.impedimentCount = 1;
   resignCapabilityProjection(projection);

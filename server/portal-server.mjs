@@ -2158,6 +2158,7 @@ function validateCapabilityRegistryProjection(value) {
     || !validIdentifier(item.handlerId)
     || !validIdentifier(item.operationId)
     || !validIdentifier(item.inputSchemaId)
+    || (item.fixedTarget !== undefined && !validIdentifier(item.fixedTarget))
     || !CAPABILITY_CLASSIFICATIONS.has(item.classification)
     || typeof item.operationalAvailability !== "boolean"
     || typeof item.invocable !== "boolean"

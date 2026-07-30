@@ -516,6 +516,10 @@ test("Runtime information renders one canonical capability projection and Execut
     "hard_blocking", "safely_remediable", "non_blocking_degraded", "operator_action_required",
   ]) assert.match(`${registry}\n${types}`, new RegExp(classification));
   assert.match(registry, /Authority is separate: Not granted/);
+  assert.match(registry, /action\.operationId/);
+  assert.match(registry, /action\.inputSchemaId/);
+  assert.match(registry, /action\.fixedTarget/);
+  assert.match(registry, /Fixed target:/);
   assert.match(registry, /remediationAction\.classification === "staged"/);
   assert.match(registry, /<NexusButton size="sm" disabled>/);
   assert.match(styles, /\.capability-registry-layout/);
