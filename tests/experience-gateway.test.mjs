@@ -396,7 +396,11 @@ function actionAdmissionProjection({
         method,
         pathTemplate,
         invocationSurfaces,
-        invocationPaths: invocationSurfaces.map((surface) => `${surface}:${method} ${pathTemplate}`),
+        invocationPaths: invocationSurfaces.map((surface) => (
+          surface === "api"
+            ? `${surface}:${method} ${pathTemplate}`
+            : `${surface}:canonical-adapter:${actionId}`
+        )),
         classification,
         operationalAvailability: operational,
         invocable: operational,

@@ -3847,9 +3847,11 @@ function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
       );
     }
     const action = matches[0];
-    const expectedInvocationPaths = alias.requiredSurfaces.map(
-      (surface) => `${surface}:${alias.runtimeMethod} ${alias.runtimePathTemplate}`,
-    );
+    const expectedInvocationPaths = alias.requiredSurfaces.map((surface) => (
+      surface === "api"
+        ? `${surface}:${alias.runtimeMethod} ${alias.runtimePathTemplate}`
+        : `${surface}:canonical-adapter:${alias.actionId}`
+    ));
     if (
       action.method !== alias.runtimeMethod
       || action.pathTemplate !== alias.runtimePathTemplate
