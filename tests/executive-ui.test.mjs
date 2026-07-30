@@ -597,3 +597,22 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
   );
   assert.match(voice, /disabled=\{!textAction\.available/);
 });
+
+test("canonical execution retains verified capability readiness across mission responses", async () => {
+  const component = await read("../src/components/CanonicalExecutionSpine.tsx");
+
+  assert.match(
+    component,
+    /const \[capabilityReady, setCapabilityReady\] = useState\(false\)/,
+  );
+  assert.match(component, /if \(Array\.isArray\(capabilities\)\)/);
+  assert.match(
+    component,
+    /capabilities\.length > 0\s+&& capabilities\.every\(\(item\) => item\.operationalAvailability\)/,
+  );
+  assert.match(component, /const ready = capabilityReady/);
+  assert.doesNotMatch(
+    component,
+    /view\?\.data\?\.capabilities\?\.every/,
+  );
+});

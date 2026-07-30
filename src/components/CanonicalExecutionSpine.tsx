@@ -14,7 +14,7 @@ const EDITED_FIXTURE = `${JSON.stringify({
 })}\n`;
 
 export function CanonicalExecutionSpine() {
-  const [view, setView] = useState<CanonicalExecutionGatewayResponse | null>(null);
+  const [capabilityReady, setCapabilityReady] = useState(false);
   const [mission, setMission] = useState<CanonicalExecutionGatewayResponse["data"]>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -26,7 +26,13 @@ export function CanonicalExecutionSpine() {
     setMessage("");
     try {
       const next = await work();
-      setView(next);
+      const capabilities = next.data?.capabilities;
+      if (Array.isArray(capabilities)) {
+        setCapabilityReady(
+          capabilities.length > 0
+          && capabilities.every((item) => item.operationalAvailability),
+        );
+      }
       if (next.data?.mission) setMission(next.data);
     } catch (caught) {
       setMessage(
@@ -45,9 +51,7 @@ export function CanonicalExecutionSpine() {
 
   const record = mission?.mission;
   const fixture = record?.fixture;
-  const ready = view?.data?.capabilities?.every(
-    (item) => item.operationalAvailability,
-  ) ?? false;
+  const ready = capabilityReady;
   const completed = record?.state === "completed";
 
   return <DataPanel
