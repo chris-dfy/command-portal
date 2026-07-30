@@ -570,6 +570,8 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
     "canonical.route.post.voice-operator.route-transcript",
   ]) assert.match(client, new RegExp(actionId.replaceAll(".", "\\.")));
   assert.match(client, /\["live_verified", "live_degraded"\]\.includes\(action\.classification\)/);
+  assert.match(client, /contract\.actionId\.startsWith\("canonical\.route\."\)/);
+  assert.match(client, /`\$\{contract\.surface\}:canonical-adapter:\$\{contract\.actionId\}`/);
   assert.match(client, /action\.operationalAvailability === true/);
   assert.match(client, /action\.authorityGranted === false/);
   assert.match(app, /interactionAction=\{copilotInteractionAction\}/);

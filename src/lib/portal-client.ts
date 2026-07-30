@@ -213,7 +213,9 @@ export function canonicalActionAvailability(
     };
   }
   const action = matches[0];
-  const exactInvocationPath = `${contract.surface}:${contract.method} ${contract.pathTemplate}`;
+  const exactInvocationPath = contract.actionId.startsWith("canonical.route.")
+    ? `${contract.surface}:canonical-adapter:${contract.actionId}`
+    : `${contract.surface}:${contract.method} ${contract.pathTemplate}`;
   const contractMatches = (
     action.method === contract.method
     && action.pathTemplate === contract.pathTemplate
