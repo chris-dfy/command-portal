@@ -8,6 +8,12 @@ This project is a standalone command portal: a React frontend served by a Node.j
 
 - **Runtime read credential** -- `COMMAND_PORTAL_RUNTIME_READ_TOKEN` lets the BFF read from the upstream runtime API. Exposure would let an attacker query the upstream system directly within that token's scope.
 - **Runtime-derived operational data** -- status, readiness, claims, proofs, receipts, and related portal data may be sensitive even in read-only form because it reflects internal system state.
+- **Managed human identity ingress** -- Replit identity headers are trusted only
+  on the provider-managed deployment and bound host, with the canonical issuer
+  and provider-owned `REPL_ID` audience. Wrong-host, unmanaged, forged,
+  duplicated, missing, or service-principal identities fail closed. Session
+  cookies retain only a keyed registration fingerprint, never the provider
+  subject binding.
 - **Portal integrity and truth posture** -- the portal is expected to preserve its declared truth boundary (`productionReady=false`, `secretValuesExposed=false`, non-live fixture labeling). Incorrect or forged values could mislead operators.
 - **Service availability** -- the BFF fans out to multiple upstream routes for `/api/portal/snapshot`; resource exhaustion or hanging upstream calls can degrade portal availability.
 - **Static browser bundle and visible configuration** -- frontend assets in `dist/` and browser-visible config from `config/brand.json` must not contain secrets or dangerous active content.

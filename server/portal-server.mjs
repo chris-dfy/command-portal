@@ -23,6 +23,9 @@ import {
   createExecutiveSessionRuntimeClient,
   ExecutiveSessionRuntimeFailure,
 } from "./executive-session-runtime.mjs";
+import {
+  REPLIT_AUTH_CANONICAL_ISSUER,
+} from "./replit-auth-provider.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DIST = join(ROOT, "dist");
@@ -38,13 +41,19 @@ const CAPABILITY_REGISTRY_RELEASE_ID = "NCR-1.0.0";
 const CAPABILITY_REGISTRY_RELEASE_DIGEST = "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa";
 const CAPABILITY_REGISTRY_RESOLUTION_DIGEST = "sha256:376331b2fdde7bbe38e6bad7d09d265666353166e78f71c7c2928e59793ec996";
 const CAPABILITY_REGISTRY_VERIFICATION_POLICY = "nexus.connector-verification-freshness@1.0.0";
-export const REPLIT_AUTH_PROVIDER_ISSUER = "https://replit.com/oidc";
+const CAPABILITY_REGISTRY_MAXIMUM_FUTURE_SKEW_SECONDS = 30;
+export const REPLIT_AUTH_PROVIDER_ISSUER = REPLIT_AUTH_CANONICAL_ISSUER;
 export const MISSION3_SESSION_CAPABILITIES = Object.freeze([
   "executive_session.authenticate",
   "executive_session.read",
   "executive_session.revoke",
 ]);
-export const MISSION3_SESSION_ESTABLISHMENT_RECEIPT_TYPE = "executive_session_establishment";
+export const MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE =
+  "capability_dependency_verification";
+export const MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID =
+  "context_runtime.local_api";
+export const MISSION3_SESSION_ESTABLISHMENT_RECEIPT_TYPE =
+  MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE;
 export const TRUST_BOOTSTRAP_CONTRACT = "nexus.runtime-experience-trust-bootstrap@1.0.0";
 export const CONTEXT_ASSERTION_CONTRACT = "nexus.context-assertion@2.0.0";
 export const CONTEXT_ASSERTION_ALGORITHM = "hmac-sha256";
@@ -631,6 +640,7 @@ export function loadConfig(overrides = {}) {
   const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,actions:simulate,actions:execute,approvals:decide,evidence:write,knowledge:promote,edge:node_admission:request")
     .split(",").map((item) => item.trim()).filter(Boolean);
   const replitDeployment = enabled(overrides.replitDeployment ?? process.env.REPLIT_DEPLOYMENT);
+  const replitId = String(overrides.replitId ?? process.env.REPL_ID ?? "").trim();
   const operationalSessionMode = String(
     overrides.operationalSessionMode
       ?? process.env.COMMAND_PORTAL_SESSION_MODE
@@ -733,6 +743,15 @@ export function loadConfig(overrides = {}) {
       ?? "nexus-web",
     "COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_CLIENT_ID",
   );
+  if (
+    executiveSessionEnabled
+    && replitDeployment
+    && !STABLE_ID_PATTERN.test(replitId)
+  ) {
+    throw new Error(
+      "Managed Replit Auth requires a stable provider-owned REPL_ID.",
+    );
+  }
   const replitAuthIssuer = executiveSessionEnabled
     ? stablePublicIdentifier(
       overrides.replitAuthIssuer
@@ -745,7 +764,7 @@ export function loadConfig(overrides = {}) {
     ? stablePublicIdentifier(
       overrides.replitAuthAudience
         ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_AUDIENCE
-        ?? process.env.REPL_ID,
+        ?? replitId,
       "COMMAND_PORTAL_REPLIT_AUTH_AUDIENCE",
     )
     : "";
@@ -822,6 +841,13 @@ export function loadConfig(overrides = {}) {
       || executiveSessionPolicyId !== EXECUTIVE_SESSION_POLICY_ID
       || executiveSessionPolicyVersion !== EXECUTIVE_SESSION_POLICY_VERSION
       || executiveSessionPolicyDigest !== EXECUTIVE_SESSION_POLICY_DIGEST
+      || (
+        replitDeployment
+        && (
+          replitAuthIssuer !== REPLIT_AUTH_PROVIDER_ISSUER
+          || replitAuthAudience !== replitId
+        )
+      )
     ) {
       throw new Error("Mission 3 registered executive sessions require the exact accepted trust, key, issuer, audience, service, and secret-reference bindings.");
     }
@@ -906,6 +932,7 @@ export function loadConfig(overrides = {}) {
     operationalSessionTtlSeconds: integer(overrides.operationalSessionTtlSeconds ?? process.env.COMMAND_PORTAL_SESSION_TTL_SECONDS, 3600, 300),
     operationalCookieSecure,
     replitDeployment,
+    replitId,
     replitDomains,
     executiveSessionEnabled,
     executiveSessionTtlSeconds,
@@ -2714,7 +2741,10 @@ function duplicateIdentity(records, key) {
   return new Set(identities).size !== identities.length;
 }
 
-function validateCapabilityRegistryProjection(value) {
+function validateCapabilityRegistryProjection(
+  value,
+  clock = () => Date.now(),
+) {
   const projection = objectRecord(value);
   const invalid = (message) => {
     throw new GatewayFailure("capability_registry_response_invalid", message, "Unknown", 502);
@@ -2756,6 +2786,24 @@ function validateCapabilityRegistryProjection(value) {
     || verificationPolicy.networkFailureRewritesConfiguration !== false
   ) {
     invalid("Capability Registry verification policy is invalid.");
+  }
+  const consumerNow = Number(clock());
+  const evaluatedAt = Date.parse(verificationPolicy.evaluatedAt);
+  const projectionAgeSeconds = (consumerNow - evaluatedAt) / 1000;
+  if (
+    !Number.isFinite(consumerNow)
+    || !Number.isFinite(projectionAgeSeconds)
+    || projectionAgeSeconds < -CAPABILITY_REGISTRY_MAXIMUM_FUTURE_SKEW_SECONDS
+  ) {
+    invalid("Capability Registry verification is not current at the consuming Gateway.");
+  }
+  if (projectionAgeSeconds >= verificationPolicy.maxAgeSeconds) {
+    throw new GatewayFailure(
+      "capability_registry_verification_stale",
+      "The Runtime-owned Capability Registry verification has expired.",
+      "Unavailable",
+      503,
+    );
   }
   if (!sameStringArray(projection.classificationVocabulary, CAPABILITY_CLASSIFICATION_VOCABULARY)) {
     invalid("Capability Registry classification vocabulary is invalid.");
@@ -2900,7 +2948,6 @@ function validateCapabilityRegistryProjection(value) {
     invalid("Capability Registry contains an invalid or unsanitized verification receipt.");
   }
   const receiptById = new Map(receipts.map((item) => [item.receiptId, item]));
-  const evaluatedAt = Date.parse(verificationPolicy.evaluatedAt);
   const currentSuccessfulReceipt = (reference, connectorId = null) => {
     const receipt = receiptById.get(receiptIdentity(reference));
     if (!receipt || receipt.successful !== true) return false;
@@ -3069,17 +3116,33 @@ function validateCapabilityRegistryProjection(value) {
   })) {
     invalid("Executive Continuity remediation actions must remain staged or unavailable and non-invocable.");
   }
-  if (projection.mission3Admitted !== deriveMission3Admission(projection)) {
+  if (
+    projection.mission3Admitted
+    !== deriveMission3Admission(projection, clock)
+  ) {
     invalid("Capability Registry mission3Admitted does not match the per-capability session-establishment evidence.");
   }
   return projection;
 }
 
-export function deriveMission3Admission(projection) {
+export function deriveMission3Admission(
+  projection,
+  clock = () => Date.now(),
+) {
   const verificationPolicy = objectRecord(projection?.verificationPolicy);
   if (!verificationPolicy || verificationPolicy.maxAgeSeconds !== 300) return false;
   const evaluatedAt = Date.parse(String(verificationPolicy.evaluatedAt ?? ""));
   if (!Number.isFinite(evaluatedAt)) return false;
+  const consumerNow = Number(clock());
+  const projectionAgeSeconds = (consumerNow - evaluatedAt) / 1000;
+  if (
+    !Number.isFinite(consumerNow)
+    || !Number.isFinite(projectionAgeSeconds)
+    || projectionAgeSeconds < -CAPABILITY_REGISTRY_MAXIMUM_FUTURE_SKEW_SECONDS
+    || projectionAgeSeconds >= verificationPolicy.maxAgeSeconds
+  ) {
+    return false;
+  }
   const capabilities = Array.isArray(projection.capabilities) ? projection.capabilities.map(objectRecord) : [];
   const actions = Array.isArray(projection.actions) ? projection.actions.map(objectRecord) : [];
   const receipts = Array.isArray(projection.verificationReceipts)
@@ -3088,24 +3151,35 @@ export function deriveMission3Admission(projection) {
   if (capabilities.some((item) => !item) || actions.some((item) => !item)) return false;
   const receiptById = new Map(receipts.map((item) => [item.receiptId, item]));
   if (receiptById.size !== receipts.length) return false;
-  const freshSessionEstablishmentReceipt = (references, verifiedAtMs) => (
-    Array.isArray(references) && references.some((reference) => {
+  const dependencyReceipt = (references, verifiedAtMs, capabilityId) => {
+    if (!Array.isArray(references)) return null;
+    const matches = new Map();
+    for (const reference of references) {
       const receipt = receiptById.get(receiptIdentity(reference));
       if (
         !receipt
         || receipt.successful !== true
         || receipt.sanitized !== true
         || receipt.secretValuesExposed !== false
-        || receipt.receiptType !== MISSION3_SESSION_ESTABLISHMENT_RECEIPT_TYPE
+        || receipt.receiptType !== MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE
+        || receipt.connectorId !== MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID
+        || !Array.isArray(receipt.evidenceRefs)
+        || !receipt.evidenceRefs.includes(`capability:${capabilityId}`)
       ) {
-        return false;
+        continue;
       }
       const receiptVerifiedAt = Date.parse(String(receipt.verifiedAt ?? ""));
-      if (!Number.isFinite(receiptVerifiedAt) || receiptVerifiedAt !== verifiedAtMs) return false;
+      if (!Number.isFinite(receiptVerifiedAt) || receiptVerifiedAt !== verifiedAtMs) {
+        continue;
+      }
       const ageSeconds = (evaluatedAt - receiptVerifiedAt) / 1000;
-      return ageSeconds >= -1 && ageSeconds < verificationPolicy.maxAgeSeconds;
-    })
-  );
+      if (ageSeconds >= -1 && ageSeconds < verificationPolicy.maxAgeSeconds) {
+        matches.set(receipt.receiptId, receipt);
+      }
+    }
+    return matches.size === 1 ? [...matches.values()][0] : null;
+  };
+  const dependencyReceiptIds = new Set();
   for (const capabilityId of MISSION3_SESSION_CAPABILITIES) {
     const matches = capabilities.filter((item) => item.capabilityId === capabilityId);
     if (matches.length !== 1) return false;
@@ -3125,7 +3199,13 @@ export function deriveMission3Admission(projection) {
     }
     const evidenceAgeSeconds = (evaluatedAt - verifiedAtMs) / 1000;
     if (evidenceAgeSeconds < -1 || evidenceAgeSeconds >= verificationPolicy.maxAgeSeconds) return false;
-    if (!freshSessionEstablishmentReceipt(capability.receiptRefs, verifiedAtMs)) return false;
+    const receipt = dependencyReceipt(
+      capability.receiptRefs,
+      verifiedAtMs,
+      capabilityId,
+    );
+    if (!receipt || dependencyReceiptIds.has(receipt.receiptId)) return false;
+    dependencyReceiptIds.add(receipt.receiptId);
     const capabilityActions = actions.filter((item) => item.capabilityId === capabilityId);
     if (capabilityActions.length === 0) return false;
     for (const action of capabilityActions) {
@@ -3134,14 +3214,18 @@ export function deriveMission3Admission(projection) {
         || action.operationalAvailability !== true
         || action.invocable !== true
         || action.authorityGranted !== false
+        || action.connectorId !== MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID
         || Date.parse(String(action.lastSuccessfulVerification ?? "")) !== verifiedAtMs
-        || !freshSessionEstablishmentReceipt(action.receiptRefs, verifiedAtMs)
+        || !Array.isArray(action.receiptRefs)
+        || !action.receiptRefs.some(
+          (reference) => receiptIdentity(reference) === receipt.receiptId,
+        )
       ) {
         return false;
       }
     }
   }
-  return true;
+  return dependencyReceiptIds.size === MISSION3_SESSION_CAPABILITIES.length;
 }
 
 const INVOCABLE_ACTION_CLASSIFICATIONS = new Set(["live_verified", "live_degraded"]);
@@ -3155,7 +3239,7 @@ function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
     expiresAt = 0;
   };
   const observe = (value) => {
-    const candidate = validateCapabilityRegistryProjection(value);
+    const candidate = validateCapabilityRegistryProjection(value, clock);
     const scope = candidate.scope;
     if (
       scope.tenantId !== config.operationalTenantId
@@ -3342,11 +3426,15 @@ function validateRuntimeEnvelope(body) {
   return body;
 }
 
-function validateRuntimeReadResponse(body, runtimePath) {
+function validateRuntimeReadResponse(
+  body,
+  runtimePath,
+  clock = () => Date.now(),
+) {
   if (runtimePath !== "/runtime/capability-registry") return validateRuntimeEnvelope(body);
   const sanitized = sanitizeOperationalResponse(body);
   if (sanitized?.recordType === CAPABILITY_REGISTRY_RECORD_TYPE) {
-    const projection = validateCapabilityRegistryProjection(sanitized);
+    const projection = validateCapabilityRegistryProjection(sanitized, clock);
     return {
       status: "ok",
       timestamp: projection.generatedAt,
@@ -3358,11 +3446,16 @@ function validateRuntimeReadResponse(body, runtimePath) {
     };
   }
   const envelope = validateRuntimeEnvelope(sanitized);
-  validateCapabilityRegistryProjection(envelope.data);
+  validateCapabilityRegistryProjection(envelope.data, clock);
   return envelope;
 }
 
-async function fetchRuntime(runtimePath, config, runtimeFetch) {
+async function fetchRuntime(
+  runtimePath,
+  config,
+  runtimeFetch,
+  clock = () => Date.now(),
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   const maximumResponseBytes = runtimePath === "/runtime/capability-registry"
@@ -3400,7 +3493,7 @@ async function fetchRuntime(runtimePath, config, runtimeFetch) {
     let body;
     try { body = JSON.parse(raw.toString("utf8")); }
     catch { throw new GatewayFailure("runtime_response_invalid", "Runtime returned invalid JSON.", "Unknown", 502); }
-    return validateRuntimeReadResponse(body, runtimePath);
+    return validateRuntimeReadResponse(body, runtimePath, clock);
   } finally {
     clearTimeout(timer);
   }
@@ -3648,11 +3741,19 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
   }
 }
 
-async function fetchWithRetry(runtimePath, config, runtimeFetch) {
+async function fetchWithRetry(
+  runtimePath,
+  config,
+  runtimeFetch,
+  clock = () => Date.now(),
+) {
   let failure;
   for (let attempt = 1; attempt <= config.maxAttempts; attempt += 1) {
     try {
-      return { body: await fetchRuntime(runtimePath, config, runtimeFetch), attempts: attempt };
+      return {
+        body: await fetchRuntime(runtimePath, config, runtimeFetch, clock),
+        attempts: attempt,
+      };
     } catch (error) {
       failure = error instanceof GatewayFailure ? error : new GatewayFailure("runtime_unknown", "Runtime request failed.", "Unknown", 502);
       if (!failure.retryable || attempt === config.maxAttempts) break;
@@ -3695,7 +3796,16 @@ function failureEnvelope(config, tracker, route, failure) {
   };
 }
 
-async function readThroughGateway(route, runtimePath, request, config, runtimeFetch, cache, tracker) {
+async function readThroughGateway(
+  route,
+  runtimePath,
+  request,
+  config,
+  runtimeFetch,
+  cache,
+  tracker,
+  clock = () => Date.now(),
+) {
   const cacheable = CACHEABLE_ROUTES.has(route);
   const invalidate = /no-cache|no-store/i.test(String(request.headers["cache-control"] ?? "")) || String(request.headers.pragma ?? "").toLowerCase() === "no-cache";
   if (invalidate) cache.delete(route);
@@ -3705,7 +3815,12 @@ async function readThroughGateway(route, runtimePath, request, config, runtimeFe
   }
 
   try {
-    const { body, attempts } = await fetchWithRetry(runtimePath, config, runtimeFetch);
+    const { body, attempts } = await fetchWithRetry(
+      runtimePath,
+      config,
+      runtimeFetch,
+      clock,
+    );
     const refreshedAt = Date.now();
     const entry = { body, refreshedAt, expiresAt: refreshedAt + config.cacheTtlMs };
     if (cacheable) cache.set(route, entry);
@@ -3722,7 +3837,16 @@ async function readThroughGateway(route, runtimePath, request, config, runtimeFe
   }
 }
 
-async function handleApi(request, response, config, runtimeFetch, cache, tracker, actionAdmission) {
+async function handleApi(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  cache,
+  tracker,
+  actionAdmission,
+  clock = () => Date.now(),
+) {
   if (!requestOriginAllowed(request, config)) {
     return sendJson(response, 403, failureEnvelope(config, tracker, "origin", new GatewayFailure("origin_denied", "Request origin is not allowed.", "Unknown", 403)));
   }
@@ -3774,7 +3898,16 @@ async function handleApi(request, response, config, runtimeFetch, cache, tracker
       );
     }
   }
-  const result = await readThroughGateway(url.pathname, runtimePath, request, config, runtimeFetch, cache, tracker);
+  const result = await readThroughGateway(
+    url.pathname,
+    runtimePath,
+    request,
+    config,
+    runtimeFetch,
+    cache,
+    tracker,
+    clock,
+  );
   if (runtimePath === "/runtime/capability-registry") {
     if (result.status === 200 && result.body.ok && result.body.data) {
       try {
@@ -3921,7 +4054,16 @@ export function createPortalServer(options = {}) {
           sendJson(response, failure.status, failureEnvelope(config, tracker, request.url, failure));
         });
     } else if (request.url?.startsWith("/api/runtime")) {
-      handleApi(request, response, config, runtimeFetch, cache, tracker, actionAdmission)
+      handleApi(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        cache,
+        tracker,
+        actionAdmission,
+        options.clock,
+      )
         .catch(() => sendJson(response, 500, failureEnvelope(config, tracker, request.url, new GatewayFailure("gateway_error", "The Experience Gateway could not complete the read request.", "Unknown", 500))));
     } else if (request.url?.startsWith("/api/local")) {
       handleLocalApi(

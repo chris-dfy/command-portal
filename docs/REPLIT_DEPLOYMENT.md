@@ -54,10 +54,12 @@ is `registered_human_executive`; the Gateway remains the distinct
 
 Provision Replit Auth through Replit Agent and retain its server-side
 verification path. Replit documents Agent as the supported provisioning path
-for Replit Auth. The Gateway must validate the provider identity on the server.
-Until the Agent-generated verifier is wired into the deployed server
-entrypoint, the Gateway remains `configured_not_verified` and the Mission 3
-live gate cannot pass. Local verifier injection is test evidence only.
+for Replit Auth. The Gateway accepts managed identity only on
+`REPLIT_DEPLOYMENT`, on a host bound by `REPLIT_DOMAINS`, with issuer exactly
+`https://replit.com/oidc` and audience exactly the provider-owned `REPL_ID`.
+Until the deployed ingress passes the real login and forged-header/host
+negative matrix, the Gateway remains `configured_not_verified`; local verifier
+injection is test evidence only.
 The browser POSTs an empty body to `/api/executive-session/login`; it never
 submits a provider subject, tenant, workspace, role, scope, policy, or provider
 token. The stable opaque provider subject is hashed into a provider binding and

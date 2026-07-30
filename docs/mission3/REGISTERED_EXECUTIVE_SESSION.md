@@ -57,13 +57,20 @@ Mission 3 establishes one non-production human Executive session:
 6. The Runtime validates the exact registry and policy, consumes the assertion
    once, records the canonical session, replay/revocation lineage, and receipt,
    and returns the complete envelope for Gateway validation.
+7. Mission admission requires three distinct Runtime-owned
+   `capability_dependency_verification` receipts, one for each authenticate,
+   read, and revoke capability. Each receipt is bound to
+   `context_runtime.local_api`, the exact capability ID, its matching live
+   action, and the current 300-second verification window.
 
 The browser supplies no identity or privilege selector and retains no provider
 token or provider subject. Human principal, Gateway service principal,
 tenant/workspace, session, policy, role/scopes, Decision, Mission, Authority,
 and action authorization remain separate. A valid session explicitly records
 no Decision, no Mission, no Authority Grant, no approval, and no action
-authorization.
+authorization. Its signed cookie carries only a keyed, non-correlatable
+registration fingerprint; a provider-subject binding is never browser-visible,
+and any registration or registry-version change invalidates the old cookie.
 
 ## Configuration names
 
@@ -96,6 +103,7 @@ The non-secret bindings are:
 - `COMMAND_PORTAL_REPLIT_AUTH_MAX_TOKEN_LIFETIME_SECONDS`
 - `COMMAND_PORTAL_REPLIT_AUTH_JWKS_TIMEOUT_MS`
 - `COMMAND_PORTAL_REPLIT_AUTH_JWKS_CACHE_SECONDS`
+- `REPL_ID` (provider-owned deployment metadata; also the exact audience)
 - `COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON`
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_ID`
 - `COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION`
@@ -106,13 +114,13 @@ Mission 1 context assertion, Mission 3 browser cookie, and Mission 3 human
 assertion use distinct secrets and key IDs.
 
 Source completion leaves provider state `configured_not_verified` until Replit
-Agent provisions the supported Replit Auth integration and wires its
-server-side verifier into the deployed `createPortalServer` entrypoint. The
-strict JWT/JWKS fallback is usable only when an authenticated provider
-integration supplies the configured token header; the NEXUS browser client
-does not manufacture or retain that token. A real login cannot satisfy the
-Mission gate before this wiring and one provider-authenticated human
-interaction are verified.
+Agent provisions the supported Replit Auth integration, the exact source is
+deployed, and one provider-authenticated human interaction is verified. The
+deployed entrypoint accepts managed identity headers only when
+`REPLIT_DEPLOYMENT` is true, the request host belongs to `REPLIT_DOMAINS`, the
+issuer is exactly `https://replit.com/oidc`, and the audience equals the
+provider-owned `REPL_ID`. The strict JWT/JWKS fallback is separately bounded;
+the NEXUS browser client does not manufacture or retain a provider token.
 
 ## Verification
 

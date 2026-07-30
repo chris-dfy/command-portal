@@ -776,6 +776,53 @@ export function createExecutiveRegistrationMapper(document) {
   });
 }
 
+function executiveRegistrationFingerprint(
+  registration,
+  sessionId,
+  config,
+) {
+  const document = Array.isArray(config.executiveRegistrations)
+    ? {
+        recordType: EXECUTIVE_REGISTRY_RECORD_TYPE,
+        schemaVersion: EXECUTIVE_REGISTRY_CONTRACT,
+        registryVersion: "compatibility-input-not-for-deployment",
+      }
+    : config.executiveRegistrations;
+  const basis = JSON.stringify([
+    "nexus.executive-session-registration-fingerprint@1",
+    sessionId,
+    document?.recordType,
+    document?.schemaVersion,
+    document?.registryVersion,
+    config.replitAuthIssuer,
+    config.replitAuthAudience,
+    registration.registrationId,
+    registration.principalId,
+    registration.principalType,
+    registration.provider,
+    registration.providerIssuer,
+    registration.providerSubjectBinding,
+    registration.providerSubjectClientControlled,
+    registration.providerSubjectRetained,
+    registration.tenantId,
+    registration.workspaceId,
+    registration.role,
+    registration.scopes,
+    registration.policyId,
+    registration.policyVersion,
+    registration.policyDigest,
+    registration.sessionVersion,
+    registration.revocationCheckpoint,
+    registration.maximumSessionLifetimeSeconds,
+    registration.authenticationMethods,
+    registration.state,
+  ]);
+  return hmac(
+    basis,
+    config.executiveSessionCookieSecret,
+  );
+}
+
 function activeClaims(claims, config, current) {
   const registrations = Array.isArray(config.executiveRegistrations)
     ? config.executiveRegistrations
@@ -854,12 +901,19 @@ export function createExecutiveSessionAuthority(
     `${EXECUTIVE_SESSION_COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${
       config.executiveSessionCookieSecure ? "; Secure" : ""
     }`;
-  const encode = (claims) => {
+  const encode = (claims, registration) => {
     const {
       providerSubjectBinding: _serverOnlyProviderSubjectBinding,
       ...browserClaims
     } = claims;
-    const payload = b64(JSON.stringify(browserClaims));
+    const payload = b64(JSON.stringify({
+      ...browserClaims,
+      registrationFingerprint: executiveRegistrationFingerprint(
+        registration,
+        claims.sid,
+        config,
+      ),
+    }));
     return `${payload}.${hmac(payload, config.executiveSessionCookieSecret)}`;
   };
   const isRevoked = (claims, current) => {
@@ -886,6 +940,10 @@ export function createExecutiveSessionAuthority(
     }
     try {
       const storedClaims = JSON.parse(unb64(payload).toString("utf8"));
+      const {
+        registrationFingerprint,
+        ...browserClaims
+      } = storedClaims;
       const registrations = Array.isArray(config.executiveRegistrations)
         ? config.executiveRegistrations
         : config.executiveRegistrations?.principals;
@@ -895,12 +953,24 @@ export function createExecutiveSessionAuthority(
               item?.registrationId === storedClaims?.registrationId,
           )
         : null;
-      const claims = registration
-        ? {
-            ...storedClaims,
-            providerSubjectBinding: registration.providerSubjectBinding,
-          }
-        : storedClaims;
+      if (
+        !registration
+        || typeof registrationFingerprint !== "string"
+        || !safeEqual(
+          registrationFingerprint,
+          executiveRegistrationFingerprint(
+            registration,
+            browserClaims.sid,
+            config,
+          ),
+        )
+      ) {
+        return null;
+      }
+      const claims = {
+        ...browserClaims,
+        providerSubjectBinding: registration.providerSubjectBinding,
+      };
       const current = nowSeconds(clock);
       return activeClaims(claims, config, current) &&
         !isRevoked(claims, current)
@@ -929,6 +999,7 @@ export function createExecutiveSessionAuthority(
       if (
         identity.provider !== registration.provider ||
         identity.issuer !== registration.providerIssuer ||
+        identity.audience !== config.replitAuthAudience ||
         identity.providerSubjectBinding !== registration.providerSubjectBinding ||
         !sameArray(identity.authnMethods, registration.authenticationMethods) ||
         !Number.isSafeInteger(identity.authnTime) ||
@@ -979,7 +1050,7 @@ export function createExecutiveSessionAuthority(
       });
       return {
         claims,
-        cookie: cookie(encode(claims), sessionLifetime),
+        cookie: cookie(encode(claims, registration), sessionLifetime),
         csrfToken: csrf(claims),
       };
     },

@@ -22,9 +22,12 @@
 //   untouched — this module only resolves identity.
 
 const PROVIDER = "replit-auth";
+export const REPLIT_AUTH_CANONICAL_ISSUER = "https://replit.com/oidc";
 const VERIFIED_SUBJECT_HEADER = "x-replit-user-id";
 const VERIFIED_NAME_HEADER = "x-replit-user-name";
 const SUBJECT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$/;
+const PROVIDER_RESOURCE_ID_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9._:@/-]{2,191}$/;
 
 class ReplitAuthProviderFailure extends Error {
   constructor(message) {
@@ -49,6 +52,19 @@ const requestHost = (request) => {
 export function createReplitAuthIdentityVerifier(config, { clock = () => Date.now() } = {}) {
   if (!config || typeof config !== "object") {
     throw new Error("Replit Auth identity verification requires the Gateway configuration.");
+  }
+  const replitId = String(config.replitId ?? "").trim();
+  if (
+    config.replitDeployment === true
+    && (
+      config.replitAuthIssuer !== REPLIT_AUTH_CANONICAL_ISSUER
+      || !PROVIDER_RESOURCE_ID_PATTERN.test(replitId)
+      || config.replitAuthAudience !== replitId
+    )
+  ) {
+    throw new Error(
+      "Managed Replit Auth requires the canonical issuer and exact provider-owned REPL_ID audience.",
+    );
   }
   const serviceSubjects = new Set(
     [
@@ -88,8 +104,8 @@ export function createReplitAuthIdentityVerifier(config, { clock = () => Date.no
     }
     return Object.freeze({
       provider: PROVIDER,
-      issuer: config.replitAuthIssuer,
-      audience: config.replitAuthAudience,
+      issuer: REPLIT_AUTH_CANONICAL_ISSUER,
+      audience: replitId,
       subject,
       authnTime: Math.floor(clock() / 1000),
       authnMethods: Object.freeze([PROVIDER]),

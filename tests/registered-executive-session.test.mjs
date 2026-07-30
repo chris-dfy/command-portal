@@ -512,6 +512,26 @@ test("signed browser session is bounded, revocable, config-bound, and exposes no
     ),
     false,
   );
+  assert.match(
+    cookiePayload.registrationFingerprint,
+    /^[A-Za-z0-9_-]{43}$/,
+  );
+  assert.notEqual(
+    cookiePayload.registrationFingerprint,
+    registration.providerSubjectBinding,
+  );
+  const secondCookie = authority.issue(identity, registration).cookie
+    .split(";", 1)[0];
+  const secondCookiePayload = JSON.parse(
+    Buffer.from(
+      secondCookie.slice(secondCookie.indexOf("=") + 1).split(".")[0],
+      "base64url",
+    ).toString("utf8"),
+  );
+  assert.notEqual(
+    cookiePayload.registrationFingerprint,
+    secondCookiePayload.registrationFingerprint,
+  );
   const claims = authority.authenticate({ headers: { cookie } });
   assert.ok(claims);
   assert.equal(claims.principalId, registration.principalId);
@@ -546,6 +566,7 @@ test("signed browser session is bounded, revocable, config-bound, and exposes no
     { authnTime: BASE_TIME_SECONDS - 301 },
     { authnTime: BASE_TIME_SECONDS + 1 },
     { issuer: "https://other-provider.example" },
+    { audience: "other-provider-audience" },
     { providerSubjectBinding: `sha256:${"b".repeat(64)}` },
     { authnMethods: ["replit-auth"] },
   ]) {
@@ -557,7 +578,7 @@ test("signed browser session is bounded, revocable, config-bound, and exposes no
   }
 });
 
-test("tenant, workspace, role, scope, policy, version, and revocation changes invalidate prior cookies", () => {
+test("registration trust, scope, policy, version, and revocation changes invalidate prior cookies", () => {
   const identity = {
     provider: "replit-auth",
     issuer: PROVIDER_ISSUER,
@@ -578,6 +599,8 @@ test("tenant, workspace, role, scope, policy, version, and revocation changes in
     { policyDigest: `sha256:${"b".repeat(64)}` },
     { sessionVersion: 2 },
     { revocationCheckpoint: 1 },
+    { providerSubjectBinding: `sha256:${"c".repeat(64)}` },
+    { authenticationMethods: ["replit-auth"] },
   ]) {
     const changed = {
       ...config,
@@ -592,6 +615,27 @@ test("tenant, workspace, role, scope, policy, version, and revocation changes in
       }),
       null,
       JSON.stringify(mutation),
+    );
+  }
+
+  for (const changed of [
+    {
+      ...config,
+      replitAuthAudience: "other-provider-audience",
+    },
+    {
+      ...config,
+      executiveRegistrations: {
+        ...registryDocument,
+        registryVersion: "nonproduction-2.0.0",
+      },
+    },
+  ]) {
+    assert.equal(
+      createExecutiveSessionAuthority(changed, clock).authenticate({
+        headers: { cookie },
+      }),
+      null,
     );
   }
 });

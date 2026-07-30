@@ -20,6 +20,7 @@ const HUMAN_SUBJECT = "opaque-replit-provider-subject-9342";
 
 const config = Object.freeze({
   replitDeployment: true,
+  replitId: AUDIENCE,
   replitDomains: ["portal.example.replit.app"],
   replitAuthIssuer: ISSUER,
   replitAuthAudience: AUDIENCE,
@@ -82,6 +83,24 @@ test("forged or tampered identities outside the managed ingress are never truste
   await rejects(verifier, request({ host: "attacker.example" }));
   await rejects(verifier, request({ "x-replit-user-id": ["array", "smuggled"] }));
   await rejects(verifier, request({ "x-replit-user-id": "-leading-invalid" }));
+});
+
+test("managed provider configuration pins the canonical issuer and exact REPL_ID audience", () => {
+  for (const drift of [
+    { replitAuthIssuer: "https://forged-issuer.example" },
+    { replitAuthAudience: "forged-audience" },
+    { replitId: "different-provider-resource" },
+    { replitId: "" },
+    { replitId: "-malformed-provider-resource" },
+  ]) {
+    assert.throws(
+      () => createReplitAuthIdentityVerifier(
+        { ...config, ...drift },
+        { clock },
+      ),
+      /canonical issuer and exact provider-owned REPL_ID audience/,
+    );
+  }
 });
 
 test("the Experience Gateway service principal is never accepted as a human identity", async () => {
@@ -147,15 +166,20 @@ test("the adapter reduces the verified subject to an opaque binding and normaliz
 
 test("wrong issuer or wrong audience from the provider seam fails closed as invalid identity", async () => {
   for (const drift of [
-    { replitAuthIssuer: "https://forged-issuer.example" },
-    { replitAuthAudience: "forged-audience" },
+    { issuer: "https://forged-issuer.example" },
+    { audience: "forged-audience" },
   ]) {
     const adapter = createReplitAuthAdapter(config, {
       clock,
-      providerIdentityVerifier: createReplitAuthIdentityVerifier(
-        { ...config, ...drift },
-        { clock },
-      ),
+      providerIdentityVerifier: async () => ({
+        provider: "replit-auth",
+        issuer: ISSUER,
+        audience: AUDIENCE,
+        subject: HUMAN_SUBJECT,
+        authnTime: Math.floor(BASE_TIME / 1000),
+        authnMethods: ["replit-auth"],
+        ...drift,
+      }),
     });
     await assert.rejects(
       () => adapter.verify(request()),

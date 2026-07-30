@@ -910,3 +910,64 @@ test("configuration pins the accepted policy and purpose-bound identities and re
       ));
   }
 });
+
+test("managed Replit configuration derives provider trust only from canonical issuer and REPL_ID", () => {
+  const managedIssuer = "https://replit.com/oidc";
+  const managedAudience = "repl-managed-nonproduction";
+  const managedRegistration = {
+    ...registration,
+    providerIssuer: managedIssuer,
+    providerSubjectBinding: providerSubjectBinding(
+      "replit-auth",
+      managedIssuer,
+      RAW_PROVIDER_SUBJECT,
+    ),
+  };
+  const managedOverrides = {
+    replitDeployment: true,
+    replitId: managedAudience,
+    replitDomains: "portal.example.replit.app",
+    replitAuthIssuer: managedIssuer,
+    replitAuthAudience: managedAudience,
+    executiveRegistrations: {
+      ...registryDocument,
+      principals: [managedRegistration],
+    },
+  };
+  const managed = loadConfig(configOverrides(managedOverrides));
+  assert.equal(managed.replitAuthIssuer, managedIssuer);
+  assert.equal(managed.replitAuthAudience, managed.replitId);
+
+  for (const mutation of [
+    { replitAuthAudience: "forged-audience" },
+    { replitId: "" },
+    { replitId: "-malformed-provider-resource" },
+  ]) {
+    assert.throws(() =>
+      loadConfig(configOverrides({
+        ...managedOverrides,
+        ...mutation,
+      })),
+    );
+  }
+
+  const forgedIssuer = "https://forged-issuer.example";
+  assert.throws(() =>
+    loadConfig(configOverrides({
+      ...managedOverrides,
+      replitAuthIssuer: forgedIssuer,
+      executiveRegistrations: {
+        ...registryDocument,
+        principals: [{
+          ...managedRegistration,
+          providerIssuer: forgedIssuer,
+          providerSubjectBinding: providerSubjectBinding(
+            "replit-auth",
+            forgedIssuer,
+            RAW_PROVIDER_SUBJECT,
+          ),
+        }],
+      },
+    })),
+  );
+});

@@ -6,8 +6,9 @@ import {
   CAPABILITY_REGISTRY_SCHEMA_VERSION,
   createPortalServer,
   deriveMission3Admission,
+  MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID,
+  MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE,
   MISSION3_SESSION_CAPABILITIES,
-  MISSION3_SESSION_ESTABLISHMENT_RECEIPT_TYPE,
 } from "../server/portal-server.mjs";
 
 const servers = [];
@@ -173,7 +174,7 @@ function baseLiveProjection(generatedAt = new Date().toISOString()) {
 const sessionReceiptId = (capabilityId) => `SESSION-ESTABLISH-${capabilityId.split(".").pop().toUpperCase()}`;
 
 function sessionCapability(capabilityId, verifiedAt) {
-  const receiptRef = `connector-receipt:${sessionReceiptId(capabilityId)}`;
+  const receiptRef = sessionReceiptId(capabilityId);
   return {
     capabilityId,
     classification: "live_verified",
@@ -195,7 +196,7 @@ function sessionAction(capabilityId, verifiedAt) {
   return {
     actionId: `executive_session.action.${suffix}`,
     capabilityId,
-    connectorId: "replit-auth",
+    connectorId: MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID,
     handlerId: `executive_session.gateway.${suffix}`,
     operationId: `executive_session.gateway.${suffix}`,
     inputSchemaId: `contracts.capabilities.executiveSession.${suffix}Input`,
@@ -208,7 +209,7 @@ function sessionAction(capabilityId, verifiedAt) {
     authorizationRequirement: "Mission 3 registered executive session; no execution Authority is granted.",
     authorityGranted: false,
     lastSuccessfulVerification: verifiedAt,
-    receiptRefs: [`connector-receipt:${sessionReceiptId(capabilityId)}`],
+    receiptRefs: [sessionReceiptId(capabilityId)],
     limitations: ["The typed session action is bounded by the Mission 3 contract."],
     requiredNextAction: "No Gateway remediation is required.",
   };
@@ -217,11 +218,17 @@ function sessionAction(capabilityId, verifiedAt) {
 function sessionReceipt(capabilityId, verifiedAt) {
   return {
     receiptId: sessionReceiptId(capabilityId),
-    receiptType: MISSION3_SESSION_ESTABLISHMENT_RECEIPT_TYPE,
-    connectorId: "replit-auth",
+    receiptType: MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE,
+    connectorId: MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID,
     verifiedAt,
     successful: true,
-    evidenceRefs: [`runtime-evidence:${sessionReceiptId(capabilityId)}`],
+    evidenceRefs: [
+      `capability:${capabilityId}`,
+      `accountability:executive-session/${sessionReceiptId(capabilityId)}`,
+      `digest:sha256:${"a".repeat(64)}`,
+      `session-replay:${sessionReceiptId(capabilityId)}`,
+      `configuration:sha256:${"b".repeat(64)}`,
+    ],
     sanitized: true,
     secretValuesExposed: false,
   };
@@ -252,7 +259,7 @@ function admittedProjection({ generatedAt = new Date().toISOString(), mutate } =
   return resign(projection);
 }
 
-async function start(projection) {
+async function start(projection, { clock } = {}) {
   const runtimeFetch = async (url) => new Response(JSON.stringify({
     status: "ok",
     timestamp: "2026-07-30T00:00:00Z",
@@ -273,6 +280,7 @@ async function start(projection) {
       retryDelayMs: 0,
     },
     runtimeFetch,
+    clock,
   });
   servers.push(server);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -283,7 +291,7 @@ const fetchRegistry = async (base) => fetch(`${base}/api/runtime/capability-regi
   headers: { "Cache-Control": "no-cache" },
 });
 
-test("mission3Admitted is true only under the full per-capability session-establishment conjunction", async () => {
+test("mission3Admitted accepts the exact Runtime per-capability dependency receipt shape", async () => {
   const projection = admittedProjection();
   assert.equal(deriveMission3Admission(projection), true);
   const base = await start(projection);
@@ -324,7 +332,7 @@ test("session evidence older than 300 seconds yields mission3Admitted=false", ()
         }
       }
       for (const receipt of candidate.verificationReceipts) {
-        if (receipt.receiptType === MISSION3_SESSION_ESTABLISHMENT_RECEIPT_TYPE) {
+        if (receipt.receiptType === MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE) {
           receipt.verifiedAt = staleAt;
         }
       }
@@ -361,7 +369,7 @@ test("a fresh unrelated canonical-route receipt never keeps stale session eviden
         }
       }
       for (const receipt of candidate.verificationReceipts) {
-        if (receipt.receiptType === MISSION3_SESSION_ESTABLISHMENT_RECEIPT_TYPE) {
+        if (receipt.receiptType === MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE) {
           receipt.verifiedAt = staleAt;
         }
       }
@@ -403,6 +411,153 @@ test("a mismatched action (wrong capability or wrong verification timestamp) yie
     },
   });
   assert.equal(deriveMission3Admission(wrongTimestamp), false);
+});
+
+test("wrong dependency type, connector, capability evidence, sharing, or action reference fails admission", () => {
+  const mutations = [
+    (candidate) => {
+      candidate.verificationReceipts.find(
+        (item) => item.receiptId === sessionReceiptId("executive_session.read"),
+      ).receiptType = "canonical_route_contract_verification";
+    },
+    (candidate) => {
+      candidate.verificationReceipts.find(
+        (item) => item.receiptId === sessionReceiptId("executive_session.read"),
+      ).connectorId = "replit-auth";
+    },
+    (candidate) => {
+      const receipt = candidate.verificationReceipts.find(
+        (item) => item.receiptId === sessionReceiptId("executive_session.read"),
+      );
+      receipt.evidenceRefs = receipt.evidenceRefs.filter(
+        (reference) => reference !== "capability:executive_session.read",
+      );
+    },
+    (candidate) => {
+      const sharedReceiptId = sessionReceiptId(
+        "executive_session.authenticate",
+      );
+      const sharedReceipt = candidate.verificationReceipts.find(
+        (item) => item.receiptId === sharedReceiptId,
+      );
+      sharedReceipt.evidenceRefs.push(
+        "capability:executive_session.read",
+        "capability:executive_session.revoke",
+      );
+      for (const capability of candidate.capabilities) {
+        if (MISSION3_SESSION_CAPABILITIES.includes(capability.capabilityId)) {
+          capability.receiptRefs = [sharedReceiptId];
+        }
+      }
+      for (const action of candidate.actions) {
+        if (MISSION3_SESSION_CAPABILITIES.includes(action.capabilityId)) {
+          action.receiptRefs = [sharedReceiptId];
+        }
+      }
+    },
+    (candidate) => {
+      candidate.actions.find(
+        (item) => item.capabilityId === "executive_session.read",
+      ).receiptRefs = [
+        sessionReceiptId("executive_session.authenticate"),
+      ];
+    },
+    (candidate) => {
+      for (const capability of candidate.capabilities) {
+        if (MISSION3_SESSION_CAPABILITIES.includes(capability.capabilityId)) {
+          capability.receiptRefs = [GITHUB_RECEIPT_ID];
+        }
+      }
+      for (const action of candidate.actions) {
+        if (MISSION3_SESSION_CAPABILITIES.includes(action.capabilityId)) {
+          action.receiptRefs = [GITHUB_RECEIPT_ID];
+        }
+      }
+    },
+  ];
+  for (const mutate of mutations) {
+    assert.equal(
+      deriveMission3Admission(admittedProjection({ mutate })),
+      false,
+    );
+  }
+});
+
+test("consumer wall clock rejects stale and far-future projections but permits bounded skew", async () => {
+  const evaluatedAt = Date.parse("2026-07-30T12:00:00Z");
+  const projection = admittedProjection({
+    generatedAt: new Date(evaluatedAt).toISOString(),
+  });
+  assert.equal(
+    deriveMission3Admission(projection, () => evaluatedAt + 299_999),
+    true,
+  );
+  assert.equal(
+    deriveMission3Admission(projection, () => evaluatedAt + 300_000),
+    false,
+  );
+  assert.equal(
+    deriveMission3Admission(projection, () => evaluatedAt - 30_000),
+    true,
+  );
+  assert.equal(
+    deriveMission3Admission(projection, () => evaluatedAt - 30_001),
+    false,
+  );
+
+  const staleBase = await start(
+    projection,
+    { clock: () => evaluatedAt + 300_000 },
+  );
+  assert.equal((await fetchRegistry(staleBase)).status, 503);
+  const futureBase = await start(
+    projection,
+    { clock: () => evaluatedAt - 30_001 },
+  );
+  assert.equal((await fetchRegistry(futureBase)).status, 502);
+});
+
+test("Gateway readback never extends admission beyond the Runtime evaluation window", async () => {
+  const evaluatedAt = Date.parse("2026-07-30T12:00:00Z");
+  let current = evaluatedAt;
+  let runtimeCalls = 0;
+  const projection = admittedProjection({
+    generatedAt: new Date(evaluatedAt).toISOString(),
+  });
+  const runtimeFetch = async () => {
+    runtimeCalls += 1;
+    return new Response(JSON.stringify({
+      status: "ok",
+      timestamp: new Date(evaluatedAt).toISOString(),
+      schemaVersion: "1.0.0",
+      runtimeVersion: "0.1.0",
+      proofIds: ["runtime-proof-1"],
+      limitations: ["read only"],
+      data: projection,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const server = createPortalServer({
+    config: {
+      port: 0,
+      runtimeBaseUrl: "https://runtime.invalid",
+      runtimeToken: "server-only-test-token",
+      timeoutMs: 30,
+      cacheTtlMs: 60_000,
+      maxAttempts: 1,
+      retryDelayMs: 0,
+    },
+    runtimeFetch,
+    clock: () => current,
+  });
+  servers.push(server);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const freshResponse = await fetchRegistry(base);
+  const freshBody = await freshResponse.clone().json();
+  assert.equal(freshResponse.status, 200, JSON.stringify(freshBody));
+  current = evaluatedAt + 300_000;
+  assert.equal((await fetchRegistry(base)).status, 503);
+  assert.equal(runtimeCalls, 2);
 });
 
 test("duplicate executive-session capability entries are rejected", async () => {
