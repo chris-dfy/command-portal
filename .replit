@@ -39,3 +39,7 @@ COMMAND_PORTAL_WORKSPACE_ID = "primary"
 
 [userenv.development]
 COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED = "true"
+COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST = "sha256:b1f6a2cdf2153ac48236867e5e1aeab794842256410f3f314fc2655008a2be78"
+COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON = "{\"recordType\":\"nexus_registered_executive_principal_registry\",\"schemaVersion\":\"nexus.registered-executive-principal-registry@1.0.0\",\"registryVersion\":\"nonproduction-1.0.0\",\"principals\":[{\"registrationId\":\"REG-NONPROD-EXECUTIVE-1\",\"principalId\":\"nexus-executive-nonprod-1\",\"principalType\":\"registered_human_executive\",\"provider\":\"replit-auth\",\"providerIssuer\":\"https://replit.com/oidc\",\"providerSubjectBinding\":\"sha256:a579085498357369ed0680fa1e35d701c119b882b5b35bc63a052588bc90b099\",\"providerSubjectClientControlled\":false,\"providerSubjectRetained\":false,\"tenantId\":\"nexicron\",\"workspaceId\":\"primary\",\"role\":\"executive\",\"scopes\":[\"executive_session.read\",\"executive_session.revoke\"],\"policyId\":\"registered-executive-session-policy\",\"policyVersion\":\"1.0.0\",\"policyDigest\":\"sha256:b1f6a2cdf2153ac48236867e5e1aeab794842256410f3f314fc2655008a2be78\",\"sessionVersion\":1,\"revocationCheckpoint\":0,\"maximumSessionLifetimeSeconds\":3600,\"authenticationMethods\":[\"replit-auth\"],\"state\":\"active\"}]}"
+COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET_REF = "env:COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET"
+NEXUS_HUMAN_SESSION_ASSERTION_SECRET_REF = "env:NEXUS_HUMAN_SESSION_ASSERTION_SECRET"
