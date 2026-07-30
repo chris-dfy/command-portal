@@ -501,7 +501,7 @@ test("Runtime information renders one canonical capability projection and Execut
     read("../src/styles.css"),
     read("../server/portal-server.mjs"),
   ]);
-  assert.match(server, /"\/api\/runtime\/capability-registry": "\/runtime\/capability-registry"/);
+  assert.match(server, /"\/api\/runtime\/capability-registry": "\/capabilities\/registry"/);
   assert.match(client, /nexus_live_capability_registry_projection/);
   assert.match(client, /nexus\.live-capability-registry@1\.0\.0/);
   assert.match(client, /capability_registry_response_invalid/);
