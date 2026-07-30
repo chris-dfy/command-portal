@@ -26,6 +26,10 @@ import {
 import {
   REPLIT_AUTH_CANONICAL_ISSUER,
 } from "./replit-auth-provider.mjs";
+import {
+  createProviderSessionIdentityVerifier,
+  createReplitAuthInteractiveHandler,
+} from "./replit-auth-oidc.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DIST = join(ROOT, "dist");
@@ -821,6 +825,51 @@ export function loadConfig(overrides = {}) {
       "COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST",
     )
     : "";
+  const providerInteractiveAuthEnabled = enabled(
+    overrides.providerInteractiveAuthEnabled
+      ?? process.env.COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED,
+  );
+  const providerSessionSecret = providerInteractiveAuthEnabled
+    ? requiredSecret(
+      overrides.providerSessionSecret ?? process.env.SESSION_SECRET,
+      "SESSION_SECRET",
+      32,
+    )
+    : "";
+  const providerSessionTtlSeconds = integer(
+    overrides.providerSessionTtlSeconds
+      ?? process.env.COMMAND_PORTAL_PROVIDER_SESSION_TTL_SECONDS,
+    3_600,
+    60,
+  );
+  if (providerInteractiveAuthEnabled) {
+    if (!executiveSessionEnabled) {
+      throw new Error("Interactive Replit Auth requires registered executive sessions to be enabled.");
+    }
+    if (!STABLE_ID_PATTERN.test(replitId)) {
+      throw new Error("Interactive Replit Auth requires a stable provider-owned REPL_ID.");
+    }
+    if (
+      replitAuthIssuer !== REPLIT_AUTH_PROVIDER_ISSUER
+      || replitAuthAudience !== replitId
+    ) {
+      throw new Error("Interactive Replit Auth requires the managed provider issuer and REPL_ID audience.");
+    }
+    if (providerSessionTtlSeconds > 86_400) {
+      throw new Error("Interactive provider session lifetime exceeds the accepted bound.");
+    }
+    if (
+      new Set([
+        runtimeToken,
+        contextAssertionSecret,
+        executiveSessionCookieSecret,
+        humanSessionAssertionSecret,
+        providerSessionSecret,
+      ]).size !== 5
+    ) {
+      throw new Error("The interactive provider session secret must be purpose-bound and distinct.");
+    }
+  }
   let executiveRegistrations = executiveSessionEnabled
     ? registeredExecutives(
       overrides.executiveRegistrations
@@ -948,6 +997,9 @@ export function loadConfig(overrides = {}) {
     humanSessionAssertionTtlSeconds,
     humanSessionServiceBindingId,
     humanSessionAssertionClientId,
+    providerInteractiveAuthEnabled,
+    providerSessionSecret,
+    providerSessionTtlSeconds,
     replitAuthIssuer,
     replitAuthAudience,
     replitAuthJwksUrl,
@@ -3981,11 +4033,23 @@ export function createPortalServer(options = {}) {
   const executiveRegistrationMapper = config.executiveSessionEnabled
     ? createExecutiveRegistrationMapper(config.executiveRegistrations)
     : null;
+  const providerInteractiveAuth = config.providerInteractiveAuthEnabled
+    ? createReplitAuthInteractiveHandler(config, {
+      clock: options.clock,
+      oidc: options.providerInteractiveOidc,
+    })
+    : null;
   const executiveProviderAdapter = config.executiveSessionEnabled
     ? createReplitAuthAdapter(config, {
       fetchImpl: options.providerFetch ?? globalThis.fetch,
       clock: options.clock,
-      providerIdentityVerifier: options.providerIdentityVerifier,
+      providerIdentityVerifier: options.providerIdentityVerifier
+        ?? (providerInteractiveAuth && !config.replitDeployment
+          ? createProviderSessionIdentityVerifier(
+            config,
+            providerInteractiveAuth.sessionService,
+          )
+          : undefined),
     })
     : null;
   const executiveSessionAuthority = config.executiveSessionEnabled
@@ -4004,7 +4068,28 @@ export function createPortalServer(options = {}) {
   const cache = new Map();
   const tracker = { lastSuccessfulConnection: null, lastSuccessfulRefresh: null };
   const server = createServer((request, response) => {
-    if (request.url?.startsWith("/api/executive-session")) {
+    if (request.url?.startsWith("/api/auth")) {
+      if (!providerInteractiveAuth) {
+        return sendJson(response, 404, {
+          ok: false,
+          error: {
+            code: "route_not_allowlisted",
+            message: "Interactive provider authentication is not enabled.",
+          },
+          truth: TRUTH,
+        });
+      }
+      providerInteractiveAuth
+        .handle(request, response)
+        .catch(() => sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "provider_auth_gateway_error",
+            message: "Interactive provider authentication failed safely.",
+          },
+          truth: TRUTH,
+        }));
+    } else if (request.url?.startsWith("/api/executive-session")) {
       handleExecutiveSessionApi(
         request,
         response,
@@ -4087,6 +4172,7 @@ export function createPortalServer(options = {}) {
     tracker,
     config,
     sessionAuthority,
+    providerInteractiveAuth,
     executiveRegistrationMapper,
     executiveProviderAdapter,
     executiveSessionAuthority,

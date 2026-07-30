@@ -148,5 +148,10 @@ export function RegisteredExecutiveSession() {
       Login sends an empty same-origin request. Identity, tenant, workspace, role, and scope are selected
       only by server verification and registration; this client stores no provider token or provider subject.
     </p>
+    <p className="boundary-note">
+      Need a provider sign-in first? <a href="/api/auth/login">Sign in with Replit</a> or{" "}
+      <a href="/api/auth/logout">sign out</a>. Signing in only authenticates you at the provider;
+      it grants no Authority, Decision, Mission, approval, or action authorization.
+    </p>
   </DataPanel>;
 }

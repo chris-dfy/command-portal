@@ -188,12 +188,22 @@ export function providerSubjectBinding(provider, issuer, subject) {
   return `sha256:${digest}`;
 }
 
+const PROVIDER_SUBJECT_BINDING_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
 function validateProviderIdentity(value, config) {
   const identity = record(value);
   const provider = String(identity?.provider ?? identity?.providerId ?? "");
   const issuer = String(identity?.issuer ?? "");
   const audience = String(identity?.audience ?? "");
   const subject = identity?.subject;
+  // Additive Mission 3 provider-truth path: a server-side verifier may reduce
+  // the provider subject to the opaque binding before it ever reaches this
+  // module. Such an identity must not carry a raw subject at all.
+  const subjectBinding = identity?.subjectBinding;
+  const reduced =
+    typeof subjectBinding === "string" &&
+    PROVIDER_SUBJECT_BINDING_PATTERN.test(subjectBinding) &&
+    subject === undefined;
   const authnTime = Number(
     identity?.authnTime ?? identity?.authenticatedAt ?? identity?.authTime,
   );
@@ -204,7 +214,7 @@ function validateProviderIdentity(value, config) {
     provider !== "replit-auth" ||
     issuer !== config.replitAuthIssuer ||
     audience !== config.replitAuthAudience ||
-    typeof subject !== "string" ||
+    (!reduced && (subjectBinding !== undefined || typeof subject !== "string")) ||
     !Number.isSafeInteger(authnTime) ||
     authnTime <= 0 ||
     !authnMethods
@@ -219,7 +229,9 @@ function validateProviderIdentity(value, config) {
     provider,
     issuer,
     audience,
-    providerSubjectBinding: providerSubjectBinding(provider, issuer, subject),
+    providerSubjectBinding: reduced
+      ? subjectBinding
+      : providerSubjectBinding(provider, issuer, subject),
     authnTime,
     authnMethods: Object.freeze(authnMethods),
   });

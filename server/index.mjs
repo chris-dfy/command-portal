@@ -4,7 +4,10 @@ import { createReplitAuthIdentityVerifier } from "./replit-auth-provider.mjs";
 const config = loadConfig();
 const server = createPortalServer({
   config,
-  providerIdentityVerifier: config.executiveSessionEnabled
+  // Managed-ingress verification remains authoritative in Replit deployments.
+  // Outside deployments, createPortalServer falls back to the interactive
+  // Replit Auth (OIDC) provider-session verifier when it is enabled.
+  providerIdentityVerifier: config.executiveSessionEnabled && config.replitDeployment
     ? createReplitAuthIdentityVerifier(config)
     : undefined,
 });
