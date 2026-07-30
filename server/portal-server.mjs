@@ -2,7 +2,7 @@ import { createReadStream, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { createSessionAuthority, requiredScope } from "./operational-auth.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -10,6 +10,15 @@ const DIST = join(ROOT, "dist");
 
 export const SUPPORTED_SCHEMA_VERSION = "1.0.0";
 export const SUPPORTED_RUNTIME_VERSION = "0.1.0";
+export const CAPABILITY_REGISTRY_SCHEMA_VERSION = "nexus.live-capability-registry@1.0.0";
+export const CAPABILITY_REGISTRY_RECORD_TYPE = "nexus_live_capability_registry_projection";
+const CAPABILITY_REGISTRY_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const CAPABILITY_REGISTRY_OWNER = "context_runtime";
+const CAPABILITY_REGISTRY_PROJECTION_OWNER = "runtime.state.RuntimeState.capability_registry_projection";
+const CAPABILITY_REGISTRY_RELEASE_ID = "NCR-1.0.0";
+const CAPABILITY_REGISTRY_RELEASE_DIGEST = "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa";
+const CAPABILITY_REGISTRY_RESOLUTION_DIGEST = "sha256:376331b2fdde7bbe38e6bad7d09d265666353166e78f71c7c2928e59793ec996";
+const CAPABILITY_REGISTRY_VERIFICATION_POLICY = "nexus.connector-verification-freshness@1.0.0";
 export const TRUST_BOOTSTRAP_CONTRACT = "nexus.runtime-experience-trust-bootstrap@1.0.0";
 export const CONTEXT_ASSERTION_CONTRACT = "nexus.context-assertion@2.0.0";
 export const CONTEXT_ASSERTION_ALGORITHM = "hmac-sha256";
@@ -35,6 +44,7 @@ export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/diagnostics": "/runtime/diagnostics",
   "/api/runtime/governance": "/runtime/governance",
   "/api/runtime/connectors": "/runtime/connectors",
+  "/api/runtime/capability-registry": "/runtime/capability-registry",
   "/api/runtime/realtime-voice": "/runtime/voice/realtime/status",
   "/api/runtime/conclave": "/runtime/conclave/status",
   "/api/runtime/eox": "/runtime/executive-operating-loop",
@@ -96,6 +106,170 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/interactions/status": { method: "GET", runtimePath: "/runtime/interactions/status", target: "platform" },
   "/api/local/interactions": { method: "POST", runtimePath: "/runtime/interactions", target: "platform" }
 });
+
+const runtimeActionAlias = (
+  actionId,
+  runtimeMethod,
+  runtimePathTemplate,
+  {
+    runtimePath = runtimePathTemplate,
+    requiredSurfaces = ["api"],
+    forwarding = "canonical",
+    limitation = "",
+  } = {},
+) => Object.freeze({
+  actionId,
+  runtimeMethod,
+  runtimePath,
+  runtimePathTemplate,
+  requiredSurfaces: Object.freeze([...requiredSurfaces]),
+  forwarding,
+  limitation,
+});
+
+export const FIXED_RUNTIME_ACTION_ALIASES = Object.freeze({
+  "/api/runtime/status": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.status", "GET", "/runtime/status", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/health": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.health", "GET", "/health", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/ready": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.ready", "GET", "/ready", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/version": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.version", "GET", "/runtime/version", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/providers": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.providers", "GET", "/runtime/providers", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/capabilities": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.capabilities", "GET", "/runtime/capabilities", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/proofs": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.proofs", "GET", "/runtime/proofs", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/receipts": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.receipts", "GET", "/runtime/receipts", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/environment": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.environment", "GET", "/runtime/environment", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/diagnostics": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.diagnostics", "GET", "/runtime/diagnostics", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/governance": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.governance", "GET", "/runtime/governance", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/connectors": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.connectors", "GET", "/runtime/connectors", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/capability-registry": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.capability_registry", "GET", "/runtime/capability-registry", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/realtime-voice": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.voice_realtime_status", "GET", "/runtime/voice/realtime/status", { requiredSurfaces: ["api", "ui", "voice"] }) }),
+  "/api/runtime/conclave": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.conclave_status", "GET", "/runtime/conclave/status", { requiredSurfaces: ["api", "assistant", "ui"] }) }),
+  "/api/runtime/eox": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.executive_operating_loop", "GET", "/runtime/executive-operating-loop", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/replay": Object.freeze({
+    GET: runtimeActionAlias(
+      "canonical.route.get.operational-replay",
+      "GET",
+      "/operational-replay",
+      {
+        runtimePath: "/runtime/replay",
+        forwarding: "unavailable_adapter",
+        limitation: "The legacy Runtime Replay alias is registered but unavailable; it never forwards.",
+      },
+    ),
+  }),
+  "/api/runtime/executive-briefing": Object.freeze({ POST: runtimeActionAlias("context.runtime.route.post.runtime.executive_operating_loop.briefing", "POST", "/runtime/executive-operating-loop/briefing", { requiredSurfaces: ["api", "assistant", "ui", "voice"] }) }),
+  "/api/runtime/conclave/reviews": Object.freeze({ POST: runtimeActionAlias("context.runtime.route.post.runtime.conclave.reviews", "POST", "/runtime/conclave/reviews", { requiredSurfaces: ["api", "assistant", "ui"] }) }),
+  "/api/runtime/interactions": Object.freeze({ POST: runtimeActionAlias("context.runtime.route.post.runtime.interactions", "POST", "/runtime/interactions", { requiredSurfaces: ["api", "assistant", "ui", "voice"] }) }),
+  "/api/runtime/realtime/call": Object.freeze({ POST: runtimeActionAlias("context.runtime.route.post.runtime.voice.realtime.call", "POST", "/runtime/voice/realtime/call", { requiredSurfaces: ["api", "voice"] }) }),
+  "/api/local/interactions/status": Object.freeze({
+    GET: runtimeActionAlias(
+      "context.runtime.route.get.runtime.interactions_status",
+      "GET",
+      "/runtime/interactions/status",
+      {
+        requiredSurfaces: ["api", "assistant", "ui", "voice"],
+        forwarding: "unavailable_adapter",
+        limitation: "The unsigned local interaction alias is not admitted; the signed Mission 1 Runtime boundary is required.",
+      },
+    ),
+  }),
+  "/api/local/interactions": Object.freeze({
+    POST: runtimeActionAlias(
+      "context.runtime.route.post.runtime.interactions",
+      "POST",
+      "/runtime/interactions",
+      {
+        requiredSurfaces: ["api", "assistant", "ui", "voice"],
+        forwarding: "unavailable_adapter",
+        limitation: "The unsigned local interaction alias is not admitted; use the signed Mission 1 /api/runtime/interactions boundary.",
+      },
+    ),
+  }),
+});
+
+function dynamicRuntimeActionAliases(method, pathname) {
+  const candidates = [];
+  const interaction = pathname.match(/^\/api\/runtime\/interactions\/([A-Z0-9-]+)\/(events|interrupt|resume|presentation-complete)$/);
+  if (interaction) {
+    const [, interactionId, operation] = interaction;
+    const definitions = {
+      events: ["GET", "context.runtime.route.get.runtime.interactions.events", "/runtime/interactions/{interaction_id}/events", ["api", "assistant", "ui", "voice"]],
+      interrupt: ["POST", "context.runtime.route.post.runtime.interactions.interrupt", "/runtime/interactions/{interaction_id}/interrupt", ["api", "assistant", "ui", "voice"]],
+      resume: ["POST", "context.runtime.route.post.runtime.interactions.resume", "/runtime/interactions/{interaction_id}/resume", ["api", "assistant", "ui", "voice"]],
+      "presentation-complete": ["POST", "context.runtime.route.post.runtime.interactions.presentation_complete", "/runtime/interactions/{interaction_id}/presentation-complete", ["api", "ui"]],
+    };
+    const [expectedMethod, actionId, template, requiredSurfaces] = definitions[operation];
+    if (method === expectedMethod) {
+      candidates.push(runtimeActionAlias(actionId, expectedMethod, template, {
+        runtimePath: `/runtime/interactions/${interactionId}/${operation}`,
+        requiredSurfaces,
+      }));
+    }
+  }
+  const localInteraction = pathname.match(/^\/api\/local\/interactions\/([A-Z0-9-]+)\/(events|interrupt|presentation-complete)$/);
+  if (localInteraction) {
+    const [, interactionId, operation] = localInteraction;
+    const definitions = {
+      events: ["GET", "context.runtime.route.get.runtime.interactions.events", "/runtime/interactions/{interaction_id}/events", ["api", "assistant", "ui", "voice"]],
+      interrupt: ["POST", "context.runtime.route.post.runtime.interactions.interrupt", "/runtime/interactions/{interaction_id}/interrupt", ["api", "assistant", "ui", "voice"]],
+      "presentation-complete": ["POST", "context.runtime.route.post.runtime.interactions.presentation_complete", "/runtime/interactions/{interaction_id}/presentation-complete", ["api", "ui"]],
+    };
+    const [expectedMethod, actionId, template, requiredSurfaces] = definitions[operation];
+    if (method === expectedMethod) {
+      candidates.push(runtimeActionAlias(actionId, expectedMethod, template, {
+        runtimePath: `/runtime/interactions/${interactionId}/${operation}`,
+        requiredSurfaces,
+        forwarding: "unavailable_adapter",
+        limitation: "The unsigned local interaction lifecycle alias is not admitted; use the signed Mission 1 Runtime boundary.",
+      }));
+    }
+  }
+  const replayDetail = pathname.match(/^\/api\/runtime\/replay\/([A-Za-z0-9_.:-]+)$/);
+  if (method === "GET" && replayDetail) {
+    candidates.push(runtimeActionAlias(
+      "canonical.route.get.operational-replay._replay_id",
+      "GET",
+      "/operational-replay/{replay_id}",
+      {
+        runtimePath: `/runtime/replay/${replayDetail[1]}`,
+        forwarding: "unavailable_adapter",
+        limitation: "The legacy Runtime Replay detail alias is registered but unavailable; it never forwards.",
+      },
+    ));
+  }
+  const replayEvents = pathname.match(/^\/api\/runtime\/replay\/([A-Za-z0-9_.:-]+)\/events$/);
+  if (method === "GET" && replayEvents) {
+    candidates.push(runtimeActionAlias(
+      "canonical.route.get.operational-replay._replay_id_.events",
+      "GET",
+      "/operational-replay/{replay_id}/events",
+      {
+        runtimePath: `/runtime/replay/${replayEvents[1]}/events`,
+        forwarding: "unavailable_adapter",
+        limitation: "The legacy Runtime Replay event alias is registered but unavailable; it never forwards.",
+      },
+    ));
+  }
+  const replayExplain = pathname.match(/^\/api\/runtime\/replay\/([A-Za-z0-9_.:-]+)\/stages\/(observation|evidence|representation|conclave|authority|decision|receipt)\/explain$/);
+  if (method === "GET" && replayExplain) {
+    candidates.push(runtimeActionAlias(
+      "canonical.route.get.operational-replay._replay_id_.stages._selector_.explain",
+      "GET",
+      "/operational-replay/{replay_id}/stages/{selector}/explain",
+      {
+        runtimePath: `/runtime/replay/${replayExplain[1]}/stages/${replayExplain[2]}/explain`,
+        forwarding: "unavailable_adapter",
+        limitation: "The legacy Runtime Replay explanation alias is registered but unavailable; it never forwards.",
+      },
+    ));
+  }
+  return candidates;
+}
+
+export function resolveGatewayRuntimeActionAlias(method, pathname) {
+  const fixed = FIXED_RUNTIME_ACTION_ALIASES[pathname]?.[method];
+  const candidates = [...(fixed ? [fixed] : []), ...dynamicRuntimeActionAliases(method, pathname)];
+  return candidates.length === 1 ? candidates[0] : null;
+}
 
 export const REPLAY_ROUTES = Object.freeze({
   "/api/replay/replay.json": "/replay.json",
@@ -170,7 +344,7 @@ const TRUTH = Object.freeze({
   cloudPrimary: false,
   localSourceOfTruth: true,
   defaultProvider: "mock_model",
-  conclave: "available_bounded_review",
+  conclave: "unavailable",
   actualTrainedSLMs: 0,
   secretValuesExposed: false
 });
@@ -816,6 +990,120 @@ export const CANONICAL_OPERATIONAL_ROUTES = Object.freeze({
   "/api/operations/runtime-coordination/events": Object.freeze({ GET: "/runtime-coordination/events" }),
   "/api/operations/runtime-coordination/admissions": Object.freeze({ GET: "/runtime-coordination/admissions", POST: "/runtime-coordination/admissions" }),
 });
+
+const DYNAMIC_CANONICAL_RUNTIME_TEMPLATES = Object.freeze([
+  ["GET", "/projects/{project_id}/sources"],
+  ["GET", "/projects/{project_id}/evidence"],
+  ["GET", "/projects/{project_id}/scope"],
+  ["GET", "/projects/{project_id}/estimate"],
+  ["GET", "/projects/{project_id}/planning-model"],
+  ["GET", "/projects/{project_id}/artifacts"],
+  ["POST", "/projects/{project_id}/compile"],
+  ["GET", "/conclave/workspaces/{mission_id}"],
+  ["POST", "/conclave/workspaces/{mission_id}/tasks/{task_id}/evidence"],
+  ["POST", "/missions/{mission_id}/execute-step"],
+  ["POST", "/approvals/{approval_id}/approve"],
+  ["POST", "/approvals/{approval_id}/deny"],
+  ["GET", "/work-sessions/{session_id}"],
+  ["POST", "/work-sessions/{session_id}/step"],
+  ["POST", "/work-sessions/{session_id}/continue"],
+  ["POST", "/work-sessions/{session_id}/pause"],
+  ["POST", "/work-sessions/{session_id}/cancel"],
+  ["GET", "/work-sessions/{session_id}/receipt"],
+  ["GET", "/operational-replay/{replay_id}"],
+  ["GET", "/operational-replay/{replay_id}/events"],
+  ["GET", "/operational-replay/{replay_id}/stages/{selector}"],
+  ["GET", "/operational-replay/{replay_id}/stages/{selector}/explain"],
+  ["GET", "/operational-replay/missions/{mission_id}"],
+  ["GET", "/operational-replay/receipts/{receipt_id}"],
+  ["GET", "/receipts/missions/{mission_id}"],
+  ["GET", "/receipts/{receipt_id}"],
+  ["GET", "/receipts/{receipt_id}/proofs"],
+  ["POST", "/knowledge/acquisitions/{mission_id}/promotion-candidates"],
+  ["GET", "/knowledge/acquisitions/{mission_id}"],
+  ["GET", "/knowledge/promotion-candidates/{candidate_id}"],
+  ["GET", "/knowledge/store/{record_id}"],
+  ["GET", "/knowledge/store/{record_id}/versions"],
+  ["GET", "/knowledge/receipts/{receipt_id}"],
+  ["GET", "/mission-store/{mission_id}"],
+  ["GET", "/missions/{mission_id}"],
+  ["GET", "/runtime/baselines/{baseline_id}"],
+  ["GET", "/runtime-coordination/nodes/{node_id}"],
+  ["GET", "/runtime-coordination/admissions/{admission_id}"],
+  ["POST", "/runtime-coordination/admissions/{admission_id}/cancel"],
+  ["POST", "/runtime-coordination/admissions/{admission_id}/challenge/reissue"],
+  ["GET", "/runtime-coordination/admissions/{admission_id}/receipt"],
+  ["GET", "/runtime-coordination/admissions/{admission_id}/replay"],
+]);
+
+function rootRuntimeActionTemplates() {
+  const fixed = [];
+  for (const routes of Object.values(CANONICAL_OPERATIONAL_ROUTES)) {
+    for (const [method, runtimePath] of Object.entries(routes)) {
+      fixed.push([method, runtimePath]);
+    }
+  }
+  for (const route of Object.values(LOCAL_CAPABILITY_ROUTES)) {
+    fixed.push([route.method, route.runtimePath.split("?", 1)[0]]);
+  }
+  fixed.push(["POST", "/conclave/workspaces"]);
+  const unique = new Map(
+    [...fixed, ...DYNAMIC_CANONICAL_RUNTIME_TEMPLATES]
+      .map(([method, template]) => [`${method} ${template}`, [method, template]]),
+  );
+  return Object.freeze([...unique.values()].map((entry) => Object.freeze(entry)));
+}
+
+export const ROOT_RUNTIME_ACTION_TEMPLATES = rootRuntimeActionTemplates();
+
+function runtimeTemplatePattern(template) {
+  const escaped = template.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(/\\\{[A-Za-z][A-Za-z0-9_]*\\\}/g, "[^/]+")}$`);
+}
+
+function canonicalActionSlug(method, template) {
+  return `${method}.${template.replace(/^\/+|\/+$/g, "").replaceAll("/", ".")}`
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^[._-]+|[._-]+$/g, "") || "unknown";
+}
+
+export function resolveCanonicalCapabilityActionAlias(resolved) {
+  if (!resolved?.method || !resolved?.runtimePath) return null;
+  const path = resolved.runtimePath.split("?", 1)[0];
+  let matches = ROOT_RUNTIME_ACTION_TEMPLATES.filter(
+    ([method, template]) => method === resolved.method && runtimeTemplatePattern(template).test(path),
+  );
+  if (matches.length > 1) {
+    const specificity = ([, template]) => {
+      const segments = template.split("/").filter(Boolean);
+      const literals = segments.filter((segment) => !segment.startsWith("{"));
+      return [literals.length, literals.join("/").length, -segments.length];
+    };
+    const compare = (left, right) => {
+      for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) return left[index] - right[index];
+      }
+      return 0;
+    };
+    const best = matches.reduce((value, item) => (
+      compare(specificity(item), specificity(value)) > 0 ? item : value
+    ));
+    const bestSpecificity = specificity(best);
+    matches = matches.filter((item) => compare(specificity(item), bestSpecificity) === 0);
+  }
+  if (matches.length !== 1) return null;
+  const [method, template] = matches[0];
+  return runtimeActionAlias(
+    `canonical.route.${canonicalActionSlug(method, template)}`,
+    method,
+    template,
+    {
+      runtimePath: resolved.runtimePath,
+      requiredSurfaces: ["api"],
+    },
+  );
+}
 
 function operationalMethod(route, method) {
   const runtimePath = route?.[method];
@@ -1518,7 +1806,15 @@ async function handleSessionApi(request, response, config, sessionAuthority) {
   return sendJson(response, 404, operationalFailure(config, url.pathname, "route_not_allowlisted", "This session route is not allowlisted."));
 }
 
-async function handleOperationalApi(request, response, config, operationalFetch, sessionAuthority) {
+async function handleOperationalApi(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  operationalFetch,
+  sessionAuthority,
+  actionAdmission,
+) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config, request.method === "POST")) return sendJson(response, 403, operationalFailure(config, url.pathname, "origin_denied", "Request origin is not allowed."));
   if (!config.operationalEnabled) return sendJson(response, 503, operationalFailure(config, url.pathname, "operational_gateway_disabled", "Hosted operational mode is not enabled."));
@@ -1528,6 +1824,26 @@ async function handleOperationalApi(request, response, config, operationalFetch,
   const resolved = resolveOperationalCapability(url.pathname, request.method);
   if (!resolved) return sendJson(response, 404, operationalFailure(config, url.pathname, "route_not_allowlisted", "This hosted operation is not allowlisted."));
   if (resolved.methodMismatch) return sendJson(response, 405, operationalFailure(config, url.pathname, "method_not_allowed", "Method is not allowed for this hosted operation."), { Allow: resolved.allowed });
+  const alias = resolveCanonicalCapabilityActionAlias(resolved);
+  const admission = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!admission.allowed) {
+    return sendJson(
+      response,
+      admission.status,
+      operationalFailure(
+        config,
+        url.pathname,
+        admission.code,
+        admission.message,
+        admission.state,
+      ),
+    );
+  }
   const scope = requiredScope(resolved.runtimePath, resolved.method);
   if (!claims.scopes.includes(scope)) return sendJson(response, 403, operationalFailure(config, url.pathname, "scope_denied", `Session lacks required scope: ${scope}.`, "Unauthorized"));
   if (resolved.method === "POST") {
@@ -1550,7 +1866,14 @@ async function handleOperationalApi(request, response, config, operationalFetch,
   }
 }
 
-async function handleLocalApi(request, response, config, localFetch) {
+async function handleLocalApi(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  localFetch,
+  actionAdmission,
+) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config)) return sendJson(response, 403, localFailure(config, url.pathname, "origin_denied", "Request origin is not allowed."));
   if (!config.localCapabilitiesEnabled) return sendJson(response, 503, localFailure(config, url.pathname, "local_capabilities_disabled", "Local capability mode is not enabled."));
@@ -1562,6 +1885,22 @@ async function handleLocalApi(request, response, config, localFetch) {
   const resolved = resolveLocalCapability(url.pathname, request.method);
   if (!resolved) return sendJson(response, 404, localFailure(config, url.pathname, "route_not_allowlisted", "This local capability route is not allowlisted."));
   if (resolved.methodMismatch) return sendJson(response, 405, localFailure(config, url.pathname, "method_not_allowed", "Method is not allowed for this local capability."), { Allow: `${resolved.allowed}, OPTIONS` });
+  const alias = url.pathname.startsWith("/api/local/interactions")
+    ? resolveGatewayRuntimeActionAlias(request.method, url.pathname)
+    : resolveCanonicalCapabilityActionAlias(resolved);
+  const decision = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!decision.allowed) {
+    return sendJson(
+      response,
+      decision.status,
+      localFailure(config, url.pathname, decision.code, decision.message, decision.state),
+    );
+  }
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
     const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
@@ -1580,7 +1919,7 @@ async function handleLocalApi(request, response, config, localFetch) {
   }
 }
 
-async function handleReplayApi(request, response, config, replayFetch) {
+async function handleReplayApi(request, response, config) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
   if (!config.replayEnabled) return sendJson(response, 503, { ok: false, error: { code: "replay_gateway_disabled", message: "Runtime-owned Operational Replay is not configured for this deployment." }, truth: TRUTH });
@@ -1592,50 +1931,622 @@ async function handleReplayApi(request, response, config, replayFetch) {
   if (request.method !== "GET") return sendJson(response, 405, { ok: false, error: { code: "method_not_allowed", message: "Operational Replay is a passive read-only surface." }, truth: TRUTH }, { Allow: "GET, OPTIONS" });
   const replayPath = REPLAY_ROUTES[url.pathname];
   if (!replayPath) return sendJson(response, 404, { ok: false, error: { code: "route_not_allowlisted", message: "This Operational Replay route is not allowlisted." }, truth: TRUTH });
+  return sendJson(response, 503, {
+    ok: false,
+    data: null,
+    error: {
+      code: "canonical_action_unavailable",
+      message: "The legacy Replay export proxy is registered as unavailable until it is represented by one current Runtime-owned canonical action.",
+    },
+    truth: TRUTH,
+  });
+}
 
-  const controller = new AbortController();
-  const streaming = replayPath === "/events";
-  const timer = streaming ? null : setTimeout(() => controller.abort(), config.localTimeoutMs);
-  response.on("close", () => controller.abort());
-  try {
-    const upstream = await replayFetch(`${config.replayBaseUrl}${replayPath}`, {
-      method: "GET",
-      headers: { Accept: streaming ? "text/event-stream" : "application/json, application/pdf, application/zip" },
-      signal: controller.signal,
-      redirect: "error",
-      cache: "no-store"
-    });
-    if (!upstream.ok || !upstream.body) {
-      return sendJson(response, upstream.status === 404 ? 404 : 503, { ok: false, error: { code: "replay_unavailable", message: `Operational Replay returned status ${upstream.status}.` }, truth: TRUTH });
-    }
-    const declaredLength = Number(upstream.headers.get("content-length") ?? 0);
-    if (!streaming && declaredLength > config.replayMaxResponseBytes) {
-      return sendJson(response, 502, { ok: false, error: { code: "replay_response_too_large", message: "Operational Replay response exceeded the gateway size limit." }, truth: TRUTH });
-    }
-    const headers = {
-      "Content-Type": upstream.headers.get("content-type") ?? (streaming ? "text/event-stream; charset=utf-8" : "application/octet-stream"),
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-      ...(streaming ? { Connection: "keep-alive", "X-Accel-Buffering": "no" } : {}),
-      ...(upstream.headers.get("content-disposition") ? { "Content-Disposition": upstream.headers.get("content-disposition") } : {}),
-      ...(!streaming && declaredLength ? { "Content-Length": declaredLength } : {})
-    };
-    response.writeHead(200, headers);
-    let received = 0;
-    for await (const chunk of upstream.body) {
-      received += chunk.byteLength;
-      if (!streaming && received > config.replayMaxResponseBytes) throw new GatewayFailure("replay_response_too_large", "Operational Replay response exceeded the gateway size limit.", "Unknown", 502);
-      response.write(Buffer.from(chunk));
-    }
-    structuredLog("experience_gateway_operational_replay", { route: url.pathname, replayPath, streaming, status: 200 });
-    return response.end();
-  } catch (error) {
-    if (response.headersSent) return response.end();
-    const timedOut = error?.name === "AbortError" && !response.destroyed;
-    return sendJson(response, timedOut ? 504 : 503, { ok: false, error: { code: timedOut ? "replay_timed_out" : "replay_unavailable", message: timedOut ? "Operational Replay timed out." : "Operational Replay is unavailable." }, truth: TRUTH });
-  } finally {
-    if (timer) clearTimeout(timer);
+const CAPABILITY_CLASSIFICATION_VOCABULARY = Object.freeze([
+  "live_verified",
+  "live_degraded",
+  "configured_unverified",
+  "staged",
+  "simulated",
+  "unavailable",
+]);
+const CAPABILITY_CLASSIFICATIONS = new Set(CAPABILITY_CLASSIFICATION_VOCABULARY);
+const EXECUTIVE_CONTINUITY_CLASSIFICATIONS = new Set([
+  "hard_blocking",
+  "safely_remediable",
+  "non_blocking_degraded",
+  "operator_action_required",
+]);
+const EXECUTIVE_CONTINUITY_VOCABULARY = Object.freeze([
+  "hard_blocking",
+  "safely_remediable",
+  "non_blocking_degraded",
+  "operator_action_required",
+]);
+const CONNECTOR_CONFIGURATIONS = new Set(["configured", "unconfigured", "invalid", "unknown"]);
+const CONNECTOR_REACHABILITY_STATES = new Set(["reachable", "unreachable", "unknown"]);
+const CONNECTOR_VERIFICATION_STATES = new Set(["verified", "failed", "unverified", "expired"]);
+const CONNECTOR_HEALTH_STATES = new Set(["healthy", "degraded", "unhealthy", "unknown"]);
+const CONNECTOR_OPERATIONAL_STATES = new Set(["available", "degraded", "unavailable"]);
+const CONNECTOR_FRESHNESS_STATES = new Set(["current", "stale", "never"]);
+const NON_OPERATIONAL_CLASSIFICATIONS = new Set([
+  "configured_unverified",
+  "staged",
+  "simulated",
+  "unavailable",
+]);
+const SHA256_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const PRINCIPLE_ENTRY_PATTERN = /^NCR-[A-Z]+-[0-9]{4}@[0-9]+$/;
+
+const objectRecord = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
+const validIdentifier = (value) => typeof value === "string" && value.length > 0 && value.length <= 191;
+const validStringArray = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
+const validTimestamp = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value));
+const sameStringArray = (value, expected) => (
+  Array.isArray(value)
+  && value.length === expected.length
+  && value.every((item, index) => item === expected[index])
+);
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  if (objectRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
   }
+  return JSON.stringify(value);
+}
+
+function canonicalProjectionDigest(projection) {
+  const digestBasis = Object.fromEntries(
+    Object.entries(projection).filter(([key]) => key !== "projectionDigest"),
+  );
+  return `sha256:${createHash("sha256").update(canonicalJson(digestBasis), "utf8").digest("hex")}`;
+}
+
+function receiptIdentity(reference) {
+  if (typeof reference !== "string" || !reference) return null;
+  return reference.startsWith("connector-receipt:")
+    ? reference.slice("connector-receipt:".length)
+    : reference;
+}
+
+function duplicateIdentity(records, key) {
+  const identities = records.map((item) => item[key]);
+  return new Set(identities).size !== identities.length;
+}
+
+function validateCapabilityRegistryProjection(value) {
+  const projection = objectRecord(value);
+  const invalid = (message) => {
+    throw new GatewayFailure("capability_registry_response_invalid", message, "Unknown", 502);
+  };
+  if (!projection) invalid("Capability Registry projection was not a JSON object.");
+  if (projection.recordType !== CAPABILITY_REGISTRY_RECORD_TYPE) invalid("Capability Registry record type is invalid.");
+  if (projection.schemaVersion !== CAPABILITY_REGISTRY_SCHEMA_VERSION) invalid("Capability Registry schema version is incompatible.");
+  if (projection.owner !== CAPABILITY_REGISTRY_OWNER || projection.projectionOwner !== CAPABILITY_REGISTRY_PROJECTION_OWNER) {
+    invalid("Capability Registry is not the Runtime-owned canonical projection.");
+  }
+  if (!validIdentifier(projection.generatedAt) || Number.isNaN(Date.parse(projection.generatedAt))) {
+    invalid("Capability Registry generation timestamp is invalid.");
+  }
+  const constitutionalBasis = objectRecord(projection.constitutionalBasis);
+  const verificationPolicy = objectRecord(projection.verificationPolicy);
+  if (!constitutionalBasis || !verificationPolicy) {
+    invalid("Capability Registry constitutional or verification policy basis is missing.");
+  }
+  const principleEntryIds = constitutionalBasis.principleEntryIds;
+  if (
+    constitutionalBasis.registryId !== "NCR"
+    || constitutionalBasis.releaseId !== CAPABILITY_REGISTRY_RELEASE_ID
+    || constitutionalBasis.releaseDigest !== CAPABILITY_REGISTRY_RELEASE_DIGEST
+    || constitutionalBasis.resolverVersion !== "1.0.0"
+    || constitutionalBasis.resolutionDigest !== CAPABILITY_REGISTRY_RESOLUTION_DIGEST
+    || !Array.isArray(principleEntryIds)
+    || principleEntryIds.length !== 48
+    || new Set(principleEntryIds).size !== principleEntryIds.length
+    || principleEntryIds.some((item) => typeof item !== "string" || !PRINCIPLE_ENTRY_PATTERN.test(item))
+  ) {
+    invalid("Capability Registry constitutional basis does not match the active pinned release.");
+  }
+  if (
+    verificationPolicy.policyId !== CAPABILITY_REGISTRY_VERIFICATION_POLICY
+    || verificationPolicy.maxAgeSeconds !== 300
+    || !validTimestamp(verificationPolicy.evaluatedAt)
+    || Date.parse(verificationPolicy.evaluatedAt) !== Date.parse(projection.generatedAt)
+    || verificationPolicy.staleVerificationEstablishesAvailability !== false
+    || verificationPolicy.networkFailureRewritesConfiguration !== false
+  ) {
+    invalid("Capability Registry verification policy is invalid.");
+  }
+  if (!sameStringArray(projection.classificationVocabulary, CAPABILITY_CLASSIFICATION_VOCABULARY)) {
+    invalid("Capability Registry classification vocabulary is invalid.");
+  }
+  const scope = objectRecord(projection.scope);
+  if (
+    !scope
+    || !validIdentifier(scope.tenantId)
+    || !validIdentifier(scope.workspaceId)
+    || scope.derivedByRuntime !== true
+  ) {
+    invalid("Capability Registry scope was not derived by the Runtime.");
+  }
+  if (!objectRecord(projection.inventory)) invalid("Capability Registry inventory is missing.");
+  const authority = objectRecord(projection.authority);
+  if (
+    !authority
+    || authority.authorityGranted !== false
+    || authority.executionAuthorityIntroduced !== false
+    || authority.healthyCapabilityImpliesAuthority !== false
+    || projection.authorityGranted !== false
+    || projection.capabilityHealthGrantsAuthority !== false
+    || projection.availabilityIndependent !== true
+    || projection.noExecutionAuthorityIntroduced !== true
+    || projection.mission3Admitted !== false
+  ) {
+    invalid("Capability Registry must explicitly state that it grants no execution Authority.");
+  }
+  if (!objectRecord(projection.summary)) invalid("Capability Registry summary is missing.");
+  if (!Array.isArray(projection.capabilities) || !Array.isArray(projection.connectors) || !Array.isArray(projection.actions)) {
+    invalid("Capability Registry collections are invalid.");
+  }
+  if (!Array.isArray(projection.verificationReceipts) || !validStringArray(projection.limitations)) {
+    invalid("Capability Registry receipt or limitation collections are invalid.");
+  }
+  if (projection.secretValuesExposed !== false) invalid("Capability Registry secret-exposure boundary is invalid.");
+  if (!SHA256_DIGEST_PATTERN.test(projection.projectionDigest) || projection.projectionDigest !== canonicalProjectionDigest(projection)) {
+    invalid("Capability Registry projection digest does not verify.");
+  }
+
+  const capabilities = projection.capabilities.map(objectRecord);
+  const connectors = projection.connectors.map(objectRecord);
+  const actions = projection.actions.map(objectRecord);
+  const receipts = projection.verificationReceipts.map(objectRecord);
+  if ([...capabilities, ...connectors, ...actions].some((item) => !item)) {
+    invalid("Capability Registry contains a non-object record.");
+  }
+  if (receipts.some((item) => !item)) invalid("Capability Registry contains a non-object verification receipt.");
+  if (
+    projection.capabilityCount !== capabilities.length
+    || projection.connectorCount !== connectors.length
+    || projection.actionCount !== actions.length
+    || projection.receiptCount !== receipts.length
+    || projection.summary.capabilityCount !== capabilities.length
+    || projection.summary.connectorCount !== connectors.length
+    || projection.summary.actionCount !== actions.length
+    || projection.summary.verificationReceiptCount !== receipts.length
+  ) {
+    invalid("Capability Registry collection counts are inconsistent.");
+  }
+  if (capabilities.some((item) => (
+    !validIdentifier(item.capabilityId)
+    || !CAPABILITY_CLASSIFICATIONS.has(item.classification)
+    || typeof item.operationalAvailability !== "boolean"
+    || item.authorityGranted !== false
+    || item.availabilityIndependent !== true
+    || !validStringArray(item.evidenceRefs)
+    || !validStringArray(item.receiptRefs)
+    || !validStringArray(item.limitations)
+    || typeof item.requiredNextAction !== "string"
+    || (NON_OPERATIONAL_CLASSIFICATIONS.has(item.classification) && item.operationalAvailability !== false)
+  ))) {
+    invalid("Capability Registry contains an invalid capability identity or classification.");
+  }
+  if (connectors.some((item) => (
+    !validIdentifier(item.connectorId)
+    || !CAPABILITY_CLASSIFICATIONS.has(item.classification)
+    || item.registration !== "registered"
+    || !CONNECTOR_CONFIGURATIONS.has(item.configuration)
+    || !CONNECTOR_REACHABILITY_STATES.has(item.reachability)
+    || !CONNECTOR_VERIFICATION_STATES.has(item.verification)
+    || !CONNECTOR_HEALTH_STATES.has(item.health)
+    || !CONNECTOR_OPERATIONAL_STATES.has(item.operationalAvailability)
+    || typeof item.authorizationRequirement !== "string"
+    || (item.lastSuccessfulVerification !== null && !validTimestamp(item.lastSuccessfulVerification))
+    || typeof item.verificationFresh !== "boolean"
+    || !objectRecord(item.freshness)
+    || !validStringArray(item.evidenceReferences)
+    || !validStringArray(item.receiptReferences)
+    || !validStringArray(item.limitations)
+    || typeof item.requiredNextAction !== "string"
+    || item.authorityGranted !== false
+  ))) {
+    invalid("Capability Registry contains an invalid connector record.");
+  }
+  if (actions.some((item) => (
+    !validIdentifier(item.actionId)
+    || !validIdentifier(item.capabilityId)
+    || !validIdentifier(item.handlerId)
+    || !validIdentifier(item.operationId)
+    || !validIdentifier(item.inputSchemaId)
+    || !CAPABILITY_CLASSIFICATIONS.has(item.classification)
+    || typeof item.operationalAvailability !== "boolean"
+    || typeof item.invocable !== "boolean"
+    || item.authorityGranted !== false
+    || item.dispatchAuthorized === true
+    || item.dispatchAvailable === true
+    || !validStringArray(item.invocationSurfaces)
+    || !validStringArray(item.invocationPaths)
+    || !validStringArray(item.receiptRefs)
+    || typeof item.authorizationRequirement !== "string"
+    || !validStringArray(item.limitations)
+    || typeof item.requiredNextAction !== "string"
+    || (NON_OPERATIONAL_CLASSIFICATIONS.has(item.classification) && (
+      item.operationalAvailability !== false || item.invocable !== false
+    ))
+    || (item.invocable === true && item.operationalAvailability !== true)
+  ))) {
+    invalid("Capability Registry contains an invalid action record.");
+  }
+  if (
+    duplicateIdentity(capabilities, "capabilityId")
+    || duplicateIdentity(connectors, "connectorId")
+    || duplicateIdentity(actions, "actionId")
+  ) {
+    invalid("Capability Registry contains a duplicate canonical identity.");
+  }
+  if (duplicateIdentity(receipts, "receiptId")) {
+    invalid("Capability Registry contains a duplicate verification receipt identity.");
+  }
+  if (receipts.some((item) => (
+    !validIdentifier(item.receiptId)
+    || !validIdentifier(item.receiptType)
+    || !validIdentifier(item.connectorId)
+    || !validTimestamp(item.verifiedAt)
+    || typeof item.successful !== "boolean"
+    || !validStringArray(item.evidenceRefs)
+    || item.sanitized !== true
+    || item.secretValuesExposed !== false
+  ))) {
+    invalid("Capability Registry contains an invalid or unsanitized verification receipt.");
+  }
+  const receiptById = new Map(receipts.map((item) => [item.receiptId, item]));
+  const evaluatedAt = Date.parse(verificationPolicy.evaluatedAt);
+  const currentSuccessfulReceipt = (reference, connectorId = null) => {
+    const receipt = receiptById.get(receiptIdentity(reference));
+    if (!receipt || receipt.successful !== true) return false;
+    if (connectorId !== null && receipt.connectorId !== connectorId) return false;
+    const ageSeconds = (evaluatedAt - Date.parse(receipt.verifiedAt)) / 1000;
+    return Number.isFinite(ageSeconds)
+      && ageSeconds >= -1
+      && ageSeconds < verificationPolicy.maxAgeSeconds;
+  };
+  const successfulReferencedReceipt = (record, references, requireConnectorMatch = true) => {
+    const successfulAt = Date.parse(record.lastSuccessfulVerification);
+    return references.some((reference) => {
+      const receipt = receiptById.get(receiptIdentity(reference));
+      return receipt
+        && receipt.successful === true
+        && (!requireConnectorMatch || receipt.connectorId === record.connectorId)
+        && Date.parse(receipt.verifiedAt) === successfulAt;
+    });
+  };
+  for (const capability of capabilities) {
+    if (capability.classification === "live_verified" && (
+      capability.operationalAvailability !== true
+      || !capability.receiptRefs.some((reference) => currentSuccessfulReceipt(reference))
+    )) {
+      invalid("A live capability lacks a current successful verification receipt.");
+    }
+  }
+  for (const connector of connectors) {
+    const freshness = connector.freshness;
+    if (
+      !CONNECTOR_FRESHNESS_STATES.has(freshness.state)
+      || freshness.policySeconds !== verificationPolicy.maxAgeSeconds
+      || (
+        freshness.ageSeconds !== null
+        && (!Number.isInteger(freshness.ageSeconds) || freshness.ageSeconds < 0)
+      )
+    ) {
+      invalid("Capability Registry contains an invalid connector freshness state.");
+    }
+    if (freshness.state === "never") {
+      if (
+        freshness.ageSeconds !== null
+        || connector.lastSuccessfulVerification !== null
+        || connector.verificationFresh !== false
+      ) {
+        invalid("A never-verified connector claimed successful verification freshness.");
+      }
+    } else {
+      const lastSuccessfulAt = Date.parse(connector.lastSuccessfulVerification);
+      const measuredAge = (evaluatedAt - lastSuccessfulAt) / 1000;
+      if (
+        !Number.isFinite(lastSuccessfulAt)
+        || measuredAge < -1
+        || Math.abs(Math.max(0, Math.floor(measuredAge)) - freshness.ageSeconds) > 1
+        || !successfulReferencedReceipt(connector, connector.receiptReferences)
+      ) {
+        invalid("Connector freshness is not backed by its current successful verification receipt.");
+      }
+      if (freshness.state === "current" && (
+        freshness.ageSeconds >= verificationPolicy.maxAgeSeconds
+        || connector.verificationFresh !== true
+      )) {
+        invalid("A current connector verification is stale or marked not fresh.");
+      }
+      if (freshness.state === "stale" && (
+        freshness.ageSeconds < verificationPolicy.maxAgeSeconds
+        || connector.verificationFresh !== false
+        || connector.verification !== "expired"
+      )) {
+        invalid("A stale connector verification did not expire fail closed.");
+      }
+    }
+    if (connector.classification === "live_verified" && (
+      connector.configuration !== "configured"
+      || connector.reachability !== "reachable"
+      || connector.verification !== "verified"
+      || connector.health !== "healthy"
+      || connector.operationalAvailability !== "available"
+      || connector.freshness.state !== "current"
+      || connector.verificationFresh !== true
+    )) {
+      invalid("A live connector lacks current successful verification evidence.");
+    }
+    if (connector.classification === "live_degraded" && (
+      connector.operationalAvailability !== "degraded"
+      || connector.freshness.state !== "current"
+      || connector.verificationFresh !== true
+    )) {
+      invalid("A degraded connector lacks a current last-known-good verification.");
+    }
+    if (NON_OPERATIONAL_CLASSIFICATIONS.has(connector.classification) && connector.operationalAvailability !== "unavailable") {
+      invalid("A non-live connector claimed operational availability.");
+    }
+  }
+  for (const action of actions) {
+    if (
+      action.classification === "live_verified"
+      && !action.receiptRefs.some((reference) => currentSuccessfulReceipt(
+        reference,
+        typeof action.connectorId === "string" ? action.connectorId : null,
+      ))
+    ) {
+      invalid("A live action lacks a current successful verification receipt.");
+    }
+  }
+
+  const executiveContinuity = objectRecord(projection.executiveContinuity);
+  if (
+    !executiveContinuity
+    || !sameStringArray(
+      executiveContinuity.impedimentClassificationVocabulary,
+      EXECUTIVE_CONTINUITY_VOCABULARY,
+    )
+    || !Array.isArray(executiveContinuity.impediments)
+    || !Array.isArray(executiveContinuity.remediationActions)
+    || executiveContinuity.duplicateIdentitiesRejected !== true
+    || executiveContinuity.dispatchAvailable !== false
+    || executiveContinuity.authorityGranted !== false
+  ) {
+    invalid("Executive Continuity impediments are missing.");
+  }
+  const impediments = executiveContinuity.impediments.map(objectRecord);
+  const remediationActions = executiveContinuity.remediationActions.map(objectRecord);
+  if (impediments.some((item) => (
+    !item
+    || !validIdentifier(item.impedimentId)
+    || !EXECUTIVE_CONTINUITY_CLASSIFICATIONS.has(item.classification)
+    || typeof item.limitation !== "string"
+    || typeof item.requiredNextAction !== "string"
+    || (
+      item.remediationAction !== undefined
+      && item.remediationAction !== null
+      && !objectRecord(item.remediationAction)
+    )
+  ))) {
+    invalid("Executive Continuity contains an invalid impediment record.");
+  }
+  if (remediationActions.some((item) => (
+    !item
+    || !validIdentifier(item.remediationActionId)
+    || !["staged", "unavailable"].includes(item.classification)
+    || item.operationalAvailability !== false
+    || item.invocable !== false
+    || item.dispatchAvailable !== false
+    || item.authorityGranted !== false
+  ))) {
+    invalid("Executive Continuity contains an invalid remediation action.");
+  }
+  if (
+    executiveContinuity.impedimentCount !== impediments.length
+    || executiveContinuity.remediationActionCount !== remediationActions.length
+    || duplicateIdentity(impediments, "impedimentId")
+    || duplicateIdentity(remediationActions, "remediationActionId")
+  ) {
+    invalid("Executive Continuity contains inconsistent or duplicate identities.");
+  }
+  if (impediments.some((item) => {
+    const remediation = item.remediationAction;
+    if (remediation === undefined || remediation === null) return false;
+    return (
+      !["staged", "unavailable"].includes(remediation.classification)
+      || remediation.invocable !== false
+      || remediation.authorityGranted !== false
+      || remediation.dispatchAvailable === true
+    );
+  })) {
+    invalid("Executive Continuity remediation actions must remain staged or unavailable and non-invocable.");
+  }
+  return projection;
+}
+
+const INVOCABLE_ACTION_CLASSIFICATIONS = new Set(["live_verified", "live_degraded"]);
+
+function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
+  let projection = null;
+  let expiresAt = 0;
+
+  const clear = () => {
+    projection = null;
+    expiresAt = 0;
+  };
+  const observe = (value) => {
+    const candidate = validateCapabilityRegistryProjection(value);
+    const scope = candidate.scope;
+    if (
+      scope.tenantId !== config.operationalTenantId
+      || scope.workspaceId !== config.operationalWorkspaceId
+    ) {
+      clear();
+      throw new GatewayFailure(
+        "capability_registry_scope_mismatch",
+        "The Runtime-owned Capability Registry scope does not match the Experience Gateway tenant and workspace binding.",
+        "Unauthorized",
+        502,
+      );
+    }
+    const evaluatedAt = Date.parse(candidate.verificationPolicy.evaluatedAt);
+    expiresAt = evaluatedAt + (candidate.verificationPolicy.maxAgeSeconds * 1000);
+    if (!Number.isFinite(expiresAt) || expiresAt <= clock()) {
+      clear();
+      throw new GatewayFailure(
+        "capability_registry_verification_stale",
+        "The Runtime-owned Capability Registry verification has expired.",
+        "Unavailable",
+        503,
+      );
+    }
+    projection = candidate;
+    return candidate;
+  };
+  const unavailable = (alias, code, message) => ({
+    allowed: false,
+    actionId: alias?.actionId ?? null,
+    code,
+    message,
+    status: 503,
+    state: "Unavailable",
+  });
+  const decide = (alias) => {
+    if (!alias) {
+      return unavailable(
+        null,
+        "canonical_action_alias_unresolved",
+        "The Gateway route does not resolve to one exact canonical Runtime action identity.",
+      );
+    }
+    if (alias.forwarding !== "canonical") {
+      return unavailable(
+        alias,
+        "canonical_action_unavailable",
+        alias.limitation || "The canonical Runtime action is unavailable.",
+      );
+    }
+    if (!projection || expiresAt <= clock()) {
+      clear();
+      return unavailable(
+        alias,
+        "capability_registry_verification_required",
+        "A current Runtime-owned Capability Registry projection is required before this action can be invoked.",
+      );
+    }
+    const matches = projection.actions.filter((action) => action.actionId === alias.actionId);
+    if (matches.length !== 1) {
+      return unavailable(
+        alias,
+        "canonical_action_identity_invalid",
+        "The Gateway alias did not resolve to exactly one canonical Runtime action record.",
+      );
+    }
+    const action = matches[0];
+    const expectedInvocationPaths = alias.requiredSurfaces.map(
+      (surface) => `${surface}:${alias.runtimeMethod} ${alias.runtimePathTemplate}`,
+    );
+    if (
+      action.method !== alias.runtimeMethod
+      || action.pathTemplate !== alias.runtimePathTemplate
+      || !Array.isArray(action.invocationSurfaces)
+      || alias.requiredSurfaces.some((surface) => !action.invocationSurfaces.includes(surface))
+      || expectedInvocationPaths.some((path) => !action.invocationPaths.includes(path))
+    ) {
+      return unavailable(
+        alias,
+        "canonical_action_contract_mismatch",
+        "The canonical Runtime action no longer matches the fixed Gateway alias contract.",
+      );
+    }
+    if (
+      !INVOCABLE_ACTION_CLASSIFICATIONS.has(action.classification)
+      || action.invocable !== true
+      || action.operationalAvailability !== true
+      || action.authorityGranted !== false
+    ) {
+      const limitations = [
+        action.requiredNextAction,
+        ...(Array.isArray(action.limitations) ? action.limitations : []),
+      ].filter((item) => typeof item === "string" && item.trim());
+      return unavailable(
+        alias,
+        "canonical_action_unavailable",
+        [...new Set(limitations)].join(" ") || `Canonical action ${alias.actionId} is ${action.classification}.`,
+      );
+    }
+    return {
+      allowed: true,
+      actionId: action.actionId,
+      classification: action.classification,
+    };
+  };
+  return Object.freeze({
+    clear,
+    decide,
+    observe,
+    snapshot: () => projection,
+  });
+}
+
+async function ensureRuntimeActionAdmission(alias, config, runtimeFetch, actionAdmission) {
+  let decision = actionAdmission.decide(alias);
+  if (
+    decision.allowed
+    || decision.code !== "capability_registry_verification_required"
+  ) {
+    return decision;
+  }
+  try {
+    const envelope = await fetchRuntime(
+      "/runtime/capability-registry",
+      config,
+      runtimeFetch,
+    );
+    actionAdmission.observe(envelope.data);
+  } catch (error) {
+    actionAdmission.clear();
+    const failure = error instanceof GatewayFailure
+      ? error
+      : new GatewayFailure(
+        "capability_registry_verification_required",
+        "A current Runtime-owned Capability Registry projection is required before this action can be invoked.",
+        "Unavailable",
+        503,
+      );
+    return {
+      allowed: false,
+      actionId: alias?.actionId ?? null,
+      code: failure.code,
+      message: failure.message,
+      status: failure.status,
+      state: failure.state,
+    };
+  }
+  decision = actionAdmission.decide(alias);
+  return decision;
+}
+
+function actionAdmissionFailure(config, tracker, route, decision) {
+  return failureEnvelope(
+    config,
+    tracker,
+    route,
+    new GatewayFailure(
+      decision.code,
+      decision.message,
+      decision.state,
+      decision.status,
+    ),
+  );
 }
 
 function validateRuntimeEnvelope(body) {
@@ -1659,9 +2570,32 @@ function validateRuntimeEnvelope(body) {
   return body;
 }
 
+function validateRuntimeReadResponse(body, runtimePath) {
+  if (runtimePath !== "/runtime/capability-registry") return validateRuntimeEnvelope(body);
+  const sanitized = sanitizeOperationalResponse(body);
+  if (sanitized?.recordType === CAPABILITY_REGISTRY_RECORD_TYPE) {
+    const projection = validateCapabilityRegistryProjection(sanitized);
+    return {
+      status: "ok",
+      timestamp: projection.generatedAt,
+      schemaVersion: SUPPORTED_SCHEMA_VERSION,
+      runtimeVersion: SUPPORTED_RUNTIME_VERSION,
+      proofIds: [],
+      limitations: projection.limitations,
+      data: projection,
+    };
+  }
+  const envelope = validateRuntimeEnvelope(sanitized);
+  validateCapabilityRegistryProjection(envelope.data);
+  return envelope;
+}
+
 async function fetchRuntime(runtimePath, config, runtimeFetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  const maximumResponseBytes = runtimePath === "/runtime/capability-registry"
+    ? CAPABILITY_REGISTRY_MAX_RESPONSE_BYTES
+    : config.maxResponseBytes;
   try {
     let response;
     try {
@@ -1684,23 +2618,23 @@ async function fetchRuntime(runtimePath, config, runtimeFetch) {
       throw new GatewayFailure("runtime_unavailable", `Runtime returned status ${response.status}.`, "Unavailable", 503, response.status >= 500 || response.status === 429);
     }
     const declaredLength = Number(response.headers.get("content-length") ?? 0);
-    if (declaredLength > config.maxResponseBytes) {
+    if (declaredLength > maximumResponseBytes) {
       throw new GatewayFailure("runtime_response_too_large", "Runtime response exceeded the gateway size limit.", "Unknown", 502);
     }
     const raw = Buffer.from(await response.arrayBuffer());
-    if (raw.byteLength > config.maxResponseBytes) {
+    if (raw.byteLength > maximumResponseBytes) {
       throw new GatewayFailure("runtime_response_too_large", "Runtime response exceeded the gateway size limit.", "Unknown", 502);
     }
     let body;
     try { body = JSON.parse(raw.toString("utf8")); }
     catch { throw new GatewayFailure("runtime_response_invalid", "Runtime returned invalid JSON.", "Unknown", 502); }
-    return validateRuntimeEnvelope(body);
+    return validateRuntimeReadResponse(body, runtimePath);
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, clock) {
+async function handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, actionAdmission, clock) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config, config.operationalEnabled)) return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("origin_denied", "Request origin is not allowed.", "Unknown", 403)));
   const runtimePath = resolveRuntimeMutation(url.pathname);
@@ -1717,6 +2651,37 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
   }
   if (config.operationalEnabled && expectedMethod === "POST" && !sessionAuthority.csrfValid(request, claims)) {
     return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("csrf_invalid", "CSRF verification failed.", "Unauthorized", 403)));
+  }
+  const alias = resolveGatewayRuntimeActionAlias(expectedMethod, url.pathname);
+  if (!alias || alias.runtimePath !== runtimePath) {
+    return sendJson(
+      response,
+      503,
+      failureEnvelope(
+        config,
+        tracker,
+        url.pathname,
+        new GatewayFailure(
+          "canonical_action_alias_unresolved",
+          "The Gateway route does not resolve to one exact canonical Runtime action identity.",
+          "Unavailable",
+          503,
+        ),
+      ),
+    );
+  }
+  const admission = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!admission.allowed) {
+    return sendJson(
+      response,
+      admission.status,
+      actionAdmissionFailure(config, tracker, url.pathname, admission),
+    );
   }
   if (expectedMethod === "GET") {
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), config.timeoutMs);
@@ -1811,7 +2776,7 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
   } finally { clearTimeout(timer); }
 }
 
-async function handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, clock) {
+async function handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, actionAdmission, clock) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config, config.operationalEnabled)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
   if (url.search) return sendJson(response, 400, { ok: false, error: { code: "query_not_allowed", message: "Realtime session routes do not accept browser query parameters." }, truth: TRUTH });
@@ -1829,6 +2794,21 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
   }
   if (config.operationalEnabled && !sessionAuthority.csrfValid(request, claims)) {
     return sendJson(response, 403, { ok: false, error: { code: "csrf_invalid", message: "CSRF verification failed." }, truth: TRUTH });
+  }
+  const alias = resolveGatewayRuntimeActionAlias("POST", url.pathname);
+  const admission = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!admission.allowed) {
+    return sendJson(response, admission.status, {
+      ok: false,
+      data: null,
+      error: { code: admission.code, message: admission.message },
+      truth: TRUTH,
+    });
   }
 
   let offer;
@@ -1970,7 +2950,7 @@ async function readThroughGateway(route, runtimePath, request, config, runtimeFe
   }
 }
 
-async function handleApi(request, response, config, runtimeFetch, cache, tracker) {
+async function handleApi(request, response, config, runtimeFetch, cache, tracker, actionAdmission) {
   if (!requestOriginAllowed(request, config)) {
     return sendJson(response, 403, failureEnvelope(config, tracker, "origin", new GatewayFailure("origin_denied", "Request origin is not allowed.", "Unknown", 403)));
   }
@@ -1989,7 +2969,60 @@ async function handleApi(request, response, config, runtimeFetch, cache, tracker
   if (!runtimePath) {
     return sendJson(response, 404, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("route_not_allowlisted", "This Experience Gateway route is not allowlisted.", "Unknown", 404)));
   }
+  const alias = resolveGatewayRuntimeActionAlias("GET", url.pathname);
+  if (!alias || alias.runtimePath !== runtimePath) {
+    return sendJson(
+      response,
+      503,
+      failureEnvelope(
+        config,
+        tracker,
+        url.pathname,
+        new GatewayFailure(
+          "canonical_action_alias_unresolved",
+          "The Gateway route does not resolve to one exact canonical Runtime action identity.",
+          "Unavailable",
+          503,
+        ),
+      ),
+    );
+  }
+  if (runtimePath !== "/runtime/capability-registry") {
+    const admission = await ensureRuntimeActionAdmission(
+      alias,
+      config,
+      runtimeFetch,
+      actionAdmission,
+    );
+    if (!admission.allowed) {
+      return sendJson(
+        response,
+        admission.status,
+        actionAdmissionFailure(config, tracker, url.pathname, admission),
+      );
+    }
+  }
   const result = await readThroughGateway(url.pathname, runtimePath, request, config, runtimeFetch, cache, tracker);
+  if (runtimePath === "/runtime/capability-registry") {
+    if (result.status === 200 && result.body.ok && result.body.data) {
+      try {
+        actionAdmission.observe(result.body.data);
+      } catch (error) {
+        actionAdmission.clear();
+        const failure = error instanceof GatewayFailure
+          ? error
+          : new GatewayFailure(
+            "capability_registry_response_invalid",
+            "The Runtime-owned Capability Registry projection failed Gateway admission validation.",
+            "Unavailable",
+            502,
+          );
+        return sendJson(response, failure.status, failureEnvelope(config, tracker, url.pathname, failure));
+      }
+    } else {
+      actionAdmission.clear();
+    }
+  }
   structuredLog("experience_gateway_request", { route: url.pathname, runtimePath, status: result.status, connectionState: result.body.gateway.connectionState });
   return sendJson(response, result.status, result.body);
 }
@@ -2039,8 +3072,11 @@ export function createPortalServer(options = {}) {
   const runtimeFetch = options.runtimeFetch ?? globalThis.fetch;
   const localFetch = options.localFetch ?? globalThis.fetch;
   const operationalFetch = options.operationalFetch ?? globalThis.fetch;
-  const replayFetch = options.replayFetch ?? globalThis.fetch;
   const sessionAuthority = createSessionAuthority(config, options.clock);
+  const actionAdmission = createRuntimeActionAdmissionState(
+    config,
+    options.clock ?? (() => Date.now()),
+  );
   const cache = new Map();
   const tracker = { lastSuccessfulConnection: null, lastSuccessfulRefresh: null };
   const server = createServer((request, response) => {
@@ -2048,30 +3084,45 @@ export function createPortalServer(options = {}) {
       handleSessionApi(request, response, config, sessionAuthority)
         .catch(() => sendJson(response, 500, operationalFailure(config, request.url, "session_gateway_error", "The session request failed safely.", "Unknown")));
     } else if (request.url?.startsWith("/api/operations")) {
-      handleOperationalApi(request, response, config, operationalFetch, sessionAuthority)
+      handleOperationalApi(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        operationalFetch,
+        sessionAuthority,
+        actionAdmission,
+      )
         .catch(() => sendJson(response, 500, operationalFailure(config, request.url, "operational_gateway_error", "The hosted operation failed safely.", "Unknown")));
     } else if (request.url?.startsWith("/api/runtime/realtime/call")) {
-      handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, options.clock)
+      handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, actionAdmission, options.clock)
         .catch(() => sendJson(response, 500, { ok: false, error: { code: "realtime_gateway_error", message: "Realtime session creation failed safely." }, truth: TRUTH }));
     } else if (request.url?.startsWith("/api/runtime/executive-briefing") || request.url === "/api/runtime/conclave/reviews" || request.url === "/api/runtime/interactions" || request.url?.startsWith("/api/runtime/interactions/")) {
-      handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, options.clock)
+      handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, actionAdmission, options.clock)
         .catch((error) => {
           const failure = error instanceof GatewayFailure ? error : new GatewayFailure("gateway_error", "The bounded Runtime request failed safely.", "Unknown", 500);
           sendJson(response, failure.status, failureEnvelope(config, tracker, request.url, failure));
         });
     } else if (request.url?.startsWith("/api/runtime")) {
-      handleApi(request, response, config, runtimeFetch, cache, tracker)
+      handleApi(request, response, config, runtimeFetch, cache, tracker, actionAdmission)
         .catch(() => sendJson(response, 500, failureEnvelope(config, tracker, request.url, new GatewayFailure("gateway_error", "The Experience Gateway could not complete the read request.", "Unknown", 500))));
     } else if (request.url?.startsWith("/api/local")) {
-      handleLocalApi(request, response, config, localFetch)
+      handleLocalApi(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        localFetch,
+        actionAdmission,
+      )
         .catch(() => sendJson(response, 500, localFailure(config, request.url, "local_gateway_error", "The local capability request failed safely.", "Unknown")));
     } else if (request.url?.startsWith("/api/replay")) {
-      handleReplayApi(request, response, config, replayFetch)
+      handleReplayApi(request, response, config)
         .catch(() => sendJson(response, 500, { ok: false, error: { code: "replay_gateway_error", message: "Operational Replay failed safely." }, truth: TRUTH }));
     } else {
       serveStatic(request, response);
     }
   });
-  server.experienceGateway = { cache, tracker, config, sessionAuthority };
+  server.experienceGateway = { cache, tracker, config, sessionAuthority, actionAdmission };
   return server;
 }

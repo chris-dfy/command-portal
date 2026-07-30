@@ -449,7 +449,12 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(missions, /step\.reversible === true/);
   assert.doesNotMatch(missions, /step\.reversible !== false/);
   assert.match(app, /HostedCapabilityBoundary/);
-  assert.match(app, /if \(configured && capability\.state === "available"\) return children/);
+  assert.match(app, /if \(configured && \["live", "degraded"\]\.includes\(capability\.state\)\) return children/);
+  assert.match(app, /asCapabilityRegistryProjection/);
+  assert.match(app, /action\.invocable !== true/);
+  assert.match(app, /No typed handler inventory for/);
+  assert.match(app, /groups=\{registryRailGroups\}/);
+  assert.doesNotMatch(app, /live: area\.id ===/);
   assert.match(app, /Hosted operational mode is not configured for this deployment/);
   assert.match(app, /knowledge\.document_intake/);
   assert.match(app, /projects\.nexicron_planning/);
@@ -485,4 +490,75 @@ test("new portal destinations render Runtime-backed dashboards without client-si
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
     assert.equal(source.includes("Authorization"), false);
   }
+});
+
+test("Runtime information renders one canonical capability projection and Executive Continuity truthfully", async () => {
+  const [runtimeInformation, registry, client, types, styles, server] = await Promise.all([
+    read("../src/components/RuntimeInformation.tsx"),
+    read("../src/components/CapabilityRegistryProjection.tsx"),
+    read("../src/lib/portal-client.ts"),
+    read("../src/lib/types.ts"),
+    read("../src/styles.css"),
+    read("../server/portal-server.mjs"),
+  ]);
+  assert.match(server, /"\/api\/runtime\/capability-registry": "\/runtime\/capability-registry"/);
+  assert.match(client, /nexus_live_capability_registry_projection/);
+  assert.match(client, /nexus\.live-capability-registry@1\.0\.0/);
+  assert.match(client, /capability_registry_response_invalid/);
+  assert.match(runtimeInformation, /snapshot\["capability-registry"\]/);
+  assert.match(runtimeInformation, /<CapabilityRegistryProjection/);
+  for (const state of ["Live", "Degraded", "Simulated", "Unavailable"]) assert.match(registry, new RegExp(`"${state}"`));
+  for (const dimension of [
+    "Registration", "Configuration", "Reachability", "Verification", "Health",
+    "Availability", "Verification age", "Authorization",
+  ]) assert.match(registry, new RegExp(dimension));
+  for (const classification of [
+    "hard_blocking", "safely_remediable", "non_blocking_degraded", "operator_action_required",
+  ]) assert.match(`${registry}\n${types}`, new RegExp(classification));
+  assert.match(registry, /Authority is separate: Not granted/);
+  assert.match(registry, /remediationAction\.classification === "staged"/);
+  assert.match(registry, /<NexusButton size="sm" disabled>/);
+  assert.match(styles, /\.capability-registry-layout/);
+  assert.doesNotMatch(registry, /fetch\(|runtimeBaseUrl|Bearer\s/);
+});
+
+test("copilot, HIF, and voice controls fail closed on canonical action availability", async () => {
+  const [app, client, copilot, voice] = await Promise.all([
+    read("../src/App.tsx"),
+    read("../src/lib/portal-client.ts"),
+    read("../src/components/NexusCopilot.tsx"),
+    read("../src/components/VoiceWorkspace.tsx"),
+  ]);
+  for (const actionId of [
+    "context.runtime.route.post.runtime.interactions",
+    "context.runtime.route.get.runtime.interactions.events",
+    "context.runtime.route.post.runtime.interactions.interrupt",
+    "context.runtime.route.post.runtime.voice.realtime.call",
+    "canonical.route.post.voice-operator.route-transcript",
+  ]) assert.match(client, new RegExp(actionId.replaceAll(".", "\\.")));
+  assert.match(client, /\["live_verified", "live_degraded"\]\.includes\(action\.classification\)/);
+  assert.match(client, /action\.operationalAvailability === true/);
+  assert.match(client, /action\.authorityGranted === false/);
+  assert.match(app, /interactionAction=\{copilotInteractionAction\}/);
+  assert.match(app, /realtimeAction=\{realtimeVoiceAction\}/);
+  assert.match(app, /textAction=\{voiceOperatorTranscriptAction\}/);
+  assert.ok(
+    copilot.indexOf("if (!interactionAction.available)") < copilot.indexOf("await hifClient.start"),
+    "NexusCopilot must reject unavailable HIF before creating an interaction",
+  );
+  assert.ok(
+    copilot.indexOf("if (!realtimeAction.available)") < copilot.indexOf('fetch("/api/runtime/realtime-voice"'),
+    "NexusCopilot must reject unavailable Realtime before status retrieval",
+  );
+  assert.match(copilot, /disabled=\{!interactionAction\.available/);
+  assert.match(copilot, /disabled=\{!voiceAvailable \|\| !realtimeAction\.available/);
+  assert.ok(
+    voice.indexOf("if (!audio.current || !realtimeAction.available)") < voice.indexOf("await client.connect()"),
+    "VoiceWorkspace must reject unavailable Realtime before connection",
+  );
+  assert.ok(
+    voice.indexOf("if (!textAction.available)") < voice.indexOf("await localNexusClient.routeTranscript"),
+    "VoiceWorkspace must reject unavailable typed text routing before forwarding",
+  );
+  assert.match(voice, /disabled=\{!textAction\.available/);
 });

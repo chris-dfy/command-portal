@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Bot, ChevronRight, Maximize2, Mic, MicOff, Minimize2, Send, ShieldCheck, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import { hifClient } from "../lib/hif-client";
+import type { CanonicalActionAvailability } from "../lib/portal-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
 
 type Message = { speaker: "operator" | "nexus"; text: string; limitation?: string };
@@ -19,11 +20,13 @@ const SKILLS: Array<{ label: string; prompt: string; area: AreaId }> = [
 const introductionKey = "nexus-copilot-introduced-v1";
 const messageFrom = (error: unknown) => error instanceof Error ? error.message : String(error);
 
-export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate, open, expanded, onOpenChange, onExpandedChange }: {
+export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate, interactionAction, realtimeAction, open, expanded, onOpenChange, onExpandedChange }: {
   activeArea: AreaId;
   activeLabel: string;
   runtimeState: string;
   onNavigate: (area: AreaId) => void;
+  interactionAction: CanonicalActionAvailability;
+  realtimeAction: CanonicalActionAvailability;
   open: boolean;
   expanded: boolean;
   onOpenChange: (open: boolean) => void;
@@ -49,12 +52,17 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
 
   useEffect(() => {
     setIntroduced(window.localStorage.getItem(introductionKey) !== "complete");
+    if (!realtimeAction.available) {
+      setVoiceAvailable(false);
+      liveClient.current?.stop();
+      return () => { liveClient.current?.stop(); };
+    }
     void fetch("/api/runtime/realtime-voice", { credentials: "same-origin", headers: { Accept: "application/json", "Cache-Control": "no-cache" } })
       .then(async (response) => ({ response, body: await response.json() as { ok?: boolean; data?: { state?: string } } }))
       .then(({ response, body }) => setVoiceAvailable(response.ok && Boolean(body.ok) && body.data?.state === "available"))
       .catch(() => setVoiceAvailable(false));
     return () => { liveClient.current?.stop(); };
-  }, []);
+  }, [realtimeAction.available]);
 
   useEffect(() => {
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" });
@@ -68,6 +76,10 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   async function ask(text = input) {
     const request = text.trim();
     if (!request || busy) return;
+    if (!interactionAction.available) {
+      setError(interactionAction.reason);
+      return;
+    }
     setInput("");
     setError(null);
     setMessages((items) => [...items, { speaker: "operator", text: request }]);
@@ -84,7 +96,10 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   }
 
   async function startVoice() {
-    if (!audio.current || !voiceAvailable) return;
+    if (!audio.current || !voiceAvailable || !realtimeAction.available) {
+      setError(realtimeAction.reason);
+      return;
+    }
     setError(null);
     setLiveAssistant("");
     setMicrophoneMuted(false);
@@ -151,21 +166,22 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
         <span>Recommended orientation</span>
         <strong>Strengthen operational understanding</strong>
         <p>Ask NEXUS to assess registered context before authorizing new capability or execution.</p>
-        <button onClick={() => void ask("Assess what NEXUS currently observes and understands, then recommend the next action that best improves the Executive Operating Loop.")}>Run assessment <ChevronRight size={16} /></button>
+        <button disabled={!interactionAction.available} onClick={() => void ask("Assess what NEXUS currently observes and understands, then recommend the next action that best improves the Executive Operating Loop.")}>Run assessment <ChevronRight size={16} /></button>
       </section>
 
       <div className="nexus-copilot__voice">
-        <div><span className="voice-dot" style={{ transform: `scale(${1 + amplitude * 1.8})` }} /><strong>{voiceConnected ? microphoneMuted ? "Microphone muted" : voiceState : voiceAvailable ? "Voice ready" : "Voice unavailable"}</strong></div>
+        <div><span className="voice-dot" style={{ transform: `scale(${1 + amplitude * 1.8})` }} /><strong>{voiceConnected ? microphoneMuted ? "Microphone muted" : voiceState : voiceAvailable && realtimeAction.available ? "Voice ready" : "Voice unavailable"}</strong></div>
         <div className="nexus-copilot__voice-controls">
           {voiceConnected && <>
             <button type="button" data-active={microphoneMuted} aria-pressed={microphoneMuted} onClick={toggleMicrophoneMute}>{microphoneMuted ? <MicOff size={15} /> : <Mic size={15} />}{microphoneMuted ? "Unmute mic" : "Mute mic"}</button>
             <button type="button" data-active={nexusMuted} aria-pressed={nexusMuted} onClick={toggleNexusMute}>{nexusMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}{nexusMuted ? "Unmute NEXUS" : "Mute NEXUS"}</button>
           </>}
-          <button onClick={voiceConnected ? stopVoice : () => void startVoice()} disabled={!voiceAvailable || voiceState === "connecting"}>
+          <button onClick={voiceConnected ? stopVoice : () => void startVoice()} disabled={!voiceAvailable || !realtimeAction.available || voiceState === "connecting"}>
             {voiceConnected ? <MicOff size={15} /> : <Mic size={15} />}{voiceConnected ? "End" : "Start conversation"}
           </button>
         </div>
       </div>
+      {(!interactionAction.available || !realtimeAction.available) && <p className="nexus-copilot__error" role="status">{!interactionAction.available ? interactionAction.reason : realtimeAction.reason}</p>}
 
       <div className="nexus-copilot__conversation" ref={scroll} aria-live="polite">
         {messages.map((message, index) => <article key={`${message.speaker}-${index}`} data-speaker={message.speaker}>
@@ -178,13 +194,13 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
 
       <section className="nexus-copilot__skills">
         <header><span>Executive skills</span><b>{SKILLS.length}</b></header>
-        <div>{SKILLS.map((skill) => <button key={skill.label} onClick={() => useSkill(skill)}>{skill.label}<ChevronRight size={13} /></button>)}</div>
+        <div>{SKILLS.map((skill) => <button key={skill.label} disabled={!interactionAction.available} onClick={() => useSkill(skill)}>{skill.label}<ChevronRight size={13} /></button>)}</div>
       </section>
 
       <form className="nexus-copilot__composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}>
-        <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask NEXUS…" aria-label="Ask NEXUS" />
-        <button type="button" onClick={voiceConnected ? toggleMicrophoneMute : () => void startVoice()} disabled={!voiceAvailable} aria-label={voiceConnected ? microphoneMuted ? "Unmute microphone" : "Mute microphone" : "Start voice conversation"}>{microphoneMuted ? <MicOff size={17} /> : <Mic size={17} />}</button>
-        <button type="submit" disabled={!input.trim() || busy} aria-label="Send message"><Send size={17} /></button>
+        <input value={input} onChange={(event) => setInput(event.target.value)} disabled={!interactionAction.available} placeholder={interactionAction.available ? "Ask NEXUS…" : "NEXUS interaction is unavailable"} aria-label="Ask NEXUS" />
+        <button type="button" onClick={voiceConnected ? toggleMicrophoneMute : () => void startVoice()} disabled={!voiceAvailable || !realtimeAction.available} aria-label={voiceConnected ? microphoneMuted ? "Unmute microphone" : "Mute microphone" : "Start voice conversation"}>{microphoneMuted ? <MicOff size={17} /> : <Mic size={17} />}</button>
+        <button type="submit" disabled={!interactionAction.available || !input.trim() || busy} aria-label="Send message"><Send size={17} /></button>
       </form>
       <footer>Model-native reasoning is labeled. Runtime evidence remains authoritative.</footer>
     </aside>

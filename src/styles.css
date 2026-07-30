@@ -385,6 +385,35 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 .capability-list, .reference-list { display: grid; gap: 7px; margin-top: 12px; }
 .capability-list article, .reference-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 10px; border: 1px solid rgba(var(--accent-rgb), .12); border-radius: 8px; background: rgba(0, 0, 0, .12); }
 .capability-list small, .reference-list span { grid-column: 1 / -1; color: var(--muted); font-size: .61rem; }
+.capability-registry-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.capability-registry__authority { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--border-strong); border-radius: 9px; background: rgba(var(--accent-rgb), .055); }
+.capability-registry__authority > svg { color: var(--accent); }
+.capability-registry__authority > div { display: grid; gap: 4px; }
+.capability-registry__authority strong { font-size: .82rem; }
+.capability-registry__authority span:not(.nx-status) { color: var(--muted); font-size: .67rem; line-height: 1.5; }
+.capability-registry__meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0 0; }
+.capability-registry__meta div { min-width: 0; padding: 10px; border: 1px solid rgba(var(--accent-rgb), .12); border-radius: 8px; background: rgba(0, 0, 0, .12); }
+.capability-registry__meta dt, .capability-registry__dimensions dt { color: var(--muted); font-size: .58rem; letter-spacing: .07em; text-transform: uppercase; }
+.capability-registry__meta dd, .capability-registry__dimensions dd { margin: 4px 0 0; overflow-wrap: anywhere; font-size: .67rem; }
+.capability-registry__records { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.capability-registry__records > article { display: grid; align-content: start; gap: 7px; min-width: 0; padding: 12px; border: 1px solid rgba(var(--accent-rgb), .12); border-radius: 8px; background: rgba(0, 0, 0, .12); }
+.capability-registry__record-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.capability-registry__record-heading strong { overflow-wrap: anywhere; font-size: .74rem; }
+.capability-registry__records small { color: var(--muted); font: .58rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.capability-registry__records p { margin: 0; color: var(--muted); font-size: .64rem; line-height: 1.5; }
+.capability-registry__records > article > span { overflow-wrap: anywhere; color: var(--muted); font-size: .62rem; line-height: 1.5; }
+.capability-registry__records > article > span b { color: var(--text); font-weight: 650; }
+.capability-registry__dimensions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 2px 0; }
+.capability-registry__dimensions div { min-width: 0; padding: 7px; border: 1px solid rgba(var(--accent-rgb), .09); border-radius: 6px; }
+.capability-registry__action-table { display: grid; overflow-x: auto; }
+.capability-registry__action-row { display: grid; grid-template-columns: minmax(190px, 1.25fr) minmax(160px, 1fr) minmax(100px, .55fr) minmax(115px, .6fr); align-items: center; gap: 10px; min-width: 700px; padding: 10px 4px; border-bottom: 1px solid rgba(var(--accent-rgb), .1); }
+.capability-registry__action-row > div { display: grid; gap: 3px; min-width: 0; }
+.capability-registry__action-row strong, .capability-registry__action-row > span { overflow-wrap: anywhere; font-size: .68rem; }
+.capability-registry__action-row small { color: var(--muted); font: .57rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.capability-registry__action-head { color: var(--muted); font-size: .57rem; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.capability-registry__boundary { margin: 12px 0 0; padding: 10px 12px; border-left: 2px solid var(--accent); color: var(--muted); background: rgba(var(--accent-rgb), .045); font-size: .64rem; line-height: 1.55; }
+.capability-registry__continuity-legend { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.capability-registry__continuity .nx-button { justify-self: start; margin-top: 2px; }
 .health-card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-top: 14px; }
 .health-card-grid article { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; min-height: 110px; padding: 14px; border: 1px solid rgba(var(--accent-rgb), .13); border-radius: 10px; background: rgba(0, 0, 0, .13); }
 .health-card-grid article > svg { color: var(--accent); }
@@ -916,7 +945,18 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 
 @keyframes nx-content-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 1180px) { .nx-runtime-ribbon { grid-template-columns: repeat(7, minmax(150px, 1fr)); } }
-@media (max-width: 760px) { .nx-command-brief__body { grid-template-columns: 1fr; }.nx-command-brief__body > aside { border-top: 1px solid var(--nx-border-strong); border-left: 0; }.experience-grid, .area-grid { grid-template-columns: 1fr; }.experience-grid > .span-2, .area-grid > .span-2, .nx-panel.span-2 { grid-column: auto; } }
+@media (max-width: 900px) {
+  .capability-registry__meta, .capability-registry__records { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .nx-command-brief__body { grid-template-columns: 1fr; }
+  .nx-command-brief__body > aside { border-top: 1px solid var(--nx-border-strong); border-left: 0; }
+  .experience-grid, .area-grid, .capability-registry-layout { grid-template-columns: 1fr; }
+  .experience-grid > .span-2, .area-grid > .span-2, .nx-panel.span-2 { grid-column: auto; }
+  .capability-registry__authority { grid-template-columns: auto minmax(0, 1fr); }
+  .capability-registry__authority > .nx-status { grid-column: 1 / -1; justify-self: start; }
+  .capability-registry__meta, .capability-registry__records, .capability-registry__dimensions { grid-template-columns: 1fr; }
+}
 @media (prefers-reduced-motion: reduce) { .experience-grid, .area-grid { animation: none; }.operating-loop article[data-active="true"], .nx-action:hover:not(:disabled) { transform: none; } }
 
 /* Nexicron-derived application language: charcoal, mineral white, mint signal,

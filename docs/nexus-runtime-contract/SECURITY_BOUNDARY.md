@@ -23,6 +23,16 @@ This boundary enforces the [NEXUS Platform Constitution](../architecture/NEXUS_P
 - Redirects are rejected.
 - Default timeout: 8 seconds.
 - Default maximum response: 1 MiB.
+- The exact canonical Capability Registry read alone has a fixed 4 MiB
+  ceiling; its validated projection is never cached and no other route
+  inherits this exception.
+- Every other `/api/runtime`, `/api/local`, and `/api/operations` route
+  resolves to one fixed canonical action identity and requires a current,
+  scope-matching Runtime-owned Capability Registry projection before any
+  target Runtime is contacted. Missing, stale, unavailable, ambiguous, or
+  contract-mismatched action truth fails closed.
+- The historical `/api/replay` export proxy remains a registered unavailable
+  adapter and never contacts its legacy upstream.
 - Default cache TTL: 15 seconds.
 - Cache entries are non-authoritative. An expired entry is used only after a failed refresh and is labeled `stale`.
 

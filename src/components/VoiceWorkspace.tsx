@@ -3,6 +3,7 @@ import { Mic, MicOff, Send, Volume2, VolumeX, Waves } from "lucide-react";
 import { DataPanel } from "./DataPanel";
 import { displayLabel } from "../lib/presentation";
 import { localNexusClient, type VoiceRouteResult } from "../lib/local-client";
+import type { CanonicalActionAvailability } from "../lib/portal-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
 
 type VoiceStatus = {
@@ -19,7 +20,13 @@ type VoiceStatus = {
 
 type TranscriptEntry = { speaker: "You" | "NEXUS"; text: string };
 
-export function VoiceWorkspace() {
+export function VoiceWorkspace({
+  realtimeAction,
+  textAction,
+}: {
+  realtimeAction: CanonicalActionAvailability;
+  textAction: CanonicalActionAvailability;
+}) {
   const [voiceState, setVoiceState] = useState<RealtimeVoiceState>("idle");
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [nexusMuted, setNexusMuted] = useState(false);
@@ -38,9 +45,10 @@ export function VoiceWorkspace() {
   const supported = RealtimeVoiceClient.supported();
 
   useEffect(() => {
-    void refreshStatus();
+    if (realtimeAction.available) void refreshStatus();
+    else setMessage(realtimeAction.reason);
     return () => liveClient.current?.stop();
-  }, []);
+  }, [realtimeAction.available, realtimeAction.reason]);
 
   async function refreshStatus() {
     try {
@@ -54,7 +62,10 @@ export function VoiceWorkspace() {
   }
 
   async function startLiveVoice() {
-    if (!audio.current) return;
+    if (!audio.current || !realtimeAction.available) {
+      setMessage(realtimeAction.reason);
+      return;
+    }
     setMessage(null);
     setAssistantTranscript("");
     setMicrophoneMuted(false);
@@ -105,6 +116,10 @@ export function VoiceWorkspace() {
 
   async function sendText() {
     if (!transcript.trim()) return;
+    if (!textAction.available) {
+      setMessage(textAction.reason);
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -150,13 +165,13 @@ export function VoiceWorkspace() {
           <button data-active={microphoneMuted} aria-pressed={microphoneMuted} onClick={toggleMicrophoneMute}>{microphoneMuted ? <MicOff size={17} /> : <Mic size={17} />}<span>{microphoneMuted ? "Unmute microphone" : "Mute microphone"}</span></button>
           <button data-active={nexusMuted} aria-pressed={nexusMuted} onClick={toggleNexusMute}>{nexusMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>{nexusMuted ? "Unmute NEXUS" : "Mute NEXUS"}</span></button>
           <button className="voice-stop" onClick={stopLiveVoice}><MicOff size={17} /><span>End live voice</span></button>
-        </div> : <button className="voice-start" onClick={() => void startLiveVoice()} disabled={!supported || voiceState === "connecting" || status?.state !== "available"}>
+        </div> : <button className="voice-start" onClick={() => void startLiveVoice()} disabled={!realtimeAction.available || !supported || voiceState === "connecting" || status?.state !== "available"}>
           <Mic size={19} /><span>{voiceState === "connecting" ? "Connecting…" : "Start live voice"}</span>
         </button>}
       </div>
       <div className="voice-text-fallback">
-        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder="Or type a request for the governed Runtime Voice Operator" />
-        <button onClick={() => void sendText()} disabled={busy || !transcript.trim()}><Send size={17} /> Send text</button>
+        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} disabled={!textAction.available} placeholder={textAction.available ? "Or type a request for the governed Runtime Voice Operator" : "Runtime Voice Operator is unavailable"} />
+        <button onClick={() => void sendText()} disabled={!textAction.available || busy || !transcript.trim()}><Send size={17} /> Send text</button>
       </div>
       {message && <p className="workspace-message" role="status">{message}</p>}
       <p className="boundary-note">Realtime conversation may use model-native knowledge. Organization-specific facts, live operational state, completed actions, and authoritative evidence still require registered Runtime context, connectors, proofs, and receipts.</p>

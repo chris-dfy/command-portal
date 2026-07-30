@@ -50,6 +50,17 @@ COMMAND_PORTAL_CACHE_TTL_MS
 COMMAND_PORTAL_MAX_RESPONSE_BYTES
 ```
 
+`COMMAND_PORTAL_MAX_RESPONSE_BYTES` remains the general Runtime-read limit.
+The fixed `/api/runtime/capability-registry` mapping has a separate,
+non-configurable 4 MiB ceiling so the measured canonical projection fits
+without widening any other route.
+
+All remaining Runtime, local, and hosted-operation aliases require that
+current Runtime-owned projection to admit one exact typed action before the
+Gateway contacts a target upstream. Unavailable, stale, mismatched, or
+unregistered actions fail closed. The legacy `/api/replay` export proxy is
+retained only as an unavailable compatibility adapter and does not forward.
+
 Never create a `VITE_` runtime variable or credential.
 
 ## Local use

@@ -13,6 +13,11 @@ Configure these server-only secrets and variables in the hosting environment:
 - `COMMAND_PORTAL_CACHE_TTL_MS=15000`
 - `COMMAND_PORTAL_MAX_RESPONSE_BYTES=1048576`
 
+The general 1 MiB response limit remains unchanged. The exact
+`/api/runtime/capability-registry` read has an isolated 4 MiB ceiling because
+the measured compact canonical projection exceeds 1 MiB; this exception is
+not configurable and does not apply to any other route.
+
 To enable the fixed-workspace Hosted Operational Gateway, publish the app as a **Workspace only** private deployment, provision every server-only operational variable from `.env.example`, deploy the execution Runtime behind HTTPS, and provision the matching Runtime token, tenant, workspace, and fixed service bindings:
 
 - `NEXUS_HOSTED_OPERATIONAL_TOKEN` matches `COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN`;

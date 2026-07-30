@@ -26,12 +26,16 @@ import {
   OPERATIONAL_SESSION_INVALID_EVENT,
   localNexusClient,
   operationalSessionClient,
-  type ClientCapabilityContract,
   type OperationalSession,
 } from "./lib/local-client";
-import { portalClient } from "./lib/portal-client";
+import {
+  PORTAL_CANONICAL_ACTIONS,
+  asCapabilityRegistryProjection,
+  canonicalActionAvailability,
+  portalClient,
+} from "./lib/portal-client";
 import { displayLabel } from "./lib/presentation";
-import type { ConnectionState, GatewayEnvelope, ProviderRecord, RuntimeSnapshot } from "./lib/types";
+import type { CapabilityRegistryProjection, ConnectionState, GatewayEnvelope, ProviderRecord, RuntimeSnapshot } from "./lib/types";
 import { NexusContextInspector } from "./platform/NexusContextInspector";
 import { NexusExecutiveNavigation } from "./platform/NexusExecutiveNavigation";
 import { NexusPlatformRail, type PlatformRailGroup } from "./platform/NexusPlatformRail";
@@ -78,7 +82,6 @@ const RAIL_GROUPS: PlatformRailGroup[] = (["Platform", "Capabilities"] as const)
   label: group,
   items: AREAS.filter((area) => area.group === group).map((area) => ({
     ...area,
-    live: area.id === "replay",
   })),
 }));
 
@@ -133,64 +136,48 @@ const AREA_CAPABILITY_IDS: Partial<Record<AreaId, string[]>> = Object.freeze({
   knowledge: ["knowledge_intake", "mission_store", "knowledge_acquisition", "knowledge_promotion", "knowledge_store"],
   edge: ["edge_monitoring", "edge_node_admission"],
   "mission-control": ["mission_executor", "conclave", "receipts", "operational_replay"],
+  documents: ["knowledge.document_intake"],
+  projects: ["projects.nexicron_planning"],
+  voice: ["interaction.human"],
 });
-const AREA_CLIENT_CONTRACT_IDS: Partial<Record<AreaId, string>> = Object.freeze({
-  documents: "knowledge.document_intake",
-  projects: "projects.nexicron_planning",
-  voice: "interaction.human",
-});
-
-function capabilityId(value: Record<string, unknown>) {
-  return String(value.capabilityId ?? value.capability_id ?? value.id ?? "");
-}
 
 function capabilityStateView(
-  readiness: Record<string, unknown> | null,
-  clientContract: ClientCapabilityContract | null,
+  projection: CapabilityRegistryProjection | null,
   active: AreaId,
-  readinessFailure: string,
-  clientContractFailure: string,
+  registryFailure: string,
 ) {
-  const contractCapabilityId = AREA_CLIENT_CONTRACT_IDS[active];
-  if (contractCapabilityId) {
-    if (clientContractFailure) return { state: "unavailable", reason: clientContractFailure };
-    if (!clientContract) return { state: "checking", reason: "The Runtime client capability contract is being verified." };
-    if (clientContract.truth.hostedExecutionAvailable !== true) {
-      return { state: "unavailable", reason: "The Runtime reports hosted execution unavailable for this deployment." };
-    }
-    if (clientContract.capabilityStates?.[contractCapabilityId] !== "available") {
-      return { state: "unavailable", reason: `The Runtime reports ${contractCapabilityId} unavailable for this deployment.` };
-    }
-    const capability = clientContract.capabilities.find((item) => item.capabilityId === contractCapabilityId);
-    if (!capability || capability.clients.nexusWeb !== "implemented" || !capability.implementationState.startsWith("implemented")) {
-      return { state: "unavailable", reason: `Runtime contract ${clientContract.contractVersion} does not register ${contractCapabilityId} for NEXUS Web.` };
-    }
+  const required = AREA_CAPABILITY_IDS[active] ?? [];
+  if (!required.length) return { state: "not_applicable", reason: "This workspace has no hosted capability contract." };
+  if (registryFailure) return { state: "unavailable", reason: registryFailure };
+  if (!projection) return { state: "checking", reason: "The Runtime-owned Capability Registry projection is being verified." };
+  const applicable = projection.capabilities.filter((item) => required.includes(item.capabilityId));
+  if (applicable.length !== required.length) {
+    const present = new Set(applicable.map((item) => item.capabilityId));
+    const missing = required.filter((id) => !present.has(id));
+    return { state: "unavailable", reason: `The canonical registry did not return capabilities: ${missing.join(", ")}.` };
+  }
+  const unavailable = applicable.filter((item) => !["live_verified", "live_degraded"].includes(item.classification));
+  const capabilityActions = projection.actions.filter((item) => required.includes(item.capabilityId));
+  const missingHandlers = required.filter((id) => !capabilityActions.some((action) => action.capabilityId === id));
+  const blockedActions = capabilityActions.filter((action) => (
+    action.invocable !== true || !["live_verified", "live_degraded"].includes(action.classification)
+  ));
+  if (!unavailable.length && !missingHandlers.length && !blockedActions.length) {
+    const degraded = applicable.some((item) => item.classification === "live_degraded")
+      || capabilityActions.some((item) => item.classification === "live_degraded");
     return {
-      state: "available",
-      reason: `${capability.name} is registered for NEXUS Web by Runtime contract ${clientContract.contractVersion}.`,
+      state: degraded ? "degraded" : "live",
+      reason: `${required.length} required canonical capability contract${required.length === 1 ? " is" : "s are"} ${degraded ? "degraded but invocable" : "live verified"}. Authority remains a separate per-action requirement.`,
     };
   }
-  const failure = readinessFailure;
-  if (failure) return { state: "unavailable", reason: failure };
-  if (!readiness) return { state: "checking", reason: "Capability-specific Runtime readiness is being verified." };
-  const required = AREA_CAPABILITY_IDS[active] ?? [];
-  const applicable = list(readiness.capabilities).filter((item) => required.includes(capabilityId(item)));
-  if (!required.length) return { state: "not_applicable", reason: "This workspace has no hosted capability contract." };
-  if (applicable.length !== required.length) {
-    const present = new Set(applicable.map(capabilityId));
-    const missing = required.filter((id) => !present.has(id));
-    return { state: "unavailable", reason: `Runtime did not return readiness for: ${missing.join(", ")}.` };
-  }
-  const unavailable = applicable.filter((item) => String(item.state ?? item.status ?? "unknown").toLowerCase() !== "available");
-  if (!unavailable.length) return { state: "available", reason: `${required.length} required capability contract${required.length === 1 ? " is" : "s are"} available.` };
-  const reasons = unavailable.flatMap((item) => {
-    const missing = Array.isArray(item.missingDependencies) ? item.missingDependencies.map(String) : [];
-    const explanation = String(item.reason ?? item.requiredNextAction ?? item.required_next_action ?? "").trim();
-    return [explanation, missing.length ? `Missing: ${missing.join(", ")}.` : ""].filter(Boolean);
-  });
+  const reasons = [
+    ...unavailable.flatMap((item) => [item.requiredNextAction ?? "", ...item.limitations]),
+    missingHandlers.length ? `No typed handler inventory for: ${missingHandlers.join(", ")}.` : "",
+    ...blockedActions.flatMap((item) => [item.requiredNextAction ?? "", ...item.limitations]),
+  ].filter(Boolean);
   return {
-    state: String(unavailable[0].state ?? unavailable[0].status ?? "unavailable"),
-    reason: [...new Set(reasons)].join(" ") || "Runtime reported the capability unavailable without an explanatory reason.",
+    state: unavailable[0]?.classification ?? blockedActions[0]?.classification ?? "unavailable",
+    reason: [...new Set(reasons)].join(" ") || "The canonical registry reports this capability unavailable.",
   };
 }
 
@@ -235,7 +222,7 @@ function HostedCapabilityBoundary({
   capability: { state: string; reason: string };
   children: ReactNode;
 }) {
-  if (configured && capability.state === "available") return children;
+  if (configured && ["live", "degraded"].includes(capability.state)) return children;
   const boundaryState = configured ? capability.state : "unavailable";
   const reason = configured ? capability.reason : "Hosted operational mode is not configured for this deployment.";
   return <DataPanel eyebrow="Hosted capability boundary" title={`${title} is ${boundaryState === "checking" ? "being verified" : "unavailable"}`} icon={<ShieldCheck size={18} />}>
@@ -283,9 +270,6 @@ export function App() {
   const [hostedOperationalConfigured, setHostedOperationalConfigured] = useState(false);
   const [operationalSession, setOperationalSession] = useState<OperationalSession>({ authenticated: false });
   const [operationalReadiness, setOperationalReadiness] = useState<Record<string, unknown> | null>(null);
-  const [operationalReadinessFailure, setOperationalReadinessFailure] = useState("");
-  const [clientCapabilityContract, setClientCapabilityContract] = useState<ClientCapabilityContract | null>(null);
-  const [clientCapabilityFailure, setClientCapabilityFailure] = useState("");
 
   const refresh = (forceRefresh = false) => { setLoading(true); portalClient.snapshot(forceRefresh).then((result) => { setSnapshot((current) => ({ ...current, ...result.data })); setFailures(result.failures); }).catch(() => { setSnapshot({}); setFailures([]); }).finally(() => setLoading(false)); };
   function focusPlatformSearch() {
@@ -305,9 +289,6 @@ export function App() {
   useEffect(() => {
     if (!operationalSession.authenticated) {
       setOperationalReadiness(null);
-      setOperationalReadinessFailure("");
-      setClientCapabilityContract(null);
-      setClientCapabilityFailure("");
       return;
     }
     let mounted = true;
@@ -315,20 +296,9 @@ export function App() {
       void localNexusClient.capabilityReadiness().then((value) => {
         if (!mounted) return;
         setOperationalReadiness(record(value));
-        setOperationalReadinessFailure("");
-      }).catch((caught) => {
+      }).catch(() => {
         if (!mounted) return;
         setOperationalReadiness(null);
-        setOperationalReadinessFailure(caught instanceof Error ? caught.message : "Capability-specific Runtime readiness is unavailable.");
-      });
-      void localNexusClient.clientCapabilities().then((value) => {
-        if (!mounted) return;
-        setClientCapabilityContract(value);
-        setClientCapabilityFailure("");
-      }).catch((caught) => {
-        if (!mounted) return;
-        setClientCapabilityContract(null);
-        setClientCapabilityFailure(caught instanceof Error ? caught.message : "The Runtime client capability contract is unavailable.");
       });
     };
     void verify();
@@ -402,12 +372,40 @@ export function App() {
   const eox = snapshot.eox?.data as EoxAssessment | null | undefined;
   const proofId = list(snapshot.proofs?.data).map((proof) => proof.id).find(Boolean);
   const receiptId = list(snapshot.receipts?.data).map((receipt) => receipt.id).find(Boolean);
+  const capabilityRegistryEnvelope = snapshot["capability-registry"];
+  const capabilityRegistry = asCapabilityRegistryProjection(capabilityRegistryEnvelope?.data);
+  const capabilityRegistryFailure = capabilityRegistryEnvelope?.error?.message
+    ?? (capabilityRegistryEnvelope && !capabilityRegistry ? "The canonical Capability Registry projection failed validation." : "");
+  const copilotInteractionAction = canonicalActionAvailability(
+    capabilityRegistry,
+    PORTAL_CANONICAL_ACTIONS.copilotInteractionStart,
+    capabilityRegistryFailure,
+  );
+  const realtimeVoiceAction = canonicalActionAvailability(
+    capabilityRegistry,
+    PORTAL_CANONICAL_ACTIONS.realtimeVoiceCall,
+    capabilityRegistryFailure,
+  );
+  const voiceOperatorTranscriptAction = canonicalActionAvailability(
+    capabilityRegistry,
+    PORTAL_CANONICAL_ACTIONS.voiceOperatorTranscript,
+    capabilityRegistryFailure,
+  );
+  const registryRailGroups = RAIL_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
+      ...item,
+      live: capabilityStateView(
+        capabilityRegistry,
+        item.id as AreaId,
+        capabilityRegistryFailure,
+      ).state === "live",
+    })),
+  }));
   const hostedCapability = capabilityStateView(
-    operationalReadiness,
-    clientCapabilityContract,
+    capabilityRegistry,
     active,
-    operationalReadinessFailure,
-    clientCapabilityFailure,
+    capabilityRegistryFailure,
   );
   const activityTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const sidePanel = copilotOpen ? "copilot" : inspectorOpen ? "inspector" : "closed";
@@ -460,16 +458,16 @@ export function App() {
       <article><span>Session expires</span><strong>{operationalSession.expiresAt ? new Date(operationalSession.expiresAt).toLocaleString() : "Unavailable"}</strong></article>
     </section>}
     {active === "dashboard" && <><ExecutiveStatusBar snapshot={snapshot} connectionState={state} /><OperationsCenter assessment={eox ?? null} /></>}
-    {active === "missions" && <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} />}
-    {active === "replay" && <OperationalReplay requestedMissionId={replayMissionId} />}
-    {active === "conclave" && <ConclaveWorkspace readiness={operationalReadiness} session={operationalSession} />}
-    {active === "knowledge" && <KnowledgeWorkspace snapshot={snapshot} session={operationalSession} />}
-    {active === "edge" && <><EdgeRuntime snapshot={snapshot} /><RuntimeTopology snapshot={snapshot} /></>}
-    {active === "mission-control" && <OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />}
+    {active === "missions" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Missions" capability={hostedCapability}><MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} /></HostedCapabilityBoundary>}
+    {active === "replay" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Operational Replay" capability={hostedCapability}><OperationalReplay requestedMissionId={replayMissionId} /></HostedCapabilityBoundary>}
+    {active === "conclave" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Conclave" capability={hostedCapability}><ConclaveWorkspace readiness={operationalReadiness} session={operationalSession} /></HostedCapabilityBoundary>}
+    {active === "knowledge" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Knowledge" capability={hostedCapability}><KnowledgeWorkspace snapshot={snapshot} session={operationalSession} /></HostedCapabilityBoundary>}
+    {active === "edge" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Edge Runtime" capability={hostedCapability}><><EdgeRuntime snapshot={snapshot} /><RuntimeTopology snapshot={snapshot} /></></HostedCapabilityBoundary>}
+    {active === "mission-control" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Mission Control" capability={hostedCapability}><OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} /></HostedCapabilityBoundary>}
     {active === "settings" && <div className="settings-workspaces"><AppearanceWorkspace appearance={appearance} /><RuntimeInformation snapshot={snapshot} connectionState={state} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
     {active === "documents" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Document Intelligence" capability={hostedCapability}><DocumentIntake /></HostedCapabilityBoundary>}
     {active === "projects" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Projects" capability={hostedCapability}><ProjectStudio /></HostedCapabilityBoundary>}
-    {active === "voice" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Voice Operations" capability={hostedCapability}><VoiceWorkspace /></HostedCapabilityBoundary>}
+    {active === "voice" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Voice Operations" capability={hostedCapability}><VoiceWorkspace realtimeAction={realtimeVoiceAction} textAction={voiceOperatorTranscriptAction} /></HostedCapabilityBoundary>}
     {active === "providers" && <Providers snapshot={snapshot} />}
     {active === "evidence" && <Evidence snapshot={snapshot} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />}
   </>;
@@ -493,7 +491,7 @@ export function App() {
     />
     <div className="nx-app-shell__body">
       <NexusPlatformRail
-        groups={RAIL_GROUPS}
+        groups={registryRailGroups}
         active={active}
         open={menuOpen}
         query={query}
@@ -550,6 +548,8 @@ export function App() {
         activeLabel={current.label}
         runtimeState={state}
         onNavigate={(area) => navigate(COPILOT_TO_PLATFORM[area])}
+        interactionAction={copilotInteractionAction}
+        realtimeAction={realtimeVoiceAction}
         open={copilotOpen}
         expanded={copilotExpanded}
         onOpenChange={setCopilotPanelOpen}
