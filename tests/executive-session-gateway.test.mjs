@@ -31,6 +31,8 @@ const HUMAN_ASSERTION_SECRET =
   "mission-three-human-assertion-secret-material-0001";
 const RUNTIME_TOKEN =
   "mission-one-runtime-service-token-material-0000001";
+const OPERATIONAL_RUNTIME_TOKEN =
+  "mission-four-operational-runtime-token-material-00001";
 
 const registration = Object.freeze({
   registrationId: "REG-NONPROD-EXECUTIVE-1",
@@ -470,6 +472,224 @@ test("login, read, and revoke preserve separate human/service identities and exp
   assert.equal((await afterRevocation.json()).session.authenticated, false);
   assert.match(afterRevocation.headers.get("set-cookie"), /Max-Age=0/);
   assert.equal(calls.length, 3);
+});
+
+test("canonical execution requires a fresh Registered Executive assertion, CSRF, exact input, and separate service credentials", async () => {
+  let admittedClaims;
+  let operationalMode = "status";
+  const operationalCalls = [];
+  const runtimeFetch = async (url, options) => {
+    const path = new URL(url).pathname;
+    assert.equal(path, "/runtime/executive-sessions/verify");
+    admittedClaims = decodeAssertion(
+      options.headers[HUMAN_SESSION_ASSERTION_HEADER],
+    );
+    return new Response(
+      JSON.stringify(
+        runtimeEnvelope(
+          admittedClaims,
+          "active",
+          "executive_session_verified",
+        ),
+      ),
+      { status: 201 },
+    );
+  };
+  const operationalFetch = async (url, options) => {
+    const path = new URL(url).pathname;
+    operationalCalls.push({ path, options });
+    assert.equal(
+      options.headers.Authorization,
+      `Bearer ${OPERATIONAL_RUNTIME_TOKEN}`,
+    );
+    assert.equal(
+      options.headers["X-NEXUS-Service-Authorization"],
+      `Bearer ${RUNTIME_TOKEN}`,
+    );
+    assert.equal(
+      options.headers["X-NEXUS-Human-Session-ID"],
+      admittedClaims.sid,
+    );
+    const assertion = decodeAssertion(
+      options.headers[HUMAN_SESSION_ASSERTION_HEADER],
+    );
+    assert.equal(assertion.sid, admittedClaims.sid);
+    assert.equal(assertion.authorityGranted, false);
+    assert.equal(assertion.actionAuthorized, false);
+    if (operationalMode === "sensitive") {
+      return new Response(
+        JSON.stringify({
+          recordType: "nexus_canonical_execution_status",
+          token: "must-never-reach-browser",
+          secretValuesExposed: false,
+        }),
+        { status: 200 },
+      );
+    }
+    if (path.endsWith("/missions")) {
+      assert.equal(options.method, "POST");
+      assert.deepEqual(JSON.parse(options.body), {
+        objective:
+          "Prove one governed reversible non-production repository fixture Action.",
+        authorizationAcknowledged: true,
+      });
+      return new Response(
+        JSON.stringify({
+          recordType: "nexus_canonical_execution_mission_result",
+          status: "created",
+          mission: {
+            missionId: "MISSION-M4-TEST",
+            state: "authorized",
+            fixture: {
+              path: "mission-fixture/nexus/m4/canonical-execution.json",
+              baselineDigest: `sha256:${"a".repeat(64)}`,
+              currentDigest: `sha256:${"a".repeat(64)}`,
+              version: 1,
+            },
+            actions: [],
+          },
+          authorityGranted: false,
+          actionAuthorized: false,
+          secretValuesExposed: false,
+        }),
+        { status: 201 },
+      );
+    }
+    assert.equal(
+      path,
+      "/executive-authority/canonical-execution",
+    );
+    return new Response(
+      JSON.stringify({
+        recordType: "nexus_canonical_execution_status",
+        capabilities: [
+          {
+            capabilityId: "github_repair.repository_edit",
+            action: "repository.edit",
+            classification: "live_verified",
+            operationalAvailability: true,
+            reason: "All ten independent capability-state checks pass.",
+          },
+        ],
+        operationalAvailability: true,
+        authorityGranted: false,
+        actionAuthorized: false,
+        secretValuesExposed: false,
+      }),
+      { status: 200 },
+    );
+  };
+  const actionAdmission = Object.freeze({
+    clear() {},
+    observe(value) { return value; },
+    snapshot() { return null; },
+    decide() {
+      return {
+        allowed: true,
+        actionId: "canonical.route.test",
+        classification: "live_verified",
+      };
+    },
+  });
+  const server = createPortalServer({
+    config: configOverrides({
+      operationalEnabled: true,
+      operationalApiBaseUrl: "https://runtime.invalid",
+      operationalRuntimeToken: OPERATIONAL_RUNTIME_TOKEN,
+      operationalSessionSecret:
+        "mission-four-operational-session-secret-material-0001",
+      operationalAccessKey: "mission-four-access-key",
+    }),
+    runtimeFetch,
+    operationalFetch,
+    actionAdmission,
+    providerIdentityVerifier: async () => providerIdentity(),
+    clock,
+  });
+  servers.push(server);
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const unauthenticated = await fetch(
+    `${base}/api/canonical-execution`,
+  );
+  assert.equal(unauthenticated.status, 401);
+  assert.equal(operationalCalls.length, 0);
+
+  const login = await fetch(`${base}/api/executive-session/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: base },
+    body: "{}",
+  });
+  assert.equal(login.status, 201);
+  const loginBody = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";", 1)[0];
+  const status = await fetch(`${base}/api/canonical-execution`, {
+    headers: { Cookie: cookie },
+  });
+  assert.equal(status.status, 200);
+  const statusBody = await status.json();
+  assert.equal(statusBody.ok, true);
+  assert.equal(statusBody.registeredExecutiveSessionVerified, true);
+  assert.equal(statusBody.authorityGranted, false);
+  assert.equal(statusBody.secretValuesExposed, false);
+
+  const missingCsrf = await fetch(
+    `${base}/api/canonical-execution/missions`,
+    {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        Origin: base,
+        "Content-Type": "application/json",
+        "Idempotency-Key": "mission4-create-test",
+      },
+      body: JSON.stringify({
+        objective:
+          "Prove one governed reversible non-production repository fixture Action.",
+        authorizationAcknowledged: true,
+      }),
+    },
+  );
+  assert.equal(missingCsrf.status, 403);
+  assert.equal(operationalCalls.length, 1);
+
+  const created = await fetch(
+    `${base}/api/canonical-execution/missions`,
+    {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        Origin: base,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": loginBody.sessionAccess.csrfToken,
+        "Idempotency-Key": "mission4-create-test",
+      },
+      body: JSON.stringify({
+        objective:
+          "Prove one governed reversible non-production repository fixture Action.",
+        authorizationAcknowledged: true,
+      }),
+    },
+  );
+  assert.equal(created.status, 201);
+  assert.equal((await created.json()).data.mission.state, "authorized");
+  assert.equal(operationalCalls.length, 2);
+
+  operationalMode = "sensitive";
+  const sensitive = await fetch(`${base}/api/canonical-execution`, {
+    headers: { Cookie: cookie },
+  });
+  assert.equal(sensitive.status, 502);
+  assert.equal(
+    JSON.stringify(await sensitive.json()).includes(
+      "must-never-reach-browser",
+    ),
+    false,
+  );
 });
 
 test("route boundary rejects client-controlled claims, unregistered humans, invalid methods, CSRF failures, and Runtime rejection without mutation", async () => {

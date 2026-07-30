@@ -7,6 +7,7 @@ import { createSessionAuthority, requiredScope } from "./operational-auth.mjs";
 import {
   createExecutiveRegistrationMapper,
   createExecutiveSessionAuthority,
+  createHumanSessionAssertion,
   createReplitAuthAdapter,
   EXECUTIVE_SESSION_COOKIE_NAME,
   EXECUTIVE_SESSION_POLICY_DIGEST,
@@ -15,6 +16,7 @@ import {
   EXECUTIVE_SCOPES,
   ExecutiveSessionFailure,
   HUMAN_SESSION_ASSERTION_CONTRACT,
+  HUMAN_SESSION_ASSERTION_HEADER,
   MAX_EXECUTIVE_SESSION_LIFETIME_SECONDS,
   MAX_HUMAN_ASSERTION_LIFETIME_SECONDS,
   REGISTERED_EXECUTIVE_SESSION_CONTRACT,
@@ -1573,6 +1575,10 @@ const DYNAMIC_CANONICAL_RUNTIME_TEMPLATES = Object.freeze([
   ["GET", "/knowledge/receipts/{receipt_id}"],
   ["GET", "/mission-store/{mission_id}"],
   ["GET", "/missions/{mission_id}"],
+  ["GET", "/executive-authority/canonical-execution"],
+  ["POST", "/executive-authority/canonical-execution/missions"],
+  ["GET", "/executive-authority/canonical-execution/missions/{mission_id}"],
+  ["POST", "/executive-authority/canonical-execution/missions/{mission_id}/actions"],
   ["GET", "/runtime/baselines/{baseline_id}"],
   ["GET", "/runtime-coordination/nodes/{node_id}"],
   ["GET", "/runtime-coordination/admissions/{admission_id}"],
@@ -1646,7 +1652,11 @@ export function resolveCanonicalCapabilityActionAlias(resolved) {
     template,
     {
       runtimePath: resolved.runtimePath,
-      requiredSurfaces: ["api"],
+      requiredSurfaces: template.startsWith(
+        "/executive-authority/canonical-execution"
+      )
+        ? ["api", "ui"]
+        : ["api"],
     },
   );
 }
@@ -2706,6 +2716,419 @@ async function handleOperationalApi(
   } catch (error) {
     const failure = error instanceof GatewayFailure ? error : new GatewayFailure("operational_gateway_error", "Hosted operation failed safely.", "Unknown", 500);
     return sendJson(response, failure.status, operationalFailure(config, url.pathname, failure.code, failure.message, failure.state, failure.details));
+  }
+}
+
+function resolveCanonicalExecutionRoute(pathname, method) {
+  if (pathname === "/api/canonical-execution") {
+    return method === "GET"
+      ? { method, runtimePath: "/executive-authority/canonical-execution" }
+      : { methodMismatch: true, allowed: "GET" };
+  }
+  if (pathname === "/api/canonical-execution/missions") {
+    return method === "POST"
+      ? {
+        method,
+        runtimePath: "/executive-authority/canonical-execution/missions",
+      }
+      : { methodMismatch: true, allowed: "POST" };
+  }
+  const match = pathname.match(
+    /^\/api\/canonical-execution\/missions\/([^/]+)(\/actions)?$/,
+  );
+  if (!match) return null;
+  const missionId = operationalIdentifier(match[1]);
+  if (!missionId) return null;
+  const actions = match[2] === "/actions";
+  const expectedMethod = actions ? "POST" : "GET";
+  if (method !== expectedMethod) {
+    return { methodMismatch: true, allowed: expectedMethod };
+  }
+  return {
+    method,
+    runtimePath: (
+      `/executive-authority/canonical-execution/missions/${missionId}`
+      + (actions ? "/actions" : "")
+    ),
+  };
+}
+
+function validateCanonicalExecutionPayload(runtimePath, payload) {
+  rejectUntrustedOperationalFields(payload);
+  if (runtimePath === "/executive-authority/canonical-execution/missions") {
+    strictKeys(
+      payload,
+      new Set(["objective", "authorizationAcknowledged"]),
+    );
+    if (
+      payload.objective !==
+        "Prove one governed reversible non-production repository fixture Action."
+      || payload.authorizationAcknowledged !== true
+    ) {
+      throw new GatewayFailure(
+        "canonical_execution_mission_scope_invalid",
+        "Only the exact admitted Mission 4 objective may be authorized.",
+        "Unauthorized",
+        400,
+      );
+    }
+    return payload;
+  }
+  strictKeys(
+    payload,
+    payload?.action === "repository.edit"
+      ? new Set(["action", "path", "expectedSha256", "content"])
+      : new Set([
+        "action",
+        "path",
+        "expectedSha256",
+        "restoreSha256",
+      ]),
+  );
+  if (
+    !["repository.edit", "repository.restore"].includes(payload?.action)
+    || payload.path !== "mission-fixture/nexus/m4/canonical-execution.json"
+    || !/^sha256:[0-9a-f]{64}$/.test(String(payload.expectedSha256 ?? ""))
+    || (
+      payload.action === "repository.edit"
+      && (
+        typeof payload.content !== "string"
+        || Buffer.byteLength(payload.content, "utf8") < 1
+        || Buffer.byteLength(payload.content, "utf8") > 4_096
+      )
+    )
+    || (
+      payload.action === "repository.restore"
+      && !/^sha256:[0-9a-f]{64}$/.test(
+        String(payload.restoreSha256 ?? ""),
+      )
+    )
+  ) {
+    throw new GatewayFailure(
+      "canonical_execution_action_invalid",
+      "The Action does not match the exact Mission 4 fixture contract.",
+      "Unauthorized",
+      400,
+    );
+  }
+  return payload;
+}
+
+async function handleCanonicalExecutionApi(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  operationalFetch,
+  executiveSessionAuthority,
+  actionAdmission,
+  clock,
+) {
+  const url = new URL(request.url, "http://portal.invalid");
+  if (
+    !requestOriginAllowed(
+      request,
+      config,
+      request.method === "POST",
+    )
+  ) {
+    return sendJson(
+      response,
+      403,
+      operationalFailure(
+        config,
+        url.pathname,
+        "origin_denied",
+        "Request origin is not allowed.",
+        "Unauthorized",
+      ),
+    );
+  }
+  if (!config.operationalEnabled || !config.executiveSessionEnabled) {
+    return sendJson(
+      response,
+      503,
+      operationalFailure(
+        config,
+        url.pathname,
+        "canonical_execution_unconfigured",
+        "Mission 4 requires both hosted operational transport and Registered Executive sessions.",
+        "Unavailable",
+      ),
+    );
+  }
+  if (url.search) {
+    return sendJson(
+      response,
+      400,
+      operationalFailure(
+        config,
+        url.pathname,
+        "query_not_allowed",
+        "Canonical execution routes do not accept query parameters.",
+      ),
+    );
+  }
+  const resolved = resolveCanonicalExecutionRoute(
+    url.pathname,
+    request.method,
+  );
+  if (!resolved) {
+    return sendJson(
+      response,
+      404,
+      operationalFailure(
+        config,
+        url.pathname,
+        "route_not_allowlisted",
+        "This canonical execution route is not allowlisted.",
+      ),
+    );
+  }
+  if (resolved.methodMismatch) {
+    return sendJson(
+      response,
+      405,
+      operationalFailure(
+        config,
+        url.pathname,
+        "method_not_allowed",
+        "Method is not allowed for this canonical execution route.",
+      ),
+      { Allow: resolved.allowed },
+    );
+  }
+  const claims = executiveSessionAuthority.authenticate(request);
+  if (!claims) {
+    return sendJson(
+      response,
+      401,
+      operationalFailure(
+        config,
+        url.pathname,
+        "registered_executive_session_required",
+        "A current Registered Executive session is required.",
+        "Unauthorized",
+      ),
+    );
+  }
+  if (
+    request.method === "POST"
+    && !executiveSessionAuthority.csrfValid(request, claims)
+  ) {
+    return sendJson(
+      response,
+      403,
+      operationalFailure(
+        config,
+        url.pathname,
+        "csrf_invalid",
+        "Registered Executive CSRF verification failed.",
+        "Unauthorized",
+      ),
+    );
+  }
+  const requestKey = String(request.headers["idempotency-key"] ?? "");
+  if (
+    request.method === "POST"
+    && !IDEMPOTENCY_KEY_PATTERN.test(requestKey)
+  ) {
+    return sendJson(
+      response,
+      400,
+      operationalFailure(
+        config,
+        url.pathname,
+        "idempotency_key_required",
+        "A valid Idempotency-Key is required.",
+      ),
+    );
+  }
+  const alias = resolveCanonicalCapabilityActionAlias(resolved);
+  const admission = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!admission.allowed) {
+    return sendJson(
+      response,
+      admission.status,
+      operationalFailure(
+        config,
+        url.pathname,
+        admission.code,
+        admission.message,
+        admission.state,
+      ),
+    );
+  }
+  let payload;
+  try {
+    payload = request.method === "POST"
+      ? validateCanonicalExecutionPayload(
+        resolved.runtimePath,
+        await readJsonBody(request, 8_192),
+      )
+      : undefined;
+  } catch (caught) {
+    const failure = caught instanceof GatewayFailure
+      ? caught
+      : new GatewayFailure(
+        "canonical_execution_request_invalid",
+        "The canonical execution request was invalid.",
+        "Unknown",
+        400,
+      );
+    return sendJson(
+      response,
+      failure.status,
+      operationalFailure(
+        config,
+        url.pathname,
+        failure.code,
+        failure.message,
+        failure.state,
+      ),
+    );
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  try {
+    const assertion = createHumanSessionAssertion(config, claims, clock);
+    let upstream;
+    try {
+      upstream = await operationalFetch(
+        `${config.operationalApiBaseUrl}${resolved.runtimePath}`,
+        {
+          method: resolved.method,
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${config.operationalRuntimeToken}`,
+            "X-NEXUS-Service-Authorization": (
+              `Bearer ${config.runtimeToken}`
+            ),
+            "X-NEXUS-Human-Session-ID": claims.sid,
+            [HUMAN_SESSION_ASSERTION_HEADER]: assertion,
+            ...(resolved.method === "POST"
+              ? {
+                "Content-Type": "application/json",
+                "Idempotency-Key": requestKey,
+              }
+              : {}),
+          },
+          ...(resolved.method === "POST"
+            ? { body: JSON.stringify(payload) }
+            : {}),
+          signal: controller.signal,
+          redirect: "error",
+        },
+      );
+    } catch (caught) {
+      if (caught?.name === "AbortError" || controller.signal.aborted) {
+        throw new GatewayFailure(
+          "canonical_execution_timed_out",
+          "Canonical execution timed out before a verified result.",
+          "Timed Out",
+          504,
+          true,
+        );
+      }
+      throw new GatewayFailure(
+        "canonical_execution_runtime_unavailable",
+        "The non-production canonical execution Runtime is unavailable.",
+        "Unavailable",
+        503,
+        true,
+      );
+    }
+    const raw = Buffer.from(await upstream.arrayBuffer());
+    if (raw.byteLength > config.localMaxResponseBytes) {
+      throw new GatewayFailure(
+        "canonical_execution_response_too_large",
+        "Canonical execution response exceeded the bounded size.",
+        "Unknown",
+        502,
+      );
+    }
+    let upstreamBody;
+    try {
+      upstreamBody = JSON.parse(raw.toString("utf8"));
+    } catch {
+      throw new GatewayFailure(
+        "canonical_execution_response_invalid",
+        "Canonical execution returned invalid JSON.",
+        "Unknown",
+        502,
+      );
+    }
+    if (
+      !upstreamBody
+      || typeof upstreamBody !== "object"
+      || Array.isArray(upstreamBody)
+      || upstreamBody.secretValuesExposed !== false
+    ) {
+      throw new GatewayFailure(
+        "canonical_execution_response_invalid",
+        "Canonical execution returned an invalid truth-bound response.",
+        "Unknown",
+        502,
+      );
+    }
+    const sanitized = sanitizeOperationalResponse(upstreamBody);
+    if (JSON.stringify(sanitized) !== JSON.stringify(upstreamBody)) {
+      throw new GatewayFailure(
+        "canonical_execution_sensitive_field_rejected",
+        "Canonical execution response contained a prohibited sensitive field.",
+        "Unauthorized",
+        502,
+      );
+    }
+    structuredLog("canonical_execution_gateway_result", {
+      route: url.pathname,
+      runtimePath: resolved.runtimePath,
+      method: resolved.method,
+      status: upstream.status,
+      sessionId: claims.sid,
+      principalId: claims.principalId,
+      tenantId: claims.tenantId,
+      workspaceId: claims.workspaceId,
+      authorityGranted: false,
+      secretValuesExposed: false,
+    });
+    return sendJson(response, upstream.status, {
+      ok: upstream.ok,
+      recordType: "nexus_canonical_execution_gateway_response",
+      route: url.pathname,
+      data: sanitized,
+      registeredExecutiveSessionVerified: true,
+      authorityGranted: false,
+      secretValuesExposed: false,
+      truth: TRUTH,
+    });
+  } catch (caught) {
+    const failure = caught instanceof GatewayFailure
+      ? caught
+      : new GatewayFailure(
+        "canonical_execution_gateway_error",
+        "Canonical execution failed safely.",
+        "Unknown",
+        500,
+      );
+    return sendJson(
+      response,
+      failure.status,
+      operationalFailure(
+        config,
+        url.pathname,
+        failure.code,
+        failure.message,
+        failure.state,
+      ),
+    );
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -4130,10 +4553,11 @@ export function createPortalServer(options = {}) {
       clock: options.clock,
     })
     : null;
-  const actionAdmission = createRuntimeActionAdmissionState(
-    config,
-    options.clock ?? (() => Date.now()),
-  );
+  const actionAdmission = options.actionAdmission
+    ?? createRuntimeActionAdmissionState(
+      config,
+      options.clock ?? (() => Date.now()),
+    );
   const cache = new Map();
   const tracker = { lastSuccessfulConnection: null, lastSuccessfulRefresh: null };
   const server = createServer((request, response) => {
@@ -4181,6 +4605,28 @@ export function createPortalServer(options = {}) {
           },
           truth: TRUTH,
         }));
+    } else if (request.url?.startsWith("/api/canonical-execution")) {
+      handleCanonicalExecutionApi(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        operationalFetch,
+        executiveSessionAuthority,
+        actionAdmission,
+        options.clock ?? (() => Date.now()),
+      )
+        .catch(() => sendJson(
+          response,
+          500,
+          operationalFailure(
+            config,
+            request.url,
+            "canonical_execution_gateway_error",
+            "Canonical execution failed safely.",
+            "Unknown",
+          ),
+        ));
     } else if (request.url?.startsWith("/api/executive-session")) {
       handleExecutiveSessionApi(
         request,

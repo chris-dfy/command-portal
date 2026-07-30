@@ -14,6 +14,7 @@ import { OperationsWorkspace } from "./components/OperationsWorkspace";
 import { OperationalAccessGate } from "./components/OperationalAccessGate";
 import { ProjectStudio } from "./components/ProjectStudio";
 import { RegisteredExecutiveSession } from "./components/RegisteredExecutiveSession";
+import { CanonicalExecutionSpine } from "./components/CanonicalExecutionSpine";
 import { ReleaseRevision } from "./components/ReleaseRevision";
 import { RuntimeHealth } from "./components/RuntimeHealth";
 import { RuntimeInformation } from "./components/RuntimeInformation";
@@ -465,7 +466,7 @@ export function App() {
     {active === "knowledge" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Knowledge" capability={hostedCapability}><KnowledgeWorkspace snapshot={snapshot} session={operationalSession} /></HostedCapabilityBoundary>}
     {active === "edge" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Edge Runtime" capability={hostedCapability}><><EdgeRuntime snapshot={snapshot} /><RuntimeTopology snapshot={snapshot} /></></HostedCapabilityBoundary>}
     {active === "mission-control" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Mission Control" capability={hostedCapability}><OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} /></HostedCapabilityBoundary>}
-    {active === "settings" && <div className="settings-workspaces"><RegisteredExecutiveSession /><AppearanceWorkspace appearance={appearance} /><RuntimeInformation snapshot={snapshot} connectionState={state} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
+    {active === "settings" && <div className="settings-workspaces"><RegisteredExecutiveSession /><CanonicalExecutionSpine /><AppearanceWorkspace appearance={appearance} /><RuntimeInformation snapshot={snapshot} connectionState={state} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
     {active === "documents" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Document Intelligence" capability={hostedCapability}><DocumentIntake /></HostedCapabilityBoundary>}
     {active === "projects" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Projects" capability={hostedCapability}><ProjectStudio /></HostedCapabilityBoundary>}
     {active === "voice" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Voice Operations" capability={hostedCapability}><VoiceWorkspace realtimeAction={realtimeVoiceAction} textAction={voiceOperatorTranscriptAction} /></HostedCapabilityBoundary>}

@@ -707,6 +707,139 @@ export const registeredExecutiveSessionClient = Object.freeze({
   ),
 });
 
+export type CanonicalExecutionGatewayResponse = {
+  ok: boolean;
+  recordType?: "nexus_canonical_execution_gateway_response";
+  route?: string;
+  data?: {
+    recordType?: string;
+    mission?: {
+      missionId: string;
+      state: string;
+      fixture: {
+        path: string;
+        baselineDigest: string;
+        currentDigest: string;
+        version: number;
+      };
+      actions: Array<{
+        action: string;
+        status: string;
+        beforeDigest: string;
+        afterDigest: string;
+      }>;
+      missionTerminalReceiptId?: string | null;
+    };
+    capabilities?: Array<{
+      capabilityId: string;
+      action: string;
+      classification: string;
+      operationalAvailability: boolean;
+      reason: string;
+    }>;
+    status?: string;
+    result?: {
+      path: string;
+      priorSha256: string;
+      currentSha256: string;
+      effectCount: number;
+    };
+    accountabilityIntegrity?: { valid: boolean; recordCount: number };
+    replay?: { passive: boolean; dispatchesActions: boolean; eventCount: number };
+    secretValuesExposed: false;
+  };
+  error?: { code?: string; message?: string };
+  registeredExecutiveSessionVerified?: boolean;
+  authorityGranted?: false;
+  secretValuesExposed?: false;
+};
+
+async function canonicalExecutionRequest(
+  path: string,
+  options: RequestInit = {},
+  requestKey = "",
+): Promise<CanonicalExecutionGatewayResponse> {
+  if (options.method === "POST" && !registeredExecutiveSessionCsrfToken) {
+    await registeredExecutiveSessionClient.status();
+  }
+  const response = await fetch(`/api/canonical-execution${path}`, {
+    ...options,
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.method === "POST"
+        ? {
+          "X-CSRF-Token": registeredExecutiveSessionCsrfToken,
+          "Idempotency-Key": requestKey || `m4-${crypto.randomUUID()}`,
+        }
+        : {}),
+      ...(options.headers ?? {}),
+    },
+  });
+  const body = await response.json() as CanonicalExecutionGatewayResponse;
+  if (!response.ok || !body.ok || !body.data) {
+    throw new RegisteredExecutiveSessionRequestError(
+      body.error?.code ?? "canonical_execution_request_failed",
+      body.error?.message
+        ?? `Canonical execution request failed (${response.status}).`,
+      response.status,
+    );
+  }
+  return body;
+}
+
+export const canonicalExecutionClient = Object.freeze({
+  status: () => canonicalExecutionRequest(""),
+  createMission: () => canonicalExecutionRequest(
+    "/missions",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        objective: "Prove one governed reversible non-production repository fixture Action.",
+        authorizationAcknowledged: true,
+      }),
+    },
+  ),
+  mission: (missionId: string) => canonicalExecutionRequest(
+    `/missions/${encodeURIComponent(missionId)}`,
+  ),
+  edit: (
+    missionId: string,
+    path: string,
+    expectedSha256: string,
+    content: string,
+  ) => canonicalExecutionRequest(
+    `/missions/${encodeURIComponent(missionId)}/actions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action: "repository.edit",
+        path,
+        expectedSha256,
+        content,
+      }),
+    },
+  ),
+  restore: (
+    missionId: string,
+    path: string,
+    expectedSha256: string,
+    restoreSha256: string,
+  ) => canonicalExecutionRequest(
+    `/missions/${encodeURIComponent(missionId)}/actions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action: "repository.restore",
+        path,
+        expectedSha256,
+        restoreSha256,
+      }),
+    },
+  ),
+});
+
 const post = <T, B extends object = Record<string, unknown>>(path: string, body: B, idempotencyKey?: string) => request<T>(
   path,
   { method: "POST", body: JSON.stringify(body) },
