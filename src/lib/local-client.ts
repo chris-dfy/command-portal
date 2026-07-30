@@ -442,6 +442,155 @@ export type OperationalSession = {
   managed?: boolean;
 };
 
+export type RegisteredExecutiveSessionRecord = {
+  recordType: "nexus_registered_executive_session";
+  schemaVersion: "nexus.registered-executive-session@1.0.0";
+  sessionId: string;
+  state: "active" | "revoked";
+  humanIdentity: {
+    registrationId: string;
+    principalId: string;
+    principalType: "registered_human_executive";
+    provider: "replit-auth";
+    providerIssuer: string;
+    providerSubjectBinding: "server_verified_opaque_subject_to_preprovisioned_registration";
+    providerSubjectClientControlled: false;
+    providerSubjectRetained: false;
+    providerAssertionVerified: true;
+    humanVerified: true;
+    authenticationMethods: string[];
+    authenticationTime: string;
+  };
+  serviceIdentity: {
+    principalId: string;
+    principalType: "experience_gateway_service";
+    authenticationMethod: "bound_service_credential";
+    authenticatedBeforeHumanAssertion: true;
+    distinctFromHumanPrincipal: true;
+  };
+  scopeBinding: {
+    tenantId: string;
+    workspaceId: string;
+    selectionOwner: "server_registration_and_runtime";
+    clientControlled: false;
+    exactRuntimeMatch: true;
+  };
+  role: "executive";
+  scopes: ["executive_session.read", "executive_session.revoke"];
+  policyBinding: {
+    policyId: "registered-executive-session-policy";
+    policyVersion: "1.0.0";
+    policyDigest: string;
+    state: "current_verified";
+    clientControlled: false;
+  };
+  assertionBinding: {
+    contractVersion: "nexus.registered-executive-session-assertion@1.0.0";
+    algorithm: "hmac-sha256";
+    keyId: string;
+    issuer: string;
+    audience: string;
+    serviceBindingId: string;
+    maximumLifetimeSeconds: 60;
+    singleUseRequired: true;
+    tokenRetained: false;
+    authorityClaimAccepted: false;
+  };
+  lifecycle: {
+    sessionVersion: number;
+    authenticatedAt: string;
+    issuedAt: string;
+    expiresAt: string;
+    revokedAt: string | null;
+    maximumSessionLifetimeSeconds: number;
+    bounded: true;
+  };
+  replayAndRevocation: {
+    assertionReplayState: "admitted_single_use";
+    sessionReplayRef: string;
+    revocationState: "active" | "revoked";
+    revocationCheckpoint: number;
+    durable: true;
+    rejectedRequestMutatedState: false;
+  };
+  authorityBoundary: {
+    authorityGranted: false;
+    actionAuthorized: false;
+    approvalRef: null;
+    decisionRef: null;
+    authorityGrantRefs: [];
+    missionExecutionAdmitted: false;
+    capabilityHealthGrantsAuthority: false;
+  };
+  receipt: {
+    receiptId: string;
+    receiptDigest: string;
+    accountabilityRef: string;
+    replayRef: string;
+    postconditionVerified: true;
+    credentialMaterialRetained: false;
+    rawProviderSubjectRetained: false;
+  };
+  secretValuesExposed: false;
+};
+
+export type RegisteredExecutiveSessionAbsent = {
+  authenticated: false;
+  runtimeVerified: false;
+  authorityGranted: false;
+  actionAuthorized: false;
+  decisionCreated: false;
+  missionCreated: false;
+  secretValuesExposed: false;
+};
+
+export type RegisteredExecutiveSessionEnvelope = {
+  ok: boolean;
+  session?: RegisteredExecutiveSessionRecord | RegisteredExecutiveSessionAbsent;
+  sessionAccess?: {
+    csrfToken: string;
+    cookieHttpOnly: true;
+    cookieSameSite: "Strict";
+    providerTokenRetained: false;
+    providerSubjectRetained: false;
+    authorityGranted: false;
+    actionAuthorized: false;
+    secretValuesExposed: false;
+  };
+  executiveSession: {
+    mode: "registered_executive_nonproduction";
+    route: string;
+    enabled: boolean;
+    provider: "replit-auth";
+    identityOwner: "server_owned_registration";
+    runtimeOwner: "NEXUS Runtime";
+    serviceIdentityDistinct: true;
+    tenantWorkspaceServerSelected: true;
+    authenticationGrantsAuthority: false;
+    sessionCreatesDecision: false;
+    sessionCreatesMission: false;
+    sessionAuthorizesAction: false;
+    productionMultiTenantReady: false;
+    runtimeVerified?: boolean;
+    lifecycleState?: "absent" | "active" | "revoked";
+    connectionState?: string;
+    secretValuesExposed: false;
+  };
+  error?: { code: string; message: string };
+};
+
+export class RegisteredExecutiveSessionRequestError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = "RegisteredExecutiveSessionRequestError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
 export type RuntimeBaselineRequest = {
   expectedDeployedCommit?: string;
 };
@@ -482,6 +631,80 @@ export const operationalSessionClient = Object.freeze({
   },
   hostedMutationHeaders,
   mode: () => capabilityTransport.mode
+});
+
+let registeredExecutiveSessionCsrfToken = "";
+
+async function registeredExecutiveSessionRequest(
+  path: "" | "/login" | "/revoke",
+  options: RequestInit = {},
+): Promise<RegisteredExecutiveSessionEnvelope> {
+  const response = await fetch(`/api/executive-session${path}`, {
+    ...options,
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers ?? {}),
+    },
+  });
+  let envelope: RegisteredExecutiveSessionEnvelope;
+  try {
+    envelope = await response.json() as RegisteredExecutiveSessionEnvelope;
+  } catch {
+    throw new RegisteredExecutiveSessionRequestError(
+      "executive_session_response_invalid",
+      "The Experience Gateway returned an invalid Registered Executive session response.",
+      response.status,
+    );
+  }
+  if (!response.ok || !envelope.ok || !envelope.session) {
+    if (
+      path === "/revoke"
+      || (response.status >= 400 && response.status < 500)
+    ) {
+      registeredExecutiveSessionCsrfToken = "";
+    }
+    throw new RegisteredExecutiveSessionRequestError(
+      envelope.error?.code ?? "executive_session_request_failed",
+      envelope.error?.message ?? `Registered Executive session request failed (${response.status}).`,
+      response.status,
+    );
+  }
+  registeredExecutiveSessionCsrfToken = envelope.sessionAccess?.csrfToken ?? "";
+  if (envelope.executiveSession.lifecycleState === "revoked") {
+    registeredExecutiveSessionCsrfToken = "";
+  }
+  return envelope;
+}
+
+export function isRegisteredExecutiveSessionRecord(
+  value: RegisteredExecutiveSessionEnvelope["session"],
+): value is RegisteredExecutiveSessionRecord {
+  return Boolean(
+    value
+      && "recordType" in value
+      && value.recordType === "nexus_registered_executive_session"
+      && value.schemaVersion === "nexus.registered-executive-session@1.0.0",
+  );
+}
+
+export const registeredExecutiveSessionClient = Object.freeze({
+  status: () => registeredExecutiveSessionRequest(""),
+  login() {
+    return registeredExecutiveSessionRequest(
+      "/login",
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+  revoke: () => registeredExecutiveSessionRequest(
+    "/revoke",
+    {
+      method: "POST",
+      headers: { "X-CSRF-Token": registeredExecutiveSessionCsrfToken },
+      body: JSON.stringify({}),
+    },
+  ),
 });
 
 const post = <T, B extends object = Record<string, unknown>>(path: string, body: B, idempotencyKey?: string) => request<T>(

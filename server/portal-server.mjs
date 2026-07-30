@@ -4,6 +4,25 @@ import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { createSessionAuthority, requiredScope } from "./operational-auth.mjs";
+import {
+  createExecutiveRegistrationMapper,
+  createExecutiveSessionAuthority,
+  createReplitAuthAdapter,
+  EXECUTIVE_SESSION_COOKIE_NAME,
+  EXECUTIVE_SESSION_POLICY_DIGEST,
+  EXECUTIVE_SESSION_POLICY_ID,
+  EXECUTIVE_SESSION_POLICY_VERSION,
+  EXECUTIVE_SCOPES,
+  ExecutiveSessionFailure,
+  HUMAN_SESSION_ASSERTION_CONTRACT,
+  MAX_EXECUTIVE_SESSION_LIFETIME_SECONDS,
+  MAX_HUMAN_ASSERTION_LIFETIME_SECONDS,
+  REGISTERED_EXECUTIVE_SESSION_CONTRACT,
+} from "./executive-session.mjs";
+import {
+  createExecutiveSessionRuntimeClient,
+  ExecutiveSessionRuntimeFailure,
+} from "./executive-session-runtime.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DIST = join(ROOT, "dist");
@@ -28,6 +47,11 @@ const CONTEXT_ASSERTION_KEY_ID = "context-assertion-current";
 const RUNTIME_CREDENTIAL_KEY_ID = "runtime-read-current";
 const TRUST_BINDING_ID = "runtime-experience-trust-bootstrap";
 const CONTEXT_ASSERTION_ROLES = Object.freeze(["observer"]);
+const HUMAN_SESSION_ASSERTION_ISSUER = "command-portal-experience-gateway";
+const HUMAN_SESSION_ASSERTION_AUDIENCE = "nexus-runtime";
+const HUMAN_SESSION_ASSERTION_KEY_ID = "executive-session-current";
+const HUMAN_SESSION_SERVICE_BINDING_ID = "command-portal-experience-gateway";
+const EXECUTIVE_SESSION_COOKIE_KEY_ID = "executive-session-cookie-current";
 const STABLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{2,191}$/;
 const SECRET_REFERENCE_PATTERN = /^(?:env|secret-manager):[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/;
 
@@ -418,12 +442,34 @@ function stablePublicIdentifier(value, name) {
   return identifier;
 }
 
+function stableSha256Digest(value, name) {
+  const digest = String(value ?? "").trim();
+  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
+    throw new Error(`${name} must be a SHA-256 digest.`);
+  }
+  return digest;
+}
+
 function optionalSecretReference(value, name) {
   const reference = String(value ?? "").trim();
   if (reference && !SECRET_REFERENCE_PATTERN.test(reference)) {
     throw new Error(`${name} must be an opaque secret-provider reference.`);
   }
   return reference;
+}
+
+function registeredExecutives(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  let parsed;
+  try {
+    parsed = JSON.parse(String(value ?? ""));
+  } catch {
+    throw new Error("COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON must be valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON must contain a principal registry object.");
+  }
+  return parsed;
 }
 
 const encodeBase64Url = (value) => Buffer.from(value).toString("base64url");
@@ -596,6 +642,213 @@ export function loadConfig(overrides = {}) {
       throw new Error("Automatic hosted sessions require REPLIT_DEPLOYMENT=1, at least one REPLIT_DOMAINS binding, and Secure cookies.");
     }
   }
+  const executiveSessionEnabled = enabled(
+    overrides.executiveSessionEnabled
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED,
+  );
+  const executiveSessionCookieSecure = operationalCookieSecure;
+  const executiveSessionTtlSeconds = integer(
+    overrides.executiveSessionTtlSeconds
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_TTL_SECONDS,
+    MAX_EXECUTIVE_SESSION_LIFETIME_SECONDS,
+    300,
+  );
+  const humanSessionAssertionTtlSeconds = integer(
+    overrides.humanSessionAssertionTtlSeconds
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_TTL_SECONDS,
+    MAX_HUMAN_ASSERTION_LIFETIME_SECONDS,
+  );
+  if (
+    executiveSessionTtlSeconds > MAX_EXECUTIVE_SESSION_LIFETIME_SECONDS
+    || humanSessionAssertionTtlSeconds > MAX_HUMAN_ASSERTION_LIFETIME_SECONDS
+  ) {
+    throw new Error("Registered executive session or assertion lifetime exceeds the Mission 3 bound.");
+  }
+  const executiveSessionCookieSecret = executiveSessionEnabled
+    ? requiredSecret(
+      overrides.executiveSessionCookieSecret
+        ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET,
+      "COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET",
+      32,
+    )
+    : "";
+  const executiveSessionCookieSecretRef = optionalSecretReference(
+    overrides.executiveSessionCookieSecretRef
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET_REF,
+    "COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET_REF",
+  );
+  const executiveSessionCookieKeyId = stablePublicIdentifier(
+    overrides.executiveSessionCookieKeyId
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_KEY_ID
+      ?? EXECUTIVE_SESSION_COOKIE_KEY_ID,
+    "COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_KEY_ID",
+  );
+  const humanSessionAssertionSecret = executiveSessionEnabled
+    ? requiredSecret(
+      overrides.humanSessionAssertionSecret
+        ?? process.env.NEXUS_HUMAN_SESSION_ASSERTION_SECRET,
+      "NEXUS_HUMAN_SESSION_ASSERTION_SECRET",
+      32,
+    )
+    : "";
+  const humanSessionAssertionSecretRef = optionalSecretReference(
+    overrides.humanSessionAssertionSecretRef
+      ?? process.env.NEXUS_HUMAN_SESSION_ASSERTION_SECRET_REF,
+    "NEXUS_HUMAN_SESSION_ASSERTION_SECRET_REF",
+  );
+  const humanSessionAssertionKeyId = stablePublicIdentifier(
+    overrides.humanSessionAssertionKeyId
+      ?? process.env.NEXUS_HUMAN_SESSION_ASSERTION_KEY_ID
+      ?? HUMAN_SESSION_ASSERTION_KEY_ID,
+    "NEXUS_HUMAN_SESSION_ASSERTION_KEY_ID",
+  );
+  const humanSessionAssertionIssuer = stablePublicIdentifier(
+    overrides.humanSessionAssertionIssuer
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_ISSUER
+      ?? HUMAN_SESSION_ASSERTION_ISSUER,
+    "COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_ISSUER",
+  );
+  const humanSessionAssertionAudience = stablePublicIdentifier(
+    overrides.humanSessionAssertionAudience
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_AUDIENCE
+      ?? HUMAN_SESSION_ASSERTION_AUDIENCE,
+    "COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_AUDIENCE",
+  );
+  const humanSessionServiceBindingId = stablePublicIdentifier(
+    overrides.humanSessionServiceBindingId
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_SERVICE_BINDING_ID
+      ?? HUMAN_SESSION_SERVICE_BINDING_ID,
+    "COMMAND_PORTAL_HUMAN_SESSION_SERVICE_BINDING_ID",
+  );
+  const humanSessionAssertionClientId = stablePublicIdentifier(
+    overrides.humanSessionAssertionClientId
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_CLIENT_ID
+      ?? "nexus-web",
+    "COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_CLIENT_ID",
+  );
+  const replitAuthIssuer = executiveSessionEnabled
+    ? stablePublicIdentifier(
+      overrides.replitAuthIssuer
+        ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_ISSUER,
+      "COMMAND_PORTAL_REPLIT_AUTH_ISSUER",
+    )
+    : "";
+  const replitAuthAudience = executiveSessionEnabled
+    ? stablePublicIdentifier(
+      overrides.replitAuthAudience
+        ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_AUDIENCE,
+      "COMMAND_PORTAL_REPLIT_AUTH_AUDIENCE",
+    )
+    : "";
+  const replitAuthJwksUrl = String(
+    overrides.replitAuthJwksUrl
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_JWKS_URL
+      ?? "",
+  ).trim();
+  const replitAuthTokenHeader = String(
+    overrides.replitAuthTokenHeader
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_TOKEN_HEADER
+      ?? "x-replit-auth-token",
+  ).trim().toLowerCase();
+  const replitAuthClockSkewSeconds = integer(
+    overrides.replitAuthClockSkewSeconds
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_CLOCK_SKEW_SECONDS,
+    30,
+    0,
+  );
+  const replitAuthMaxTokenLifetimeSeconds = integer(
+    overrides.replitAuthMaxTokenLifetimeSeconds
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_MAX_TOKEN_LIFETIME_SECONDS,
+    3_600,
+    60,
+  );
+  const replitAuthJwksTimeoutMs = integer(
+    overrides.replitAuthJwksTimeoutMs
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_JWKS_TIMEOUT_MS,
+    5_000,
+    100,
+  );
+  const replitAuthJwksCacheSeconds = integer(
+    overrides.replitAuthJwksCacheSeconds
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_JWKS_CACHE_SECONDS,
+    300,
+    30,
+  );
+  const executiveSessionPolicyId = stablePublicIdentifier(
+    overrides.executiveSessionPolicyId
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_ID
+      ?? EXECUTIVE_SESSION_POLICY_ID,
+    "COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_ID",
+  );
+  const executiveSessionPolicyVersion = stablePublicIdentifier(
+    overrides.executiveSessionPolicyVersion
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION
+      ?? EXECUTIVE_SESSION_POLICY_VERSION,
+    "COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION",
+  );
+  const executiveSessionPolicyDigest = executiveSessionEnabled
+    ? stableSha256Digest(
+      overrides.executiveSessionPolicyDigest
+        ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST,
+      "COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST",
+    )
+    : "";
+  let executiveRegistrations = executiveSessionEnabled
+    ? registeredExecutives(
+      overrides.executiveRegistrations
+        ?? process.env.COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON,
+    )
+    : [];
+  if (executiveSessionEnabled) {
+    if (
+      !trustBootstrapRequired
+      || !executiveSessionCookieSecretRef
+      || !humanSessionAssertionSecretRef
+      || humanSessionAssertionIssuer !== HUMAN_SESSION_ASSERTION_ISSUER
+      || humanSessionAssertionAudience !== HUMAN_SESSION_ASSERTION_AUDIENCE
+      || humanSessionAssertionKeyId !== HUMAN_SESSION_ASSERTION_KEY_ID
+      || humanSessionServiceBindingId !== HUMAN_SESSION_SERVICE_BINDING_ID
+      || humanSessionAssertionClientId !== "nexus-web"
+      || executiveSessionCookieKeyId !== EXECUTIVE_SESSION_COOKIE_KEY_ID
+      || executiveSessionPolicyId !== EXECUTIVE_SESSION_POLICY_ID
+      || executiveSessionPolicyVersion !== EXECUTIVE_SESSION_POLICY_VERSION
+      || executiveSessionPolicyDigest !== EXECUTIVE_SESSION_POLICY_DIGEST
+    ) {
+      throw new Error("Mission 3 registered executive sessions require the exact accepted trust, key, issuer, audience, service, and secret-reference bindings.");
+    }
+    if (
+      new Set([
+        runtimeToken,
+        contextAssertionSecret,
+        executiveSessionCookieSecret,
+        humanSessionAssertionSecret,
+      ]).size !== 4
+    ) {
+      throw new Error("Runtime, context, executive-cookie, and human-assertion secrets must be purpose-bound and distinct.");
+    }
+    if (
+      !executiveSessionCookieSecure
+      || (replitDeployment && replitDomains.length === 0)
+    ) {
+      throw new Error("Registered executive sessions require Secure cookies; Replit deployments also require at least one REPLIT_DOMAINS binding.");
+    }
+    const registrationMapper = createExecutiveRegistrationMapper(executiveRegistrations);
+    const metadata = registrationMapper.publicMetadata();
+    if (
+      metadata.some((item) => (
+        item.providerIssuer !== replitAuthIssuer
+        || item.principalId === humanSessionServiceBindingId
+        || item.tenantId !== operationalTenantId
+        || item.workspaceId !== operationalWorkspaceId
+        || item.policyId !== executiveSessionPolicyId
+        || item.policyVersion !== executiveSessionPolicyVersion
+        || item.policyDigest !== executiveSessionPolicyDigest
+      ))
+    ) {
+      throw new Error("Executive registrations must match the verified provider issuer and server-owned tenant/workspace binding.");
+    }
+    executiveRegistrations = registrationMapper.document();
+  }
   return Object.freeze({
     port: integer(overrides.port ?? process.env.PORT, 4173, 0),
     runtimeBaseUrl,
@@ -645,6 +898,32 @@ export function loadConfig(overrides = {}) {
     operationalCookieSecure,
     replitDeployment,
     replitDomains,
+    executiveSessionEnabled,
+    executiveSessionTtlSeconds,
+    executiveSessionCookieSecure,
+    executiveSessionCookieSecret,
+    executiveSessionCookieSecretRef,
+    executiveSessionCookieKeyId,
+    humanSessionAssertionSecret,
+    humanSessionAssertionSecretRef,
+    humanSessionAssertionKeyId,
+    humanSessionAssertionIssuer,
+    humanSessionAssertionAudience,
+    humanSessionAssertionTtlSeconds,
+    humanSessionServiceBindingId,
+    humanSessionAssertionClientId,
+    replitAuthIssuer,
+    replitAuthAudience,
+    replitAuthJwksUrl,
+    replitAuthTokenHeader,
+    replitAuthClockSkewSeconds,
+    replitAuthMaxTokenLifetimeSeconds,
+    replitAuthJwksTimeoutMs,
+    replitAuthJwksCacheSeconds,
+    executiveSessionPolicyId,
+    executiveSessionPolicyVersion,
+    executiveSessionPolicyDigest,
+    executiveRegistrations,
     maxAttempts: integer(overrides.maxAttempts, 3),
     retryDelayMs: integer(overrides.retryDelayMs, 100, 0)
   });
@@ -728,6 +1007,58 @@ export function publicTrustBootstrap(config) {
   };
 }
 
+export function publicExecutiveSessionTrust(config) {
+  const enabled = Boolean(config.executiveSessionEnabled);
+  return {
+    contractVersion: REGISTERED_EXECUTIVE_SESSION_CONTRACT,
+    assertionContract: HUMAN_SESSION_ASSERTION_CONTRACT,
+    state: !enabled ? "disabled" : "configured_not_verified",
+    provider: "replit-auth",
+    providerIssuerConfigured: Boolean(config.replitAuthIssuer),
+    providerAudienceConfigured: Boolean(config.replitAuthAudience),
+    providerJwksConfigured: Boolean(config.replitAuthJwksUrl),
+    agentProvisionedVerifierSupported: true,
+    registrationCount: enabled
+      ? config.executiveRegistrations.principals.length
+      : 0,
+    cookieKeyId: config.executiveSessionCookieKeyId,
+    assertionKeyId: config.humanSessionAssertionKeyId,
+    assertionIssuer: config.humanSessionAssertionIssuer,
+    assertionAudience: config.humanSessionAssertionAudience,
+    serviceBindingId: config.humanSessionServiceBindingId,
+    clientId: config.humanSessionAssertionClientId,
+    policyId: config.executiveSessionPolicyId,
+    policyVersion: config.executiveSessionPolicyVersion,
+    policyDigest: config.executiveSessionPolicyDigest || null,
+    policyBindingVerified: enabled,
+    exactRoles: ["executive"],
+    exactScopes: [...EXECUTIVE_SCOPES],
+    maxSessionLifetimeSeconds: MAX_EXECUTIVE_SESSION_LIFETIME_SECONDS,
+    maxAssertionLifetimeSeconds: MAX_HUMAN_ASSERTION_LIFETIME_SECONDS,
+    cookieSecretReferenceConfigured: Boolean(config.executiveSessionCookieSecretRef),
+    assertionSecretReferenceConfigured: Boolean(config.humanSessionAssertionSecretRef),
+    providerSubjectStoredOrExposed: false,
+    providerSubjectBindingAlgorithm: "sha256",
+    identitySelectsTenantOrWorkspace: false,
+    authenticationGrantsAuthority: false,
+    sessionCreatesDecision: false,
+    sessionCreatesMission: false,
+    sessionAuthorizesAction: false,
+    targetEnvironmentVerified: false,
+    secretValuesExposed: false,
+    limitations: enabled
+      ? [
+        "Replit Auth must be provisioned by Replit Agent and verified by one non-production human login.",
+        "Configured identity and session state do not establish Decision, Mission, or Authority.",
+        "Target-environment admission requires a separate sanitized Runtime handshake receipt.",
+      ]
+      : [
+        "Registered executive sessions are disabled.",
+        "The Mission 1 service principal remains distinct and does not establish a human identity.",
+      ],
+  };
+}
+
 class GatewayFailure extends Error {
   constructor(code, message, state, status, retryable = false, details = undefined) {
     super(message);
@@ -799,6 +1130,7 @@ function gatewayMetadata(config, tracker, route, state, entry, additions = {}) {
     cache: cacheMetadata(entry, false),
     readOnly: true,
     trustBootstrap: publicTrustBootstrap(config),
+    executiveSessionTrust: publicExecutiveSessionTrust(config),
     secretValuesExposed: false,
     ...additions
   };
@@ -880,6 +1212,67 @@ function operationalFailure(config, route, code, message, status = "Unavailable"
       secretValuesExposed: false
     },
     truth: TRUTH, error: { code, message, ...(details ? { details } : {}) }
+  };
+}
+
+function executiveSessionEnvelope(config, route, session, additions = {}) {
+  return {
+    ok: true,
+    session,
+    executiveSession: {
+      mode: "registered_executive_nonproduction",
+      route,
+      enabled: config.executiveSessionEnabled,
+      provider: "replit-auth",
+      identityOwner: "server_owned_registration",
+      runtimeOwner: "NEXUS Runtime",
+      serviceIdentityDistinct: true,
+      tenantWorkspaceServerSelected: true,
+      authenticationGrantsAuthority: false,
+      sessionCreatesDecision: false,
+      sessionCreatesMission: false,
+      sessionAuthorizesAction: false,
+      productionMultiTenantReady: false,
+      secretValuesExposed: false,
+      ...additions,
+    },
+    truth: TRUTH,
+  };
+}
+
+function executiveSessionFailureEnvelope(config, route, error, session = undefined) {
+  const connectionState = error.status === 503
+    ? "Unavailable"
+    : error.status === 504
+      ? "Timed Out"
+      : error.status >= 500
+        ? "Unknown"
+        : "Unauthorized";
+  return {
+    ok: false,
+    ...(session ? { session } : {}),
+    executiveSession: {
+      mode: "registered_executive_nonproduction",
+      route,
+      enabled: config.executiveSessionEnabled,
+      provider: "replit-auth",
+      identityOwner: "server_owned_registration",
+      runtimeOwner: "NEXUS Runtime",
+      serviceIdentityDistinct: true,
+      tenantWorkspaceServerSelected: true,
+      authenticationGrantsAuthority: false,
+      sessionCreatesDecision: false,
+      sessionCreatesMission: false,
+      sessionAuthorizesAction: false,
+      productionMultiTenantReady: false,
+      connectionState,
+      secretValuesExposed: false,
+    },
+    truth: TRUTH,
+    error: {
+      code: error.code ?? "executive_session_failed",
+      message: error.message ?? "The registered executive session failed safely.",
+    },
   };
 }
 
@@ -1804,6 +2197,303 @@ async function handleSessionApi(request, response, config, sessionAuthority) {
     return sendJson(response, 200, { ok: true, session: { authenticated: false }, truth: TRUTH }, { "Set-Cookie": sessionAuthority.clearCookie() });
   }
   return sendJson(response, 404, operationalFailure(config, url.pathname, "route_not_allowlisted", "This session route is not allowlisted."));
+}
+
+function executiveSessionError(error) {
+  if (
+    error instanceof ExecutiveSessionFailure
+    || error instanceof ExecutiveSessionRuntimeFailure
+  ) {
+    return error;
+  }
+  if (error instanceof GatewayFailure) {
+    return new ExecutiveSessionFailure(
+      error.code,
+      error.message,
+      error.status,
+    );
+  }
+  return new ExecutiveSessionFailure(
+    "executive_session_gateway_error",
+    "The registered executive session failed safely.",
+    500,
+  );
+}
+
+function sessionAccess(authority, claims) {
+  return {
+    csrfToken: authority.csrfToken(claims),
+    cookieHttpOnly: true,
+    cookieSameSite: "Strict",
+    providerTokenRetained: false,
+    providerSubjectRetained: false,
+    authorityGranted: false,
+    actionAuthorized: false,
+    secretValuesExposed: false,
+  };
+}
+
+async function handleExecutiveSessionApi(
+  request,
+  response,
+  config,
+  providerAdapter,
+  registrationMapper,
+  authority,
+  runtimeClient,
+) {
+  const url = new URL(request.url, "http://portal.invalid");
+  if (
+    !requestOriginAllowed(
+      request,
+      config,
+      request.method === "POST",
+    )
+  ) {
+    const error = new ExecutiveSessionFailure(
+      "origin_denied",
+      "Request origin is not allowed.",
+      403,
+    );
+    return sendJson(
+      response,
+      error.status,
+      executiveSessionFailureEnvelope(config, url.pathname, error),
+    );
+  }
+  if (!config.executiveSessionEnabled) {
+    const error = new ExecutiveSessionFailure(
+      "executive_session_disabled",
+      "Registered executive sessions are not enabled.",
+      503,
+    );
+    return sendJson(
+      response,
+      error.status,
+      executiveSessionFailureEnvelope(config, url.pathname, error),
+    );
+  }
+  if (url.search) {
+    const error = new ExecutiveSessionFailure(
+      "query_not_allowed",
+      "Registered executive session routes do not accept query parameters.",
+      400,
+    );
+    return sendJson(
+      response,
+      error.status,
+      executiveSessionFailureEnvelope(config, url.pathname, error),
+    );
+  }
+  if (
+    url.pathname === "/api/executive-session/login"
+    && request.method === "POST"
+  ) {
+    try {
+      const payload = await readJsonBody(request, 1_024);
+      strictKeys(payload, new Set());
+      const identity = await providerAdapter.verify(request);
+      const registration = registrationMapper.resolve(identity);
+      const issued = authority.issue(identity, registration);
+      const session = await runtimeClient.verify(issued.claims);
+      structuredLog("registered_executive_session_started", {
+        sessionId: issued.claims.sid,
+        registrationId: issued.claims.registrationId,
+        principalId: issued.claims.principalId,
+        provider: issued.claims.provider,
+        providerIssuer: issued.claims.providerIssuer,
+        tenantId: issued.claims.tenantId,
+        workspaceId: issued.claims.workspaceId,
+        role: issued.claims.role,
+        authorityGranted: false,
+        actionAuthorized: false,
+      });
+      const body = executiveSessionEnvelope(
+        config,
+        url.pathname,
+        session,
+        {
+          runtimeVerified: true,
+          lifecycleState: "active",
+        },
+      );
+      body.sessionAccess = sessionAccess(authority, issued.claims);
+      return sendJson(response, 201, body, {
+        "Set-Cookie": issued.cookie,
+      });
+    } catch (caught) {
+      const error = executiveSessionError(caught);
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(config, url.pathname, error),
+      );
+    }
+  }
+  if (
+    url.pathname === "/api/executive-session"
+    && request.method === "GET"
+  ) {
+    const claims = authority.authenticate(request);
+    if (!claims) {
+      const hadCookie = String(request.headers.cookie ?? "")
+        .split(";")
+        .some(
+          (item) =>
+            item.trim().startsWith(`${EXECUTIVE_SESSION_COOKIE_NAME}=`),
+        );
+      return sendJson(
+        response,
+        200,
+        executiveSessionEnvelope(
+          config,
+          url.pathname,
+          {
+            authenticated: false,
+            runtimeVerified: false,
+            authorityGranted: false,
+            actionAuthorized: false,
+            secretValuesExposed: false,
+          },
+          { runtimeVerified: false, lifecycleState: "absent" },
+        ),
+        hadCookie ? { "Set-Cookie": authority.clearCookie() } : {},
+      );
+    }
+    try {
+      const session = await runtimeClient.get(claims);
+      const body = executiveSessionEnvelope(
+        config,
+        url.pathname,
+        session,
+        {
+          runtimeVerified: true,
+          lifecycleState: "active",
+        },
+      );
+      body.sessionAccess = sessionAccess(authority, claims);
+      return sendJson(response, 200, body);
+    } catch (caught) {
+      const error = executiveSessionError(caught);
+      const terminalSessionFailure = [
+        "session_expired",
+        "session_revoked",
+        "session_not_found",
+        "executive_session_invalid",
+      ].includes(error.code);
+      if (terminalSessionFailure) {
+        authority.revoke(claims);
+      }
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(
+          config,
+          url.pathname,
+          error,
+          authority.publicSession(claims, false),
+        ),
+        terminalSessionFailure
+          ? { "Set-Cookie": authority.clearCookie() }
+          : {},
+      );
+    }
+  }
+  if (
+    url.pathname === "/api/executive-session/revoke"
+    && request.method === "POST"
+  ) {
+    const claims = authority.authenticate(request);
+    if (!claims) {
+      const error = new ExecutiveSessionFailure(
+        "executive_session_required",
+        "A verified registered executive session is required.",
+        401,
+      );
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(config, url.pathname, error),
+      );
+    }
+    if (!authority.csrfValid(request, claims)) {
+      const error = new ExecutiveSessionFailure(
+        "csrf_invalid",
+        "Session verification failed.",
+        403,
+      );
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(config, url.pathname, error),
+      );
+    }
+    try {
+      const payload = await readJsonBody(request, 1_024);
+      strictKeys(payload, new Set());
+      const session = await runtimeClient.revoke(claims);
+      authority.revoke(claims);
+      structuredLog("registered_executive_session_revoked", {
+        sessionId: claims.sid,
+        registrationId: claims.registrationId,
+        principalId: claims.principalId,
+        tenantId: claims.tenantId,
+        workspaceId: claims.workspaceId,
+        authorityGranted: false,
+        actionAuthorized: false,
+      });
+      return sendJson(
+        response,
+        200,
+        executiveSessionEnvelope(
+          config,
+          url.pathname,
+          session,
+          { runtimeVerified: true, lifecycleState: "revoked" },
+        ),
+        { "Set-Cookie": authority.clearCookie() },
+      );
+    } catch (caught) {
+      authority.revoke(claims);
+      const error = executiveSessionError(caught);
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(
+          config,
+          url.pathname,
+          error,
+          {
+            authenticated: false,
+            runtimeVerified: false,
+            authorityGranted: false,
+            actionAuthorized: false,
+            secretValuesExposed: false,
+          },
+        ),
+        { "Set-Cookie": authority.clearCookie() },
+      );
+    }
+  }
+  const allowed = url.pathname === "/api/executive-session"
+    ? "GET"
+    : url.pathname === "/api/executive-session/login"
+      || url.pathname === "/api/executive-session/revoke"
+      ? "POST"
+      : "";
+  const error = new ExecutiveSessionFailure(
+    allowed ? "method_not_allowed" : "route_not_allowlisted",
+    allowed
+      ? "Method is not allowed for this registered executive session route."
+      : "This registered executive session route is not allowlisted.",
+    allowed ? 405 : 404,
+  );
+  return sendJson(
+    response,
+    error.status,
+    executiveSessionFailureEnvelope(config, url.pathname, error),
+    allowed ? { Allow: allowed } : {},
+  );
 }
 
 async function handleOperationalApi(
@@ -3074,6 +3764,25 @@ export function createPortalServer(options = {}) {
   const localFetch = options.localFetch ?? globalThis.fetch;
   const operationalFetch = options.operationalFetch ?? globalThis.fetch;
   const sessionAuthority = createSessionAuthority(config, options.clock);
+  const executiveRegistrationMapper = config.executiveSessionEnabled
+    ? createExecutiveRegistrationMapper(config.executiveRegistrations)
+    : null;
+  const executiveProviderAdapter = config.executiveSessionEnabled
+    ? createReplitAuthAdapter(config, {
+      fetchImpl: options.providerFetch ?? globalThis.fetch,
+      clock: options.clock,
+      providerIdentityVerifier: options.providerIdentityVerifier,
+    })
+    : null;
+  const executiveSessionAuthority = config.executiveSessionEnabled
+    ? createExecutiveSessionAuthority(config, options.clock)
+    : null;
+  const executiveSessionRuntimeClient = config.executiveSessionEnabled
+    ? createExecutiveSessionRuntimeClient(config, {
+      runtimeFetch,
+      clock: options.clock,
+    })
+    : null;
   const actionAdmission = createRuntimeActionAdmissionState(
     config,
     options.clock ?? (() => Date.now()),
@@ -3081,7 +3790,33 @@ export function createPortalServer(options = {}) {
   const cache = new Map();
   const tracker = { lastSuccessfulConnection: null, lastSuccessfulRefresh: null };
   const server = createServer((request, response) => {
-    if (request.url?.startsWith("/api/session")) {
+    if (request.url?.startsWith("/api/executive-session")) {
+      handleExecutiveSessionApi(
+        request,
+        response,
+        config,
+        executiveProviderAdapter,
+        executiveRegistrationMapper,
+        executiveSessionAuthority,
+        executiveSessionRuntimeClient,
+      )
+        .catch(() => {
+          const error = new ExecutiveSessionFailure(
+            "executive_session_gateway_error",
+            "The registered executive session failed safely.",
+            500,
+          );
+          sendJson(
+            response,
+            error.status,
+            executiveSessionFailureEnvelope(
+              config,
+              request.url,
+              error,
+            ),
+          );
+        });
+    } else if (request.url?.startsWith("/api/session")) {
       handleSessionApi(request, response, config, sessionAuthority)
         .catch(() => sendJson(response, 500, operationalFailure(config, request.url, "session_gateway_error", "The session request failed safely.", "Unknown")));
     } else if (request.url?.startsWith("/api/operations")) {
@@ -3124,6 +3859,16 @@ export function createPortalServer(options = {}) {
       serveStatic(request, response);
     }
   });
-  server.experienceGateway = { cache, tracker, config, sessionAuthority, actionAdmission };
+  server.experienceGateway = {
+    cache,
+    tracker,
+    config,
+    sessionAuthority,
+    executiveRegistrationMapper,
+    executiveProviderAdapter,
+    executiveSessionAuthority,
+    executiveSessionRuntimeClient,
+    actionAdmission,
+  };
   return server;
 }
