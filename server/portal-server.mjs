@@ -1671,7 +1671,7 @@ function operationalMethod(route, method) {
 function operationalIdentifier(raw) {
   let identifier;
   try { identifier = decodeURIComponent(raw); } catch { return null; }
-  return OPERATIONAL_RECORD_ID_PATTERN.test(identifier) ? encodeURIComponent(identifier) : null;
+  return OPERATIONAL_RECORD_ID_PATTERN.test(identifier) ? identifier : null;
 }
 
 export function resolveOperationalCapability(pathname, method) {

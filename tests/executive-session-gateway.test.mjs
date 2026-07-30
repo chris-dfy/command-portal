@@ -538,7 +538,7 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
           recordType: "nexus_canonical_execution_mission_result",
           status: "created",
           mission: {
-            missionId: "MISSION-M4-TEST",
+            missionId: "MISSION-M4:TEST",
             state: "authorized",
             fixture: {
               path: "mission-fixture/nexus/m4/canonical-execution.json",
@@ -553,6 +553,28 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
           secretValuesExposed: false,
         }),
         { status: 201 },
+      );
+    }
+    if (
+      path ===
+        "/executive-authority/canonical-execution/missions/MISSION-M4:TEST/actions"
+    ) {
+      assert.equal(options.method, "POST");
+      assert.deepEqual(JSON.parse(options.body), {
+        action: "repository.edit",
+        path: "mission-fixture/nexus/m4/canonical-execution.json",
+        expectedSha256: `sha256:${"a".repeat(64)}`,
+        content: "{\"version\":1}",
+      });
+      return new Response(
+        JSON.stringify({
+          recordType: "nexus_canonical_execution_action_result",
+          status: "verified_success",
+          authorityGranted: false,
+          actionAuthorized: false,
+          secretValuesExposed: false,
+        }),
+        { status: 200 },
       );
     }
     assert.equal(
@@ -676,8 +698,34 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
     },
   );
   assert.equal(created.status, 201);
-  assert.equal((await created.json()).data.mission.state, "authorized");
+  const createdBody = await created.json();
+  assert.equal(createdBody.data.mission.state, "authorized");
   assert.equal(operationalCalls.length, 2);
+
+  const action = await fetch(
+    `${base}/api/canonical-execution/missions/${
+      encodeURIComponent(createdBody.data.mission.missionId)
+    }/actions`,
+    {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        Origin: base,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": loginBody.sessionAccess.csrfToken,
+        "Idempotency-Key": "mission4-action-test",
+      },
+      body: JSON.stringify({
+        action: "repository.edit",
+        path: "mission-fixture/nexus/m4/canonical-execution.json",
+        expectedSha256: `sha256:${"a".repeat(64)}`,
+        content: "{\"version\":1}",
+      }),
+    },
+  );
+  assert.equal(action.status, 200);
+  assert.equal((await action.json()).data.status, "verified_success");
+  assert.equal(operationalCalls.length, 3);
 
   operationalMode = "sensitive";
   const sensitive = await fetch(`${base}/api/canonical-execution`, {
