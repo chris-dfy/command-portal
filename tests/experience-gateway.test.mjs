@@ -397,7 +397,7 @@ function actionAdmissionProjection({
         pathTemplate,
         invocationSurfaces,
         invocationPaths: invocationSurfaces.map((surface) => (
-          surface === "api"
+          surface === "api" || !actionId.startsWith("canonical.route.")
             ? `${surface}:${method} ${pathTemplate}`
             : `${surface}:canonical-adapter:${actionId}`
         )),
