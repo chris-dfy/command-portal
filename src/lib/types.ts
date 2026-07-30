@@ -206,7 +206,7 @@ export type CapabilityRegistryProjection = {
   };
   authorityGranted: false;
   noExecutionAuthorityIntroduced: true;
-  mission3Admitted: false;
+  mission3Admitted: boolean;
   summary: Record<string, unknown>;
   capabilities: CanonicalCapabilityRecord[];
   connectors: CanonicalConnectorRecord[];

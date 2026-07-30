@@ -1,7 +1,13 @@
 import { createPortalServer, loadConfig } from "./portal-server.mjs";
+import { createReplitAuthIdentityVerifier } from "./replit-auth-provider.mjs";
 
 const config = loadConfig();
-const server = createPortalServer({ config });
+const server = createPortalServer({
+  config,
+  providerIdentityVerifier: config.executiveSessionEnabled
+    ? createReplitAuthIdentityVerifier(config)
+    : undefined,
+});
 server.listen(config.port, "0.0.0.0", () => {
   console.log(JSON.stringify({
     timestamp: new Date().toISOString(),

@@ -45,6 +45,83 @@ Published Replit deployments select the automatic workspace-session contract fro
 
 Never enable operational mode while any ingress or fixed-binding value is absent or mismatched. This is a fixed workspace-service compatibility boundary, not individual human identity, enterprise identity, multi-user RBAC, or an Authority Grant. `productionMultiTenantReady` remains `false`.
 
+## Registered Executive session
+
+Mission 3 adds a separate, non-production human session. It does not replace or
+reinterpret the Hosted Operational Gateway service session. The human principal
+is `registered_human_executive`; the Gateway remains the distinct
+`experience_gateway_service` principal.
+
+Provision Replit Auth through Replit Agent and retain its server-side
+verification path. Replit documents Agent as the supported provisioning path
+for Replit Auth. The Gateway must validate the provider identity on the server.
+Until the Agent-generated verifier is wired into the deployed server
+entrypoint, the Gateway remains `configured_not_verified` and the Mission 3
+live gate cannot pass. Local verifier injection is test evidence only.
+The browser POSTs an empty body to `/api/executive-session/login`; it never
+submits a provider subject, tenant, workspace, role, scope, policy, or provider
+token. The stable opaque provider subject is hashed into a provider binding and
+mapped only through `COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON`, a
+server-owned non-production registration.
+
+Configure the Mission 3 names listed in `.env.example` through the Replit
+deployment configuration and secret manager. Secret values must never be
+placed in `.replit`, repository files, browser-visible `VITE_` variables,
+deployment receipts, logs, or operator transcripts. The two new purpose-bound
+secret values are:
+
+- `COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET`, used only to sign the
+  short-lived HttpOnly browser session cookie; and
+- `NEXUS_HUMAN_SESSION_ASSERTION_SECRET`, shared only with the Runtime to sign
+  the at-most-60-second, single-use human-session assertion.
+
+Their provider references and public key IDs are
+`COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET_REF`,
+`COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_KEY_ID`,
+`NEXUS_HUMAN_SESSION_ASSERTION_SECRET_REF`, and
+`NEXUS_HUMAN_SESSION_ASSERTION_KEY_ID`. Inspect and record only names, key IDs,
+presence, and provider metadata. Do not read values. The cookie secret,
+human-assertion secret, Runtime bearer token, and Mission 1 context-assertion
+secret must be purpose-bound and distinct.
+
+The accepted policy binding is immutable for this Mission:
+
+- ID: `registered-executive-session-policy`
+- version: `1.0.0`
+- digest:
+  `sha256:b1f6a2cdf2153ac48236867e5e1aeab794842256410f3f314fc2655008a2be78`
+
+Deploy the named non-production Runtime first, then the Experience Gateway.
+The Runtime registration and policy digest, the Gateway registration, Replit
+issuer, tenant, workspace, role, scopes, session version, revocation checkpoint,
+service binding, client ID, key ID, issuer, and audience must match exactly.
+Perform one interactive Replit login only after both deployments report the
+expected commit and image identities.
+
+Acceptance requires a positive login/read/revoke lifecycle and negative tests
+for forged and browser-selected claims, unknown registration, issuer, audience,
+signature, algorithm, key, replay, expiry, revocation, session version,
+revocation checkpoint, policy ID/version/digest, tenant, workspace, role,
+scope, and Authority injection. Every rejection must fail closed without
+creating a Decision, Mission, Authority Grant, approval, or action
+authorization.
+
+Rollback is additive and reversible: set
+`COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED=false`, restore the accepted Mission
+2 Runtime and Experience releases, and verify that the Mission 2 service
+handshake still passes. Retain the purpose-bound secrets and registration as
+inactive provider metadata unless compromise is proven; do not rotate or
+delete them merely because a release was superseded. Record the rolled-back
+release identities and revocation status in the sanitized receipt.
+
 Build with `npm run build` and start with `npm run start`. Never create a browser-visible `VITE_` runtime variable. After deployment, verify every allowlisted route, mutation rejection, secret isolation, failure rendering, and the live topology.
 
-Deploy in this order: first add the assertion secret to this portal and republish it so text and voice already carry the signed header; then deploy Runtime with the provisioned tenant registry, the matching secret, and assertion verification. The earlier Runtime safely ignores the additional header. Rotating the assertion secret requires coordinated dual-secret support or a bounded maintenance window; changing only one side after verification is active will correctly fail closed.
+For the earlier Mission 1 tenant-context assertion rollout, deploy in this
+order: first add that context-assertion secret to this portal and republish it
+so text and voice already carry the signed header; then deploy Runtime with the
+provisioned tenant registry, matching context-assertion secret, and assertion
+verification. The earlier Runtime safely ignores the additional Mission 1
+header. Rotating any assertion secret requires coordinated dual-secret support
+or a bounded maintenance window; changing only one side after verification is
+active will correctly fail closed. Mission 3 keeps the Runtime-first order
+specified above.
