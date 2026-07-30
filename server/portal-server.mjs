@@ -10,8 +10,17 @@ const DIST = join(ROOT, "dist");
 
 export const SUPPORTED_SCHEMA_VERSION = "1.0.0";
 export const SUPPORTED_RUNTIME_VERSION = "0.1.0";
+export const TRUST_BOOTSTRAP_CONTRACT = "nexus.runtime-experience-trust-bootstrap@1.0.0";
+export const CONTEXT_ASSERTION_CONTRACT = "nexus.context-assertion@2.0.0";
+export const CONTEXT_ASSERTION_ALGORITHM = "hmac-sha256";
 const CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime";
 const CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway";
+const CONTEXT_ASSERTION_KEY_ID = "context-assertion-current";
+const RUNTIME_CREDENTIAL_KEY_ID = "runtime-read-current";
+const TRUST_BINDING_ID = "runtime-experience-trust-bootstrap";
+const CONTEXT_ASSERTION_ROLES = Object.freeze(["observer"]);
+const STABLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{2,191}$/;
+const SECRET_REFERENCE_PATTERN = /^(?:env|secret-manager):[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/;
 
 export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/status": "/runtime/status",
@@ -229,22 +238,49 @@ function optionalSecret(value, name, minimum = 32) {
   return secret;
 }
 
+function stablePublicIdentifier(value, name) {
+  const identifier = String(value ?? "").trim();
+  if (!STABLE_ID_PATTERN.test(identifier)) throw new Error(`${name} must be a stable public identifier.`);
+  return identifier;
+}
+
+function optionalSecretReference(value, name) {
+  const reference = String(value ?? "").trim();
+  if (reference && !SECRET_REFERENCE_PATTERN.test(reference)) {
+    throw new Error(`${name} must be an opaque secret-provider reference.`);
+  }
+  return reference;
+}
+
 const encodeBase64Url = (value) => Buffer.from(value).toString("base64url");
 
-export function createTenantContextAssertion(config, claims, clientId, clock = () => Date.now()) {
+export function createTenantContextAssertion(config, _claims, clientId, clock = () => Date.now()) {
   if (!config.contextAssertionSecret) return "";
+  const issuer = config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER;
+  const audience = config.contextAssertionAudience ?? CONTEXT_ASSERTION_AUDIENCE;
+  const keyId = config.contextAssertionKeyId ?? CONTEXT_ASSERTION_KEY_ID;
+  const allowedClientIds = config.contextAssertionClientIds ?? ["nexus-web"];
+  if (!allowedClientIds.includes(clientId)) {
+    throw new Error("The Runtime client identity is not provisioned for this Experience Gateway.");
+  }
   const issuedAt = Math.floor(clock() / 1000);
   const payload = {
-    v: 1,
-    iss: CONTEXT_ASSERTION_ISSUER,
-    aud: CONTEXT_ASSERTION_AUDIENCE,
-    tid: claims?.tenantId ?? config.operationalTenantId,
-    sub: claims?.sub ?? config.contextAssertionPrincipalId,
-    roles: claims?.role ? [claims.role] : ["observer"],
+    v: 2,
+    contract: CONTEXT_ASSERTION_CONTRACT,
+    alg: CONTEXT_ASSERTION_ALGORITHM,
+    kid: keyId,
+    iss: issuer,
+    aud: audience,
+    tid: config.operationalTenantId ?? "nexicron",
+    wid: config.operationalWorkspaceId ?? "primary",
+    sub: issuer,
+    roles: [...CONTEXT_ASSERTION_ROLES],
     clientId,
     iat: issuedAt,
     exp: issuedAt + 60,
-    jti: randomUUID()
+    jti: randomUUID(),
+    trustBindingId: TRUST_BINDING_ID,
+    authorityGranted: false
   };
   const encodedPayload = encodeBase64Url(JSON.stringify(payload));
   const signature = createHmac("sha256", config.contextAssertionSecret).update(encodedPayload).digest("base64url");
@@ -257,6 +293,96 @@ export function loadConfig(overrides = {}) {
   ));
   const runtimeToken = String(overrides.runtimeToken ?? process.env.COMMAND_PORTAL_RUNTIME_READ_TOKEN ?? "");
   if (!runtimeToken) throw new Error("COMMAND_PORTAL_RUNTIME_READ_TOKEN is required and must remain server-only.");
+  const trustBootstrapRequired = enabled(
+    overrides.trustBootstrapRequired
+      ?? process.env.COMMAND_PORTAL_TRUST_BOOTSTRAP_REQUIRED
+  );
+  const runtimeTokenRef = optionalSecretReference(
+    overrides.runtimeTokenRef
+      ?? process.env.COMMAND_PORTAL_RUNTIME_READ_TOKEN_REF,
+    "COMMAND_PORTAL_RUNTIME_READ_TOKEN_REF"
+  );
+  const runtimeTokenKeyId = stablePublicIdentifier(
+    overrides.runtimeTokenKeyId
+      ?? process.env.COMMAND_PORTAL_RUNTIME_READ_TOKEN_KEY_ID
+      ?? RUNTIME_CREDENTIAL_KEY_ID,
+    "COMMAND_PORTAL_RUNTIME_READ_TOKEN_KEY_ID"
+  );
+  const contextAssertionSecret = optionalSecret(
+    overrides.contextAssertionSecret
+      ?? process.env.NEXUS_CONTEXT_ASSERTION_SECRET,
+    "NEXUS_CONTEXT_ASSERTION_SECRET"
+  );
+  const contextAssertionSecretRef = optionalSecretReference(
+    overrides.contextAssertionSecretRef
+      ?? process.env.NEXUS_CONTEXT_ASSERTION_SECRET_REF,
+    "NEXUS_CONTEXT_ASSERTION_SECRET_REF"
+  );
+  const contextAssertionIssuer = stablePublicIdentifier(
+    overrides.contextAssertionIssuer
+      ?? process.env.COMMAND_PORTAL_CONTEXT_ASSERTION_ISSUER
+      ?? CONTEXT_ASSERTION_ISSUER,
+    "COMMAND_PORTAL_CONTEXT_ASSERTION_ISSUER"
+  );
+  const contextAssertionAudience = stablePublicIdentifier(
+    overrides.contextAssertionAudience
+      ?? process.env.COMMAND_PORTAL_CONTEXT_ASSERTION_AUDIENCE
+      ?? CONTEXT_ASSERTION_AUDIENCE,
+    "COMMAND_PORTAL_CONTEXT_ASSERTION_AUDIENCE"
+  );
+  const contextAssertionKeyId = stablePublicIdentifier(
+    overrides.contextAssertionKeyId
+      ?? process.env.NEXUS_CONTEXT_ASSERTION_KEY_ID
+      ?? CONTEXT_ASSERTION_KEY_ID,
+    "NEXUS_CONTEXT_ASSERTION_KEY_ID"
+  );
+  const contextAssertionClientIds = String(
+    overrides.contextAssertionClientIds
+      ?? process.env.COMMAND_PORTAL_CONTEXT_ASSERTION_CLIENT_IDS
+      ?? "nexus-web"
+  ).split(",").map((item) => item.trim()).filter(Boolean);
+  if (
+    contextAssertionClientIds.length === 0
+    || new Set(contextAssertionClientIds).size !== contextAssertionClientIds.length
+    || contextAssertionClientIds.some((item) => !STABLE_ID_PATTERN.test(item))
+  ) {
+    throw new Error("COMMAND_PORTAL_CONTEXT_ASSERTION_CLIENT_IDS must contain unique stable public identifiers.");
+  }
+  const operationalTenantId = stablePublicIdentifier(
+    overrides.operationalTenantId
+      ?? process.env.COMMAND_PORTAL_TENANT_ID
+      ?? "nexicron",
+    "COMMAND_PORTAL_TENANT_ID"
+  );
+  const operationalWorkspaceId = stablePublicIdentifier(
+    overrides.operationalWorkspaceId
+      ?? process.env.COMMAND_PORTAL_WORKSPACE_ID
+      ?? "primary",
+    "COMMAND_PORTAL_WORKSPACE_ID"
+  );
+  if (contextAssertionSecret && contextAssertionSecret === runtimeToken) {
+    throw new Error("Runtime service authentication and context assertion material must be distinct by purpose.");
+  }
+  if (trustBootstrapRequired) {
+    requiredSecret(runtimeToken, "COMMAND_PORTAL_RUNTIME_READ_TOKEN", 32);
+    requiredSecret(contextAssertionSecret, "NEXUS_CONTEXT_ASSERTION_SECRET", 32);
+    if (!runtimeTokenRef || !contextAssertionSecretRef) {
+      throw new Error("Trust bootstrap requires both opaque secret-provider references.");
+    }
+    if (new URL(runtimeBaseUrl).protocol !== "https:") {
+      throw new Error("Trust bootstrap requires an HTTPS Runtime endpoint.");
+    }
+    if (
+      contextAssertionIssuer !== CONTEXT_ASSERTION_ISSUER
+      || contextAssertionAudience !== CONTEXT_ASSERTION_AUDIENCE
+      || contextAssertionKeyId !== CONTEXT_ASSERTION_KEY_ID
+      || runtimeTokenKeyId !== RUNTIME_CREDENTIAL_KEY_ID
+      || contextAssertionClientIds.length !== 1
+      || contextAssertionClientIds[0] !== "nexus-web"
+    ) {
+      throw new Error("Trust bootstrap public identities must match the registered Mission 1 binding.");
+    }
+  }
   const localApiBaseUrl = safeLocalApiUrl(String(
     overrides.localApiBaseUrl ?? process.env.COMMAND_PORTAL_LOCAL_API_BASE_URL ?? "http://127.0.0.1:8765"
   ));
@@ -301,6 +427,9 @@ export function loadConfig(overrides = {}) {
     runtimeBaseUrl,
     runtimePublicUrl: new URL(runtimeBaseUrl).origin,
     runtimeToken,
+    runtimeTokenRef,
+    runtimeTokenKeyId,
+    trustBootstrapRequired,
     localCapabilitiesEnabled,
     localApiBaseUrl,
     platformRuntimeBaseUrl,
@@ -328,11 +457,15 @@ export function loadConfig(overrides = {}) {
       ? requiredSecret(overrides.operationalAccessKey ?? process.env.COMMAND_PORTAL_OPERATOR_ACCESS_KEY, "COMMAND_PORTAL_OPERATOR_ACCESS_KEY", 16)
       : "automatic-session-no-access-key",
     operationalUserId: String(overrides.operationalUserId ?? process.env.COMMAND_PORTAL_OPERATOR_USER_ID ?? "operator-alpha"),
-    operationalTenantId: String(overrides.operationalTenantId ?? process.env.COMMAND_PORTAL_TENANT_ID ?? "nexicron"),
-    operationalWorkspaceId: String(overrides.operationalWorkspaceId ?? process.env.COMMAND_PORTAL_WORKSPACE_ID ?? "primary"),
+    operationalTenantId,
+    operationalWorkspaceId,
     operationalRole: String(overrides.operationalRole ?? process.env.COMMAND_PORTAL_OPERATOR_ROLE ?? "admin"),
-    contextAssertionSecret: optionalSecret(overrides.contextAssertionSecret ?? process.env.NEXUS_CONTEXT_ASSERTION_SECRET, "NEXUS_CONTEXT_ASSERTION_SECRET"),
-    contextAssertionPrincipalId: String(overrides.contextAssertionPrincipalId ?? process.env.COMMAND_PORTAL_CONTEXT_PRINCIPAL_ID ?? "command-portal-observer"),
+    contextAssertionSecret,
+    contextAssertionSecretRef,
+    contextAssertionIssuer,
+    contextAssertionAudience,
+    contextAssertionKeyId,
+    contextAssertionClientIds,
     operationalScopes,
     operationalSessionTtlSeconds: integer(overrides.operationalSessionTtlSeconds ?? process.env.COMMAND_PORTAL_SESSION_TTL_SECONDS, 3600, 300),
     operationalCookieSecure,
@@ -341,6 +474,84 @@ export function loadConfig(overrides = {}) {
     maxAttempts: integer(overrides.maxAttempts, 3),
     retryDelayMs: integer(overrides.retryDelayMs, 100, 0)
   });
+}
+
+export function publicTrustBootstrap(config) {
+  const runtimeCredentialReferenceConfigured = Boolean(config.runtimeTokenRef);
+  const assertionKeyReferenceConfigured = Boolean(config.contextAssertionSecretRef);
+  const runtimeCredentialMaterialConfigured = Boolean(config.runtimeToken);
+  const assertionKeyMaterialConfigured = Boolean(config.contextAssertionSecret);
+  const trustBootstrapRequired = Boolean(config.trustBootstrapRequired);
+  const secureRuntimeTransport = (() => {
+    try {
+      return new URL(config.runtimeBaseUrl).protocol === "https:";
+    } catch {
+      return false;
+    }
+  })();
+  const publicBindingsValid = (
+    (config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER) === CONTEXT_ASSERTION_ISSUER
+    && (config.contextAssertionAudience ?? CONTEXT_ASSERTION_AUDIENCE) === CONTEXT_ASSERTION_AUDIENCE
+    && (config.contextAssertionKeyId ?? CONTEXT_ASSERTION_KEY_ID) === CONTEXT_ASSERTION_KEY_ID
+    && (config.runtimeTokenKeyId ?? RUNTIME_CREDENTIAL_KEY_ID) === RUNTIME_CREDENTIAL_KEY_ID
+    && (config.contextAssertionClientIds ?? ["nexus-web"]).length === 1
+    && (config.contextAssertionClientIds ?? ["nexus-web"])[0] === "nexus-web"
+    && STABLE_ID_PATTERN.test(String(config.operationalTenantId ?? ""))
+    && STABLE_ID_PATTERN.test(String(config.operationalWorkspaceId ?? ""))
+  );
+  const provisioningReady = trustBootstrapRequired
+    && secureRuntimeTransport
+    && publicBindingsValid
+    && runtimeCredentialReferenceConfigured
+    && assertionKeyReferenceConfigured
+    && runtimeCredentialMaterialConfigured
+    && assertionKeyMaterialConfigured;
+  const state = !trustBootstrapRequired
+    ? "disabled"
+    : (!secureRuntimeTransport || !publicBindingsValid)
+      ? "invalid"
+      : provisioningReady
+        ? "configured_not_verified"
+        : "awaiting_operator_provisioning";
+  return {
+    contractVersion: TRUST_BOOTSTRAP_CONTRACT,
+    contextAssertionContract: CONTEXT_ASSERTION_CONTRACT,
+    algorithm: CONTEXT_ASSERTION_ALGORITHM,
+    state,
+    experienceGatewayPrincipalId: config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER,
+    assertionIssuer: config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER,
+    assertionAudience: config.contextAssertionAudience ?? CONTEXT_ASSERTION_AUDIENCE,
+    allowedClientIds: [...(config.contextAssertionClientIds ?? ["nexus-web"])],
+    currentKeyId: config.contextAssertionKeyId ?? CONTEXT_ASSERTION_KEY_ID,
+    runtimeCredentialKeyId: config.runtimeTokenKeyId ?? RUNTIME_CREDENTIAL_KEY_ID,
+    runtimeCredentialReferenceConfigured,
+    assertionKeyReferenceConfigured,
+    runtimeCredentialMaterialConfigured,
+    assertionKeyMaterialConfigured,
+    secureRuntimeTransport,
+    publicBindingsValid,
+    tenantBindingConfigured: STABLE_ID_PATTERN.test(String(config.operationalTenantId ?? "")),
+    workspaceBindingConfigured: STABLE_ID_PATTERN.test(String(config.operationalWorkspaceId ?? "")),
+    assertionSubjectId: CONTEXT_ASSERTION_ISSUER,
+    assertionRoles: [...CONTEXT_ASSERTION_ROLES],
+    maxAssertionLifetimeSeconds: 60,
+    replayProtection: "runtime_process_local_single_use",
+    replayProtectionDurable: false,
+    canonicalAuthorityOwner: "contracts.authority",
+    canonicalAuthorityGrantContract: "nexus.authority-grant@1.1.0",
+    canonicalDecisionContract: "nexus.authority-decision@1.1.0",
+    authenticationGrantsAuthority: false,
+    provisioningContractGrantsAuthority: false,
+    targetEnvironmentVerified: false,
+    provisioningReady,
+    trustBootstrapRequired,
+    secretValuesExposed: false,
+    limitations: [
+      "The Experience Gateway identity is a service principal, not a verified human operator",
+      "Service authentication does not grant canonical Authority",
+      "Target-environment trust requires a separate sanitized live handshake receipt"
+    ]
+  };
 }
 
 class GatewayFailure extends Error {
@@ -413,6 +624,7 @@ function gatewayMetadata(config, tracker, route, state, entry, additions = {}) {
     lastSuccessfulRefresh: tracker.lastSuccessfulRefresh,
     cache: cacheMetadata(entry, false),
     readOnly: true,
+    trustBootstrap: publicTrustBootstrap(config),
     secretValuesExposed: false,
     ...additions
   };
