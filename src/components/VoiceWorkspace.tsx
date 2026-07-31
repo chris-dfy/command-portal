@@ -77,7 +77,6 @@ export function VoiceWorkspace({
       onState: setVoiceState,
       onAmplitude: setAmplitude,
       onUserTranscript: (text) => {
-        setTranscript(text);
         setHistory((items) => [{ speaker: "You", text } as TranscriptEntry, ...items].slice(0, 10));
       },
       onAssistantTranscript: (text) => setAssistantTranscript(text),
@@ -117,15 +116,17 @@ export function VoiceWorkspace({
   }
 
   async function sendText() {
-    if (!transcript.trim()) return;
+    const request = transcript.trim();
+    if (!request) return;
     if (!textAction.available) {
       setMessage(textAction.reason);
       return;
     }
+    setTranscript("");
     setBusy(true);
     setMessage(null);
     try {
-      const response = await localNexusClient.routeTranscript(transcript.trim(), "text_fallback");
+      const response = await localNexusClient.routeTranscript(request, "text_fallback");
       const responseText = response.spokenSummary?.trim()
         || response.event?.failureReason?.trim()
         || "NEXUS recorded the request without a spoken summary.";
@@ -135,7 +136,7 @@ export function VoiceWorkspace({
       setAssistantTranscript(responseText);
       setHistory((items) => [
         { speaker: "NEXUS", text: responseText } as TranscriptEntry,
-        { speaker: "You", text: transcript.trim() } as TranscriptEntry,
+        { speaker: "You", text: request } as TranscriptEntry,
         ...items,
       ].slice(0, 10));
       setMessage([
@@ -170,7 +171,7 @@ export function VoiceWorkspace({
         </button>}
       </div>
       <div className="voice-text-fallback">
-        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} disabled={!textAction.available} placeholder={textAction.available ? "Or type a request for the governed Runtime Voice Operator" : "Runtime Voice Operator is unavailable"} />
+        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} disabled={!textAction.available} placeholder={textAction.available ? "Or type a request for the governed Runtime Voice Operator" : "Runtime Voice Operator is unavailable"} autoComplete="off" />
         <button onClick={() => void sendText()} disabled={!textAction.available || busy || !transcript.trim()}><Send size={17} /> Send text</button>
       </div>
       {message && <p className="workspace-message" role="status">{message}</p>}

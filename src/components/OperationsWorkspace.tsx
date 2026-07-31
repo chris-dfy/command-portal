@@ -162,16 +162,17 @@ export function OperationsWorkspace({
       setErrors([missionCreationReason]);
       return;
     }
-    if (!objective.trim()) {
+    const submittedObjective = objective.trim();
+    if (!submittedObjective) {
       setErrors(["Enter an evidence-bound mission objective."]);
       return;
     }
+    setObjective("");
     setBusy(true);
     setErrors([]);
     try {
-      const next = await localNexusClient.planMission(objective.trim());
+      const next = await localNexusClient.planMission(submittedObjective);
       setResult(next);
-      setObjective("");
       await refresh();
     } catch (caught) {
       setErrors([caught instanceof Error ? caught.message : "Mission creation failed safely."]);
@@ -217,7 +218,7 @@ export function OperationsWorkspace({
     {errors.length > 0 && <section className="operation-error span-2" role="alert"><ShieldAlert size={18} /><span>{[...new Set(errors)].join(" ")}</span></section>}
 
     <DataPanel eyebrow="Mission Control" title="Plan a canonical Mission" icon={<Route size={18} />}>
-      <label className="operation-field"><span>Evidence-bound objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the operational question NEXUS should investigate…" /></label>
+      <label className="operation-field"><span>Evidence-bound objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the operational question NEXUS should investigate…" autoComplete="off" /></label>
       <div className="operation-actions"><button onClick={() => void planMission()} disabled={busy || !objective.trim() || !missionCreationAllowed}><ClipboardCheck size={15} /> Plan governed Mission</button><button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} /> Refresh</button></div>
       <p className="boundary-note">Mission planning gate for <code>POST /missions/plan</code>: {missionCreationReason}</p>
       <p className="boundary-note">Readiness context only: {missionCapabilityReadinessNote}</p>
