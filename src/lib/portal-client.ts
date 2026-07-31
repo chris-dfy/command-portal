@@ -1,10 +1,16 @@
 import type {
   CapabilityClassification,
   CapabilityRegistryProjection,
+  ConnectionState,
   GatewayEnvelope,
   RuntimeRoute,
   RuntimeSnapshot,
 } from "./types";
+import {
+  createSerializedRefresh,
+  registryFirstSettledMap,
+  runBoundedTask,
+} from "./request-coordination.mjs";
 
 export const RUNTIME_ROUTES: RuntimeRoute[] = [
   "status", "health", "ready", "version", "providers", "capabilities",
@@ -12,6 +18,9 @@ export const RUNTIME_ROUTES: RuntimeRoute[] = [
   "capability-registry", "eox", "conclave"
 ];
 
+const SNAPSHOT_CONCURRENCY = 3;
+const CLIENT_REQUEST_TIMEOUT_MS = 10_000;
+const CLIENT_SNAPSHOT_TIMEOUT_MS = 20_000;
 const CAPABILITY_REGISTRY_RECORD_TYPE = "nexus_live_capability_registry_projection";
 const CAPABILITY_REGISTRY_SCHEMA_VERSION = "nexus.live-capability-registry@1.0.0";
 const CAPABILITY_CLASSIFICATIONS = new Set<CapabilityClassification>([
@@ -28,6 +37,18 @@ const EXECUTIVE_CONTINUITY_CLASSIFICATIONS = new Set([
   "non_blocking_degraded",
   "operator_action_required",
 ]);
+const CONNECTION_STATES = new Set<ConnectionState>([
+  "Connecting",
+  "Healthy",
+  "Degraded",
+  "Unavailable",
+  "Retrying",
+  "Timed Out",
+  "Version Mismatch",
+  "Schema Mismatch",
+  "Unauthorized",
+  "Unknown",
+]);
 const ROOT_REVISION_PATTERN = /^[0-9a-f]{40}$/;
 
 const objectRecord = (value: unknown): Record<string, unknown> | null => (
@@ -37,6 +58,13 @@ const objectRecord = (value: unknown): Record<string, unknown> | null => (
 );
 const stringArray = (value: unknown): value is string[] => (
   Array.isArray(value) && value.every((item) => typeof item === "string")
+);
+const nullableString = (value: unknown): value is string | null => (
+  value === null || typeof value === "string"
+);
+const nullableNonNegativeNumber = (value: unknown): value is number | null => (
+  value === null
+  || (typeof value === "number" && Number.isFinite(value) && value >= 0)
 );
 const validIdentity = (value: unknown): value is string => (
   typeof value === "string" && value.length > 0 && value.length <= 191
@@ -264,10 +292,11 @@ export function canonicalActionAvailability(
   };
 }
 
-function unavailableEnvelope(
+export function portalFailureEnvelope(
   route: RuntimeRoute,
   code?: string,
   message = `The Experience Gateway did not return a valid ${route} response.`,
+  connectionState: ConnectionState = "Unavailable",
 ): GatewayEnvelope {
   return {
     ok: false,
@@ -275,7 +304,7 @@ function unavailableEnvelope(
     runtime: null,
     gateway: {
       status: "Degraded",
-      connectionState: "Unavailable",
+      connectionState,
       route: `/api/runtime/${route}`,
       runtimeUrl: "",
       lastSuccessfulConnection: null,
@@ -298,42 +327,216 @@ function unavailableEnvelope(
   };
 }
 
-async function get<T>(route: RuntimeRoute, forceRefresh = false): Promise<GatewayEnvelope<T>> {
-  const response = await fetch(`/api/runtime/${route}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      ...(forceRefresh ? { "Cache-Control": "no-cache" } : {})
-    },
-    credentials: "same-origin"
-  });
-  const body = await response.json() as GatewayEnvelope<T>;
-  if (!response.ok || !body.ok) throw Object.assign(new Error(body.error?.message ?? `Gateway read failed (${response.status})`), { envelope: body });
-  if (route === "capability-registry" && !asCapabilityRegistryProjection(body.data)) {
-    const envelope = unavailableEnvelope(
-      route,
-      "capability_registry_response_invalid",
-      "The Runtime-owned Capability Registry projection was invalid or incompatible.",
-    );
-    throw Object.assign(new Error(envelope.error?.message), { envelope });
+function asGatewayEnvelope<T>(value: unknown): GatewayEnvelope<T> | null {
+  const envelope = objectRecord(value);
+  const gateway = objectRecord(envelope?.gateway);
+  const truth = objectRecord(envelope?.truth);
+  const cache = objectRecord(gateway?.cache);
+  const runtime = envelope?.runtime === null
+    ? null
+    : objectRecord(envelope?.runtime);
+  const error = envelope?.error === undefined
+    ? null
+    : objectRecord(envelope.error);
+  const connectionState = gateway?.connectionState as ConnectionState;
+  const expectedGatewayStatus = connectionState === "Healthy"
+    ? "Healthy"
+    : connectionState === "Connecting" || connectionState === "Retrying"
+      ? connectionState
+      : "Degraded";
+  if (
+    !envelope
+    || typeof envelope.ok !== "boolean"
+    || !("data" in envelope)
+    || !gateway
+    || !["Healthy", "Degraded", "Connecting", "Retrying"].includes(String(gateway.status))
+    || !CONNECTION_STATES.has(connectionState)
+    || gateway.status !== expectedGatewayStatus
+    || typeof gateway.route !== "string"
+    || typeof gateway.runtimeUrl !== "string"
+    || !nullableString(gateway.lastSuccessfulConnection)
+    || !nullableString(gateway.lastSuccessfulRefresh)
+    || !cache
+    || !nullableString(cache.lastRefresh)
+    || !nullableNonNegativeNumber(cache.age)
+    || typeof cache.stale !== "boolean"
+    || !nullableString(cache.expires)
+    || typeof cache.cached !== "boolean"
+    || gateway.readOnly !== true
+    || gateway.secretValuesExposed !== false
+    || !truth
+    || truth.productionReady !== false
+    || truth.enterpriseReady !== false
+    || truth.cloudPrimary !== false
+    || truth.localSourceOfTruth !== true
+    || truth.defaultProvider !== "mock_model"
+    || truth.conclave !== "unavailable"
+    || truth.actualTrainedSLMs !== 0
+    || truth.secretValuesExposed !== false
+    || (envelope.ok === true
+      ? (
+        envelope.data === null
+        || !runtime
+        || typeof runtime.status !== "string"
+        || typeof runtime.timestamp !== "string"
+        || typeof runtime.schemaVersion !== "string"
+        || typeof runtime.runtimeVersion !== "string"
+        || !stringArray(runtime.proofIds)
+        || !stringArray(runtime.limitations)
+        || envelope.error !== undefined
+      )
+      : (
+        envelope.data !== null
+        || envelope.runtime !== null
+        || !error
+        || typeof error.code !== "string"
+        || typeof error.message !== "string"
+      ))
+  ) {
+    return null;
   }
-  return body;
+  return envelope as GatewayEnvelope<T>;
 }
 
-async function snapshot(forceRefresh = false): Promise<{ data: RuntimeSnapshot; failures: GatewayEnvelope[] }> {
-  const results = await Promise.allSettled(RUNTIME_ROUTES.map((route) => get(route, forceRefresh)));
+function envelopeFailure(envelope: GatewayEnvelope) {
+  return Object.assign(
+    new Error(envelope.error?.message ?? "The Gateway request failed safely."),
+    { envelope },
+  );
+}
+
+async function get<T>(
+  route: RuntimeRoute,
+  forceRefresh = false,
+  parentSignal?: AbortSignal,
+): Promise<GatewayEnvelope<T>> {
+  try {
+    return await runBoundedTask(async (signal) => {
+      const response = await fetch(`/api/runtime/${route}`, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          ...(forceRefresh ? { "Cache-Control": "no-cache" } : {})
+        },
+        credentials: "same-origin",
+        signal,
+      });
+      let body: GatewayEnvelope<T>;
+      try {
+        const parsed = await response.json() as unknown;
+        const validated = asGatewayEnvelope<T>(parsed);
+        if (!validated) throw new Error("invalid Gateway envelope");
+        body = validated;
+      } catch {
+        throw envelopeFailure(portalFailureEnvelope(
+          route,
+          "gateway_response_invalid",
+          `The Experience Gateway returned an invalid ${route} response.`,
+          "Unknown",
+        ));
+      }
+      if (
+        body.gateway.route !== `/api/runtime/${route}`
+        || response.ok !== body.ok
+      ) {
+        throw envelopeFailure(portalFailureEnvelope(
+          route,
+          "gateway_response_invalid",
+          `The Experience Gateway returned a mismatched ${route} response envelope.`,
+          "Unknown",
+        ));
+      }
+      if (!body.ok) {
+        throw envelopeFailure(body);
+      }
+      if (route === "capability-registry" && !asCapabilityRegistryProjection(body.data)) {
+        throw envelopeFailure(portalFailureEnvelope(
+          route,
+          "capability_registry_response_invalid",
+          "The Runtime-owned Capability Registry projection was invalid or incompatible.",
+          "Unknown",
+        ));
+      }
+      return body;
+    }, {
+      timeoutMs: CLIENT_REQUEST_TIMEOUT_MS,
+      ...(parentSignal ? { parentSignal } : {}),
+    });
+  } catch (error) {
+    const known = error as {
+      code?: string;
+      envelope?: GatewayEnvelope;
+    };
+    if (known.envelope) throw error;
+    const timedOut = known.code === "task_timed_out";
+    const snapshotAborted = known.code === "task_parent_aborted";
+    const envelope = portalFailureEnvelope(
+      route,
+      timedOut
+        ? "gateway_request_timed_out"
+        : snapshotAborted
+          ? "gateway_snapshot_timed_out"
+          : "gateway_unreachable",
+      timedOut
+        ? `The ${route} request exceeded the bounded client response window.`
+        : snapshotAborted
+          ? `The ${route} request was cancelled when the bounded startup snapshot expired.`
+          : `The Experience Gateway could not complete the ${route} request.`,
+      timedOut || snapshotAborted ? "Timed Out" : "Unavailable",
+    );
+    throw envelopeFailure(envelope);
+  }
+}
+
+async function collectSnapshot(
+  forceRefresh: boolean,
+  signal: AbortSignal,
+): Promise<{ data: RuntimeSnapshot; failures: GatewayEnvelope[] }> {
+  const results = await registryFirstSettledMap(RUNTIME_ROUTES, {
+    registryItem: "capability-registry" as RuntimeRoute,
+    concurrency: SNAPSHOT_CONCURRENCY,
+    task: (route) => get(route, forceRefresh, signal),
+  });
   const data: RuntimeSnapshot = {};
   const failures: GatewayEnvelope[] = [];
   results.forEach((result, index) => {
     const route = RUNTIME_ROUTES[index];
     if (result.status === "fulfilled") data[route] = result.value;
     else {
-      const envelope = (result.reason as { envelope?: GatewayEnvelope }).envelope ?? unavailableEnvelope(route);
+      const envelope = (result.reason as { envelope?: GatewayEnvelope }).envelope ?? portalFailureEnvelope(route);
       data[route] = envelope;
       failures.push(envelope);
     }
   });
   return { data, failures };
 }
+
+async function loadSnapshot(
+  forceRefresh = false,
+): Promise<{ data: RuntimeSnapshot; failures: GatewayEnvelope[] }> {
+  try {
+    return await runBoundedTask(
+      (signal) => collectSnapshot(forceRefresh, signal),
+      { timeoutMs: CLIENT_SNAPSHOT_TIMEOUT_MS },
+    );
+  } catch (error) {
+    const timedOut = (error as { code?: string }).code === "task_timed_out";
+    const data: RuntimeSnapshot = {};
+    const failures = RUNTIME_ROUTES.map((route) => portalFailureEnvelope(
+      route,
+      timedOut ? "gateway_snapshot_timed_out" : "gateway_snapshot_failed",
+      timedOut
+        ? "The bounded startup snapshot expired and failed closed. Retry to request a fresh Runtime snapshot."
+        : "The browser snapshot coordinator failed closed before it could establish current Runtime state.",
+      timedOut ? "Timed Out" : "Unknown",
+    ));
+    RUNTIME_ROUTES.forEach((route, index) => {
+      data[route] = failures[index];
+    });
+    return { data, failures };
+  }
+}
+
+const snapshot = createSerializedRefresh(loadSnapshot);
 
 export const portalClient = Object.freeze({ get, snapshot });

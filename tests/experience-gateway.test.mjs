@@ -1092,6 +1092,76 @@ test("missing, stale, mismatched, or contract-invalid action truth fails closed"
   assert.equal((await staleRegistry.json()).error.code, "capability_registry_verification_stale");
 });
 
+test("concurrent unprimed Runtime reads share one Capability Registry admission refresh", async () => {
+  let registryCalls = 0;
+  let runtimeCalls = 0;
+  let releaseRegistry;
+  const registryGate = new Promise((resolve) => {
+    releaseRegistry = resolve;
+  });
+  const runtimeFetch = async (url) => {
+    if (url.endsWith("/runtime/capability-registry")) {
+      registryCalls += 1;
+      await registryGate;
+      return runtimeResponse(actionAdmissionProjection());
+    }
+    runtimeCalls += 1;
+    return runtimeResponse({ route: url });
+  };
+  const base = await start(runtimeFetch, {
+    testUseProvidedCapabilityRegistry: true,
+  });
+  const routes = ["status", "health", "version", "providers", "environment", "diagnostics"];
+  const pending = Promise.all(routes.map((route) => fetch(`${base}/api/runtime/${route}`, {
+    headers: { "Cache-Control": "no-cache" },
+  })));
+
+  for (let index = 0; index < 20 && registryCalls === 0; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+
+  releaseRegistry();
+  const responses = await pending;
+  assert.deepEqual(responses.map((response) => response.status), routes.map(() => 200));
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, routes.length);
+});
+
+test("a failed concurrent admission refresh has a bounded cooldown instead of creating sequential herds", async () => {
+  let registryCalls = 0;
+  let runtimeCalls = 0;
+  const runtimeFetch = async (url) => {
+    if (url.endsWith("/runtime/capability-registry")) {
+      registryCalls += 1;
+      return runtimeResponse({});
+    }
+    runtimeCalls += 1;
+    return runtimeResponse({ route: url });
+  };
+  const base = await start(runtimeFetch, {
+    testUseProvidedCapabilityRegistry: true,
+    retryDelayMs: 500,
+  });
+  const routes = ["status", "health", "version", "providers", "environment", "diagnostics"];
+  const responses = await Promise.all(routes.map((route) => fetch(`${base}/api/runtime/${route}`)));
+
+  assert.deepEqual(responses.map((response) => response.status), routes.map(() => 502));
+  for (const response of responses) {
+    assert.equal((await response.json()).error.code, "capability_registry_response_invalid");
+  }
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+
+  const immediateRetry = await fetch(`${base}/api/runtime/status`);
+  assert.equal(immediateRetry.status, 502);
+  assert.equal((await immediateRetry.json()).error.code, "capability_registry_response_invalid");
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+});
+
 test("a live-degraded typed action remains bounded and grants no Authority", async () => {
   const actionId = "context.runtime.route.post.runtime.interactions";
   let calls = 0;

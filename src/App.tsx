@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, BookOpen, Bot, BrainCircuit, CircleGauge, FileCheck2, Files, FolderKanban, History, Mic2, Network, ServerCog, Settings2, ShieldCheck, Waypoints, type LucideIcon } from "lucide-react";
 import { CapabilityRegistryProjection as CapabilityRegistryWorkspace } from "./components/CapabilityRegistryProjection";
 import { ConnectorDiagnosticsWorkspace } from "./components/ConnectorDiagnosticsWorkspace";
@@ -50,8 +50,10 @@ import {
   PORTAL_CANONICAL_ACTIONS,
   asCapabilityRegistryProjection,
   canonicalActionAvailability,
+  portalFailureEnvelope,
   portalClient,
 } from "./lib/portal-client";
+import { derivePortalConnectionState } from "./lib/request-coordination.mjs";
 import { displayLabel } from "./lib/presentation";
 import type {
   CapabilityRegistryProjection,
@@ -148,7 +150,6 @@ const RAIL_GROUPS: PlatformRailGroup[] = NEXUS_SURFACE_GROUPS.map((group) => ({
 
 const record = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const list = (value: unknown) => Array.isArray(value) ? value as Record<string, unknown>[] : [];
-const STATE_PRIORITY: ConnectionState[] = ["Unauthorized", "Schema Mismatch", "Version Mismatch", "Timed Out", "Unavailable", "Unknown", "Degraded", "Retrying", "Connecting", "Healthy"];
 const isAreaId = (value: string): value is AreaId => AREAS.some((area) => area.id === value);
 const AREA_PATHS: Readonly<Record<AreaId, string>> = Object.freeze(
   Object.fromEntries(AREAS.map((area) => [area.id, area.clients.web.route])) as Record<AreaId, string>,
@@ -322,10 +323,7 @@ function surfaceHasVerifiedRuntimeEvidence(
 }
 
 function connectionState(snapshot: RuntimeSnapshot, failures: GatewayEnvelope[], loading: boolean): ConnectionState {
-  if (!Object.keys(snapshot).length) return loading ? "Connecting" : "Unavailable";
-  if (loading) return "Retrying";
-  const states = [...failures, ...Object.values(snapshot)].map((item) => item?.gateway.connectionState).filter(Boolean) as ConnectionState[];
-  return STATE_PRIORITY.find((state) => states.includes(state)) ?? (failures.length ? "Unavailable" : "Healthy");
+  return derivePortalConnectionState(snapshot, failures, loading) as ConnectionState;
 }
 
 function nexusTone(state: ConnectionState): "neutral" | "info" | "success" | "attention" | "critical" {
@@ -438,8 +436,34 @@ export function App() {
   const [hostedOperationalConfigured, setHostedOperationalConfigured] = useState(false);
   const [operationalSession, setOperationalSession] = useState<OperationalSession>({ authenticated: false });
   const [operationalReadiness, setOperationalReadiness] = useState<Record<string, unknown> | null>(null);
+  const refreshGeneration = useRef(0);
 
-  const refresh = (forceRefresh = false) => { setLoading(true); portalClient.snapshot(forceRefresh).then((result) => { setSnapshot((current) => ({ ...current, ...result.data })); setFailures(result.failures); }).catch(() => { setSnapshot({}); setFailures([]); }).finally(() => setLoading(false)); };
+  const refresh = (forceRefresh = false) => {
+    const generation = refreshGeneration.current + 1;
+    refreshGeneration.current = generation;
+    setLoading(true);
+    portalClient.snapshot(forceRefresh)
+      .then((result) => {
+        setSnapshot((current) => ({ ...current, ...result.data }));
+        setFailures(result.failures);
+      })
+      .catch(() => {
+        setFailures((current) => [
+          ...current.filter(
+            (item) => item.error?.code !== "gateway_snapshot_failed",
+          ),
+          portalFailureEnvelope(
+            "status",
+            "gateway_snapshot_failed",
+            "The browser could not complete the bounded Runtime snapshot. Previously verified module state remains visible.",
+            "Unknown",
+          ),
+        ]);
+      })
+      .finally(() => {
+        if (refreshGeneration.current === generation) setLoading(false);
+      });
+  };
   function focusPlatformSearch() {
     if (window.matchMedia("(max-width: 820px)").matches) setMenuOpen(true);
     window.requestAnimationFrame(() => document.getElementById("platform-search")?.focus());
@@ -449,8 +473,18 @@ export function App() {
   useEffect(() => {
     let active = true;
     operationalSessionClient.status()
-      .then((session) => { operationalSessionClient.use(session); if (active) { setHostedOperationalConfigured(true); setOperationalSession(session); } })
-      .catch(() => { operationalSessionClient.use({ authenticated: false }); if (active) { setHostedOperationalConfigured(false); setOperationalSession({ authenticated: false }); } })
+      .then((session) => {
+        if (!active) return;
+        operationalSessionClient.use(session);
+        setHostedOperationalConfigured(true);
+        setOperationalSession(session);
+      })
+      .catch(() => {
+        if (!active) return;
+        operationalSessionClient.use({ authenticated: false });
+        setHostedOperationalConfigured(false);
+        setOperationalSession({ authenticated: false });
+      })
       .finally(() => { if (active) setSessionBootstrapComplete(true); });
     return () => { active = false; };
   }, []);
@@ -483,6 +517,7 @@ export function App() {
       if (document.visibilityState !== "visible") return;
       operationalSessionClient.status().then((session) => {
         operationalSessionClient.use(session);
+        setHostedOperationalConfigured(true);
         setOperationalSession(session);
       }).catch(invalidate);
     };
@@ -619,6 +654,7 @@ export function App() {
 
   function acceptOperationalSession(session: OperationalSession) {
     operationalSessionClient.use(session);
+    setHostedOperationalConfigured(true);
     setOperationalSession(session);
     refresh(true);
   }

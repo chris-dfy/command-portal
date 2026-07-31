@@ -1,3 +1,10 @@
+import {
+  createSerializedRefresh,
+  runBoundedTask,
+} from "./request-coordination.mjs";
+
+const CLIENT_READ_TIMEOUT_MS = 10_000;
+
 export type LocalEnvelope<T> = {
   ok: boolean;
   data: T | null;
@@ -421,20 +428,36 @@ export type ConclaveWorkspaceList = {
 
 async function request<T>(path: string, options: RequestInit = {}, idempotencyKey?: string): Promise<T> {
   const hosted = capabilityTransport.mode === "hosted";
-  const response = await fetch(`${hosted ? "/api/operations" : "/api/local"}${path}`, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.method === "POST" ? {
-        ...(hosted ? { "X-CSRF-Token": capabilityTransport.csrfToken } : {}),
-        ...(idempotencyKey || hosted ? { "Idempotency-Key": idempotencyKey ?? globalThis.crypto.randomUUID() } : {}),
-      } : {}),
-      ...(options.headers ?? {})
-    },
-    credentials: "same-origin"
-  });
-  const envelope = await response.json() as LocalEnvelope<T>;
+  const readOnly = !options.method || options.method === "GET";
+  const perform = async (signal?: AbortSignal) => {
+    const response = await fetch(`${hosted ? "/api/operations" : "/api/local"}${path}`, {
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.method === "POST" ? {
+          ...(hosted ? { "X-CSRF-Token": capabilityTransport.csrfToken } : {}),
+          ...(idempotencyKey || hosted ? { "Idempotency-Key": idempotencyKey ?? globalThis.crypto.randomUUID() } : {}),
+        } : {}),
+        ...(options.headers ?? {})
+      },
+      credentials: "same-origin",
+      ...(signal ? { signal } : {}),
+    });
+    return {
+      response,
+      envelope: await response.json() as LocalEnvelope<T>,
+    };
+  };
+  const { response, envelope } = readOnly
+    ? await runBoundedTask(
+      (signal) => perform(signal),
+      {
+        timeoutMs: CLIENT_READ_TIMEOUT_MS,
+        ...(options.signal ? { parentSignal: options.signal } : {}),
+      },
+    )
+    : await perform();
   if (!response.ok || !envelope.ok || envelope.data === null) {
     if (hosted && response.status === 401) window.dispatchEvent(new Event(OPERATIONAL_SESSION_INVALID_EVENT));
     const details = envelope.error?.details;
@@ -644,17 +667,37 @@ export type KnowledgeIntakeRequest = {
 };
 
 async function sessionRequest(path: string, options: RequestInit = {}): Promise<OperationalSession> {
-  const response = await fetch(`/api/session${path}`, {
-    ...options, credentials: "same-origin",
-    headers: { Accept: "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers ?? {}) }
-  });
-  const body = await response.json() as { ok: boolean; session?: OperationalSession; error?: { message?: string } };
+  const readOnly = !options.method || options.method === "GET";
+  const perform = async (signal?: AbortSignal) => {
+    const response = await fetch(`/api/session${path}`, {
+      ...options, credentials: "same-origin",
+      headers: { Accept: "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers ?? {}) },
+      ...(signal ? { signal } : {}),
+    });
+    return {
+      response,
+      body: await response.json() as { ok: boolean; session?: OperationalSession; error?: { message?: string } },
+    };
+  };
+  const { response, body } = readOnly
+    ? await runBoundedTask(
+      (signal) => perform(signal),
+      {
+        timeoutMs: CLIENT_READ_TIMEOUT_MS,
+        ...(options.signal ? { parentSignal: options.signal } : {}),
+      },
+    )
+    : await perform();
   if (!response.ok || !body.ok || !body.session) throw new Error(body.error?.message ?? `Operational session request failed (${response.status})`);
   return body.session;
 }
 
+const operationalSessionStatus = createSerializedRefresh(
+  () => sessionRequest(""),
+);
+
 export const operationalSessionClient = Object.freeze({
-  status: () => sessionRequest(""),
+  status: () => operationalSessionStatus(false),
   logout: () => sessionRequest("/logout", { method: "POST", headers: { "X-CSRF-Token": capabilityTransport.csrfToken }, body: JSON.stringify({}) }),
   use: (session: OperationalSession) => {
     capabilityTransport.mode = session.authenticated ? "hosted" : "local";

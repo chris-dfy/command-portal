@@ -24,12 +24,17 @@ test("runtime information exposes discovery and preserved truth boundaries", asy
 });
 
 test("connection lifecycle renders every required state", async () => {
-  const [source, app] = await Promise.all([read("../src/components/RuntimeHealth.tsx"), read("../src/App.tsx")]);
+  const [source, app, coordination] = await Promise.all([
+    read("../src/components/RuntimeHealth.tsx"),
+    read("../src/App.tsx"),
+    read("../src/lib/request-coordination.mjs"),
+  ]);
   for (const state of ["Connecting", "Healthy", "Degraded", "Unavailable", "Retrying", "Timed Out", "Version Mismatch", "Schema Mismatch", "Unauthorized", "Unknown"]) {
     assert.match(source, new RegExp(`\"${state}\"`));
   }
-  assert.match(app, /if \(!Object\.keys\(snapshot\)\.length\) return loading \? "Connecting" : "Unavailable"/);
-  assert.match(app, /if \(loading\) return "Retrying"/);
+  assert.match(app, /derivePortalConnectionState\(snapshot, failures, loading\)/);
+  assert.match(coordination, /return loading \? "Connecting" : "Unavailable"/);
+  assert.doesNotMatch(coordination, /if \(loading\) return "Retrying"/);
 });
 
 test("topology is live and follows the required read path", async () => {
@@ -52,7 +57,7 @@ test("browser uses only same-origin allowlisted runtime routes and no token", as
     assert.equal(source.includes("COMMAND_PORTAL_RUNTIME_READ_TOKEN"), false);
     assert.equal(source.includes("Authorization"), false);
   }
-  assert.match(client, /unavailableEnvelope/);
+  assert.match(client, /portalFailureEnvelope/);
   assert.match(client, /code: "gateway_unreachable"/);
   assert.match(client, /failures\.push\(envelope\)/);
   assert.equal(types.includes("runtimeToken"), false);

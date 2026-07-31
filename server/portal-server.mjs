@@ -3860,6 +3860,13 @@ const INVOCABLE_ACTION_CLASSIFICATIONS = new Set(["live_verified", "live_degrade
 function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
   let projection = null;
   let expiresAt = 0;
+  let refreshPromise = null;
+  let refreshFailure = null;
+  let refreshRetryAt = 0;
+  const refreshFailureCooldownMs = Math.max(
+    250,
+    Math.min(Number(config.retryDelayMs) * 2 || 0, 1_000),
+  );
 
   const clear = () => {
     projection = null;
@@ -3892,6 +3899,8 @@ function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
       );
     }
     projection = candidate;
+    refreshFailure = null;
+    refreshRetryAt = 0;
     return candidate;
   };
   const unavailable = (alias, code, message) => ({
@@ -3975,10 +3984,35 @@ function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
       classification: action.classification,
     };
   };
+  const refresh = async (loadProjection) => {
+    if (refreshPromise) return refreshPromise;
+    if (refreshFailure && refreshRetryAt > clock()) {
+      throw refreshFailure;
+    }
+    refreshFailure = null;
+    refreshRetryAt = 0;
+    const pending = (async () => {
+      try {
+        return observe(await loadProjection());
+      } catch (error) {
+        clear();
+        refreshFailure = error;
+        refreshRetryAt = Number(clock()) + refreshFailureCooldownMs;
+        throw error;
+      }
+    })();
+    refreshPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (refreshPromise === pending) refreshPromise = null;
+    }
+  };
   return Object.freeze({
     clear,
     decide,
     observe,
+    refresh,
     snapshot: () => projection,
   });
 }
@@ -3992,12 +4026,19 @@ async function ensureRuntimeActionAdmission(alias, config, runtimeFetch, actionA
     return decision;
   }
   try {
-    const envelope = await fetchRuntime(
-      "/runtime/capability-registry",
-      config,
-      runtimeFetch,
-    );
-    actionAdmission.observe(envelope.data);
+    const loadProjection = async () => {
+      const envelope = await fetchRuntime(
+        "/runtime/capability-registry",
+        config,
+        runtimeFetch,
+      );
+      return envelope.data;
+    };
+    if (typeof actionAdmission.refresh === "function") {
+      await actionAdmission.refresh(loadProjection);
+    } else {
+      actionAdmission.observe(await loadProjection());
+    }
   } catch (error) {
     actionAdmission.clear();
     const failure = error instanceof GatewayFailure
