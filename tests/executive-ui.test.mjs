@@ -267,7 +267,13 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(client, /expectedWorkspaceVersion/);
   assert.doesNotMatch(client, /\/api\/runtime\/conclave\/reviews|runConclaveReview/);
   assert.match(conclave, /localNexusClient\.conclaveWorkspaces\(\)/);
-  assert.match(conclave, /Durable Runtime workspace/);
+  assert.match(conclave, /Durable Runtime records/);
+  assert.match(conclave, /Browser-local Review draft/);
+  assert.match(conclave, /not yet a Runtime record/);
+  assert.match(conclave, /defaultConclaveWorkspace/);
+  assert.match(conclave, /conclaveDirectoryLabel/);
+  assert.match(conclave, /Verified canonical Review result/);
+  assert.match(conclave, /Historical prompt only — not a Review result/);
   assert.match(conclave, /does not substitute a static one-shot review/);
   assert.match(conclave, /Run governed review/);
   assert.match(conclave, /created workspace was preserved/i);
