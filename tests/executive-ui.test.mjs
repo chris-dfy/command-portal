@@ -13,6 +13,33 @@ test("status bar displays the independent Phase 5X-D health model", async () => 
   assert.match(source, /aria-label="Experience Gateway health model"/);
 });
 
+test("runtime health cards reflow without breaking status words", async () => {
+  const styles = await read("../src/styles.css");
+  assert.match(styles, /\.nx-runtime-ribbon \{[^}]*repeat\(auto-fit, minmax\(min\(100%, 11\.5rem\), 1fr\)\)[^}]*overflow-x: visible;[^}]*scroll-snap-type: none;/);
+  for (const row of ["span", "strong", "small"]) {
+    assert.match(styles, new RegExp(`\\.nx-runtime-ribbon__signal \\.nx-metric > ${row} \\{[^}]*overflow-wrap: normal;[^}]*word-break: normal;[^}]*hyphens: none;`));
+  }
+  assert.match(styles, /@container portal-main \(max-width: 1280px\) \{\s*\.nx-runtime-ribbon \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\);/);
+  assert.doesNotMatch(styles, /\.nx-runtime-ribbon \{[^}]*repeat\(7, minmax\(128px, 1fr\)\)/);
+});
+
+test("the global shell exposes the persisted Dark Light System control", async () => {
+  const [app, navigation, styles] = await Promise.all([
+    read("../src/App.tsx"),
+    read("../src/platform/NexusExecutiveNavigation.tsx"),
+    read("../src/platform/nexus-platform.css"),
+  ]);
+  assert.match(app, /colorMode=\{appearance\.settings\.colorMode\}/);
+  assert.match(app, /onColorModeChange=\{\(colorMode\) => appearance\.updateSettings\(\{ colorMode \}\)\}/);
+  assert.match(navigation, /aria-label="Color mode"/);
+  for (const [value, label] of [["dark", "Dark"], ["light", "Light"], ["system", "System"]]) {
+    assert.match(navigation, new RegExp(`<option value="${value}">${label}<\\/option>`));
+  }
+  assert.doesNotMatch(navigation, /localStorage|sessionStorage/);
+  assert.match(styles, /\.nx-color-mode-control:focus-within \{[^}]*box-shadow: var\(--nx-focus-ring\);/);
+  assert.doesNotMatch(styles, /\.nx-color-mode-control\s*\{[^}]*display:\s*none/);
+});
+
 test("runtime information exposes discovery and preserved truth boundaries", async () => {
   const source = await read("../src/components/RuntimeInformation.tsx");
   for (const label of ["Runtime version", "Schema version", "Environment", "Runtime URL", "Gateway status", "Provider registry", "Capabilities"]) {
@@ -406,7 +433,7 @@ test("navigation, Context Inspector, and NEXUS reflow without covering the works
   assert.doesNotMatch(platformStyles, /position:\s*fixed/);
   assert.doesNotMatch(platformStyles, /nx-platform-scrim/);
 
-  for (const breakpoint of [1100, 900, 680, 460]) {
+  for (const breakpoint of [1280, 1100, 900, 680, 460]) {
     assert.match(routeStyles, new RegExp(`@container portal-main \\(max-width: ${breakpoint}px\\)`));
   }
   assert.match(routeStyles, /\.nx-runtime-ribbon \{[^}]*grid-auto-rows: 1fr;[^}]*align-items: stretch;/);
@@ -461,6 +488,8 @@ test("canonical consolidation exposes every permanent platform workspace", async
   assert.match(app, /useAppearanceSettings\(\)/);
   assert.match(app, /<AppearanceWorkspace appearance=\{appearance\}/);
   assert.match(appearance, /NEXUS_THEMES\.map/);
+  assert.match(appearance, /Saved in this browser/);
+  assert.doesNotMatch(appearance, /Presentation only/);
   assert.match(platformStyles, /Canonical hosted NEXUS Platform shell/);
   const tokenImport = app.indexOf('import "./design-system/nexus-tokens.css"');
   const foundationImport = app.indexOf('import "./design-system/nexus-foundation.css"');

@@ -86,6 +86,32 @@
 .nx-executive-nav > nav button[data-active="true"]::after { background: var(--nexus-accent, var(--accent)); box-shadow: none; }
 
 .nx-executive-nav__tools { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.nx-color-mode-control {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--nx-border-subtle, var(--border));
+  border-radius: var(--nx-radius-sm);
+  color: var(--nx-text-muted, var(--muted));
+  background: var(--nx-surface-1, var(--panel));
+  font-size: .61rem;
+}
+.nx-color-mode-control:focus-within { border-color: var(--nx-border-strong); box-shadow: var(--nx-focus-ring); }
+.nx-color-mode-control > svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--nexus-accent, var(--accent)); }
+.nx-color-mode-control > span { font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+.nx-color-mode-control > select {
+  min-width: 60px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--nx-text-strong, var(--text));
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
 .nx-global-search { display: flex; width: 184px; height: 38px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--nx-border-subtle, var(--border)); border-radius: var(--nx-radius-sm); color: var(--nx-text-muted, var(--muted)); background: var(--nx-surface-1, var(--panel)); font-size: .65rem; }
 .nx-global-search svg { width: 14px; }
 .nx-global-search kbd { margin-left: auto; padding: 2px 5px; border: 1px solid var(--nx-border-subtle, var(--border)); border-radius: 4px; color: var(--nx-text-muted, var(--muted)); background: var(--nx-surface-0, var(--bg)); font: .51rem var(--nx-font-mono, ui-monospace); }
@@ -331,6 +357,7 @@
   .nx-executive-nav > nav { justify-content: flex-start; overflow-x: auto; scrollbar-width: none; }
   .nx-executive-nav > nav::-webkit-scrollbar { display: none; }
   .nx-executive-nav__tools .nx-status { display: none; }
+  .nx-color-mode-control > span { display: none; }
   .nx-app-shell__body,
   .nx-app-shell[data-side-panel="closed"] .nx-app-shell__body { display: flex; min-width: 0; flex-direction: column; }
   .nx-platform-rail { position: relative; top: auto; z-index: 1; display: none; order: 0; width: 100%; height: min(72vh, 640px); border-right: 0; border-bottom: 1px solid var(--nx-border-subtle, var(--border)); box-shadow: none; transform: none; }
