@@ -35,17 +35,20 @@ export function derivePortalConnectionState(
   );
   if (trustFailure) return trustFailure;
 
-  const anchorStates = [snapshot.health, snapshot.ready]
-    .map((item) => item?.gateway?.connectionState)
-    .filter(Boolean);
-  const hasUsableAnchor = anchorStates.some(
-    (state) => state === "Healthy" || state === "Degraded",
-  );
-  if (hasUsableAnchor) {
-    return states.every((state) => state === "Healthy")
-      ? "Healthy"
-      : "Degraded";
+  const healthState = snapshot.health?.gateway?.connectionState;
+  const readyState = snapshot.ready?.gateway?.connectionState;
+
+  // The shell reports transport/trust posture, not the least-ready capability.
+  // A structurally valid `/ready` 503 is intentionally represented by the
+  // Hosted Readiness module as Degraded; it must not make every independent
+  // surface look disconnected when liveness remains healthy.
+  if (healthState === "Healthy") return "Healthy";
+  if (healthState === "Degraded") return "Degraded";
+  if (!healthState && (readyState === "Healthy" || readyState === "Degraded")) {
+    return readyState;
   }
+
+  const anchorStates = [healthState, readyState].filter(Boolean);
   return CONNECTION_FAILURE_PRIORITY.find(
     (state) => anchorStates.includes(state),
   ) ?? "Unavailable";

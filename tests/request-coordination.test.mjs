@@ -198,7 +198,7 @@ test("a completed bounded task clears its timer without a later abort", async ()
   assert.equal(signal.aborted, false);
 });
 
-test("portal connection state preserves degraded readiness and independent availability", () => {
+test("portal connection state keeps capability readiness separate from healthy transport", () => {
   const envelope = (connectionState) => ({
     gateway: { connectionState },
   });
@@ -209,7 +209,7 @@ test("portal connection state preserves degraded readiness and independent avail
     health: envelope("Healthy"),
     ready: envelope("Degraded"),
     providers: envelope("Healthy"),
-  }, [], false), "Degraded");
+  }, [], false), "Healthy");
   assert.equal(derivePortalConnectionState({
     health: envelope("Healthy"),
     ready: envelope("Healthy"),
@@ -219,7 +219,7 @@ test("portal connection state preserves degraded readiness and independent avail
     health: envelope("Healthy"),
     ready: envelope("Healthy"),
     providers: envelope("Unavailable"),
-  }, [envelope("Unavailable")], false), "Degraded");
+  }, [envelope("Unavailable")], false), "Healthy");
   assert.equal(derivePortalConnectionState({
     health: envelope("Healthy"),
     ready: envelope("Healthy"),
