@@ -8,7 +8,6 @@ import type {
 } from "./types";
 import {
   createSerializedRefresh,
-  registryFirstSettledMap,
   runBoundedTask,
 } from "./request-coordination.mjs";
 
@@ -18,9 +17,11 @@ export const RUNTIME_ROUTES: RuntimeRoute[] = [
   "capability-registry", "eox", "conclave"
 ];
 
-const SNAPSHOT_CONCURRENCY = 3;
 const CLIENT_REQUEST_TIMEOUT_MS = 10_000;
 const CLIENT_SNAPSHOT_TIMEOUT_MS = 20_000;
+const RUNTIME_BOOTSTRAP_ROUTE = "/api/runtime/bootstrap";
+const RUNTIME_BOOTSTRAP_RECORD_TYPE = "nexus_experience_runtime_bootstrap";
+const RUNTIME_BOOTSTRAP_SCHEMA_VERSION = "1.0.0";
 const SUPPORTED_SCHEMA_VERSION = "1.0.0";
 const SUPPORTED_RUNTIME_VERSION = "0.1.0";
 const SEMANTIC_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -424,6 +425,70 @@ function asGatewayEnvelope<T>(value: unknown): GatewayEnvelope<T> | null {
   return envelope as GatewayEnvelope<T>;
 }
 
+function asRuntimeBootstrapEnvelope(
+  value: unknown,
+): { data: RuntimeSnapshot; failures: GatewayEnvelope[] } | null {
+  const bootstrap = objectRecord(value);
+  const data = objectRecord(bootstrap?.data);
+  const truth = objectRecord(bootstrap?.truth);
+  if (
+    !bootstrap
+    || bootstrap.recordType !== RUNTIME_BOOTSTRAP_RECORD_TYPE
+    || bootstrap.schemaVersion !== RUNTIME_BOOTSTRAP_SCHEMA_VERSION
+    || bootstrap.routeCount !== RUNTIME_ROUTES.length
+    || typeof bootstrap.registryAdmitted !== "boolean"
+    || !data
+    || !stringArray(bootstrap.failedRoutes)
+    || bootstrap.readOnly !== true
+    || bootstrap.secretValuesExposed !== false
+    || !truth
+    || truth.productionReady !== false
+    || truth.enterpriseReady !== false
+    || truth.cloudPrimary !== false
+    || truth.localSourceOfTruth !== true
+    || truth.defaultProvider !== "mock_model"
+    || truth.conclave !== "unavailable"
+    || truth.actualTrainedSLMs !== 0
+    || truth.secretValuesExposed !== false
+  ) return null;
+
+  const dataKeys = Object.keys(data);
+  if (
+    dataKeys.length !== RUNTIME_ROUTES.length
+    || RUNTIME_ROUTES.some((route) => !Object.hasOwn(data, route))
+    || dataKeys.some((route) => !RUNTIME_ROUTES.includes(route as RuntimeRoute))
+  ) return null;
+
+  const snapshot: RuntimeSnapshot = {};
+  const failures: GatewayEnvelope[] = [];
+  for (const route of RUNTIME_ROUTES) {
+    const envelope = asGatewayEnvelope(data[route]);
+    if (!envelope || envelope.gateway.route !== `/api/runtime/${route}`) return null;
+    snapshot[route] = envelope;
+    if (!envelope.ok) failures.push(envelope);
+  }
+  const registry = snapshot["capability-registry"];
+  const registryAdmitted = Boolean(
+    registry?.ok
+    && asCapabilityRegistryProjection(registry.data),
+  );
+  if (
+    bootstrap.registryAdmitted !== registryAdmitted
+    || (!registryAdmitted && RUNTIME_ROUTES.some((route) => (
+      route !== "capability-registry" && snapshot[route]?.ok === true
+    )))
+  ) return null;
+
+  const expectedFailures = RUNTIME_ROUTES.filter((route) => snapshot[route]?.ok !== true);
+  const failedRoutes = bootstrap.failedRoutes as string[];
+  if (
+    failedRoutes.length !== expectedFailures.length
+    || new Set(failedRoutes).size !== failedRoutes.length
+    || failedRoutes.some((route, index) => route !== expectedFailures[index])
+  ) return null;
+  return { data: snapshot, failures };
+}
+
 function envelopeFailure(envelope: GatewayEnvelope) {
   return Object.assign(
     new Error(envelope.error?.message ?? "The Gateway request failed safely."),
@@ -518,23 +583,34 @@ async function collectSnapshot(
   forceRefresh: boolean,
   signal: AbortSignal,
 ): Promise<{ data: RuntimeSnapshot; failures: GatewayEnvelope[] }> {
-  const results = await registryFirstSettledMap(RUNTIME_ROUTES, {
-    registryItem: "capability-registry" as RuntimeRoute,
-    concurrency: SNAPSHOT_CONCURRENCY,
-    task: (route) => get(route, forceRefresh, signal),
-  });
-  const data: RuntimeSnapshot = {};
-  const failures: GatewayEnvelope[] = [];
-  results.forEach((result, index) => {
-    const route = RUNTIME_ROUTES[index];
-    if (result.status === "fulfilled") data[route] = result.value;
-    else {
-      const envelope = (result.reason as { envelope?: GatewayEnvelope }).envelope ?? portalFailureEnvelope(route);
-      data[route] = envelope;
-      failures.push(envelope);
+  let response: Response;
+  try {
+    response = await fetch(RUNTIME_BOOTSTRAP_ROUTE, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...(forceRefresh ? { "Cache-Control": "no-cache" } : {}),
+      },
+      credentials: "same-origin",
+      signal,
+    });
+  } catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error("Gateway bootstrap failed."), {
+      code: signal.aborted ? "gateway_snapshot_timed_out" : "gateway_unreachable",
+    });
+  }
+  try {
+    const parsed = await response.json() as unknown;
+    const validated = asRuntimeBootstrapEnvelope(parsed);
+    if (!response.ok || !validated) {
+      throw new Error("invalid Gateway bootstrap envelope");
     }
-  });
-  return { data, failures };
+    return validated;
+  } catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error("Gateway bootstrap response was invalid."), {
+      code: "gateway_bootstrap_response_invalid",
+    });
+  }
 }
 
 async function loadSnapshot(
@@ -546,15 +622,23 @@ async function loadSnapshot(
       { timeoutMs: CLIENT_SNAPSHOT_TIMEOUT_MS },
     );
   } catch (error) {
-    const timedOut = (error as { code?: string }).code === "task_timed_out";
+    const code = (error as { code?: string }).code;
+    const timedOut = code === "task_timed_out" || code === "gateway_snapshot_timed_out";
+    const unreachable = code === "gateway_unreachable";
     const data: RuntimeSnapshot = {};
     const failures = RUNTIME_ROUTES.map((route) => portalFailureEnvelope(
       route,
-      timedOut ? "gateway_snapshot_timed_out" : "gateway_snapshot_failed",
+      timedOut
+        ? "gateway_snapshot_timed_out"
+        : unreachable
+          ? "gateway_unreachable"
+          : "gateway_snapshot_failed",
       timedOut
         ? "The bounded startup snapshot expired and failed closed. Retry to request a fresh Runtime snapshot."
-        : "The browser snapshot coordinator failed closed before it could establish current Runtime state.",
-      timedOut ? "Timed Out" : "Unknown",
+        : unreachable
+          ? "The Experience Gateway could not be reached for the bounded Runtime bootstrap."
+          : "The browser snapshot coordinator failed closed before it could establish current Runtime state.",
+      timedOut ? "Timed Out" : unreachable ? "Unavailable" : "Unknown",
     ));
     RUNTIME_ROUTES.forEach((route, index) => {
       data[route] = failures[index];

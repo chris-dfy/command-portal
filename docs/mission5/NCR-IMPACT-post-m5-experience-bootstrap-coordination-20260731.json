@@ -1,0 +1,52 @@
+{
+  "impact_id": "NCR-IMPACT-post-m5-experience-bootstrap-coordination-20260731",
+  "artifact_id": "nexus.experience.post-m5-single-request-runtime-bootstrap",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0002@1",
+      "NCR-CON-0006@1",
+      "NCR-CON-0019@1",
+      "NCR-CON-0020@1",
+      "NCR-CON-0026@1",
+      "NCR-CON-0027@1",
+      "NCR-CON-0028@1",
+      "NCR-CON-0029@1",
+      "NCR-CON-0030@1",
+      "NCR-CON-0033@1",
+      "NCR-ARC-0008@1",
+      "NCR-ARC-0012@1",
+      "NCR-ARC-0017@1",
+      "NCR-ARC-0019@1",
+      "NCR-ENG-0006@1",
+      "NCR-ENG-0008@1",
+      "NCR-ENG-0010@1",
+      "NCR-ENG-0011@1",
+      "NCR-ENG-0018@1",
+      "NCR-OPS-0028@1",
+      "NCR-OPS-0029@1",
+      "NCR-OPS-0030@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:85cc31f78ba6ac34fc58f02b36f6bc469ebf3c21a6343e46fc84bf66a29d3bd2"
+  },
+  "disposition": "no_constitutional_change",
+  "rationale": "This additive Experience correction implements the existing Runtime-truth and health-separation contracts without changing constitutional meaning. The browser now requests one fixed, read-only bootstrap contract instead of fanning out independent reads across autoscaled Gateway processes. The receiving Gateway validates and scope-admits one current Runtime-owned Capability Registry projection, reuses that exact admitted projection for every fixed child alias, and performs the existing reads with concurrency bounded to three. Per-route capability admission, response validation, size limits, tenant and workspace binding, read-only behavior, independent failure envelopes, and fail-closed posture remain intact. A structurally valid process-ready /ready 503 remains one Degraded result without retry; malformed or unauthorized Registry responses prevent all child dispatch. No generic proxy, mutation route, Authority, Runtime change, capability promotion, production claim, deployment, or historical Mission record mutation is introduced.",
+  "evidence_references": [
+    "command:./nexusctl constitution-registry validate (valid=true; NCR-1.0.0; sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa)",
+    "command:constitutional context resolution for 22 direct principles (sha256:85cc31f78ba6ac34fc58f02b36f6bc469ebf3c21a6343e46fc84bf66a29d3bd2)",
+    "command:node --test tests/experience-gateway.test.mjs tests/portal-client.test.mjs tests/request-coordination.test.mjs (91 passed; 0 failed)",
+    "command:npm run build (TypeScript noEmit passed; Vite production build passed; 1631 modules transformed)",
+    "command:npm run verify:build (asset paths verified; secretValuesExposed=false)",
+    "path:server/portal-server.mjs",
+    "path:src/lib/portal-client.ts",
+    "path:tests/experience-gateway.test.mjs",
+    "path:tests/request-coordination.test.mjs",
+    "rollback:revert only the scoped Experience bootstrap commit and restore the prior per-route browser snapshot coordinator; no Runtime, root, secret, data, Mission, or deployment rollback is required"
+  ],
+  "conflicts": [],
+  "recorded_by": "NEXUS Engineering",
+  "recorded_at": "2026-07-31T20:50:52Z"
+}

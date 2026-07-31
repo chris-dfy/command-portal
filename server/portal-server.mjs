@@ -104,6 +104,28 @@ export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/replay": "/runtime/replay"
 });
 
+export const RUNTIME_BOOTSTRAP_ROUTE = "/api/runtime/bootstrap";
+export const RUNTIME_BOOTSTRAP_ROUTES = Object.freeze({
+  status: "/api/runtime/status",
+  health: "/api/runtime/health",
+  ready: "/api/runtime/ready",
+  version: "/api/runtime/version",
+  providers: "/api/runtime/providers",
+  capabilities: "/api/runtime/capabilities",
+  proofs: "/api/runtime/proofs",
+  receipts: "/api/runtime/receipts",
+  environment: "/api/runtime/environment",
+  diagnostics: "/api/runtime/diagnostics",
+  governance: "/api/runtime/governance",
+  connectors: "/api/runtime/connectors",
+  "capability-registry": "/api/runtime/capability-registry",
+  conclave: "/api/runtime/conclave",
+  eox: "/api/runtime/eox",
+});
+const RUNTIME_BOOTSTRAP_RECORD_TYPE = "nexus_experience_runtime_bootstrap";
+const RUNTIME_BOOTSTRAP_SCHEMA_VERSION = "1.0.0";
+const RUNTIME_BOOTSTRAP_CONCURRENCY = 3;
+
 const REPLAY_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,160}$/;
 const REPLAY_STAGES = new Set(["observation", "evidence", "representation", "conclave", "authority", "decision", "receipt"]);
 
@@ -3919,6 +3941,90 @@ export function deriveMission3Admission(
 
 const INVOCABLE_ACTION_CLASSIFICATIONS = new Set(["live_verified", "live_degraded"]);
 
+function unavailableRuntimeActionAdmission(alias, code, message) {
+  return {
+    allowed: false,
+    actionId: alias?.actionId ?? null,
+    code,
+    message,
+    status: 503,
+    state: "Unavailable",
+  };
+}
+
+function decideAdmittedRuntimeAction(alias, projection) {
+  if (!alias) {
+    return unavailableRuntimeActionAdmission(
+      null,
+      "canonical_action_alias_unresolved",
+      "The Gateway route does not resolve to one exact canonical Runtime action identity.",
+    );
+  }
+  if (alias.forwarding !== "canonical") {
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "canonical_action_unavailable",
+      alias.limitation || "The canonical Runtime action is unavailable.",
+    );
+  }
+  if (!projection) {
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "capability_registry_verification_required",
+      "A current Runtime-owned Capability Registry projection is required before this action can be invoked.",
+    );
+  }
+  const matches = projection.actions.filter((action) => action.actionId === alias.actionId);
+  if (matches.length !== 1) {
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "canonical_action_identity_invalid",
+      "The Gateway alias did not resolve to exactly one canonical Runtime action record.",
+    );
+  }
+  const action = matches[0];
+  const canonicalAdapterAction = alias.actionId.startsWith("canonical.route.");
+  const expectedInvocationPaths = alias.requiredSurfaces.map((surface) => (
+    surface === "api" || !canonicalAdapterAction
+      ? `${surface}:${alias.runtimeMethod} ${alias.runtimePathTemplate}`
+      : `${surface}:canonical-adapter:${alias.actionId}`
+  ));
+  if (
+    action.method !== alias.runtimeMethod
+    || action.pathTemplate !== alias.runtimePathTemplate
+    || !Array.isArray(action.invocationSurfaces)
+    || alias.requiredSurfaces.some((surface) => !action.invocationSurfaces.includes(surface))
+    || expectedInvocationPaths.some((path) => !action.invocationPaths.includes(path))
+  ) {
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "canonical_action_contract_mismatch",
+      "The canonical Runtime action no longer matches the fixed Gateway alias contract.",
+    );
+  }
+  if (
+    !INVOCABLE_ACTION_CLASSIFICATIONS.has(action.classification)
+    || action.invocable !== true
+    || action.operationalAvailability !== true
+    || action.authorityGranted !== false
+  ) {
+    const limitations = [
+      action.requiredNextAction,
+      ...(Array.isArray(action.limitations) ? action.limitations : []),
+    ].filter((item) => typeof item === "string" && item.trim());
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "canonical_action_unavailable",
+      [...new Set(limitations)].join(" ") || `Canonical action ${alias.actionId} is ${action.classification}.`,
+    );
+  }
+  return {
+    allowed: true,
+    actionId: action.actionId,
+    classification: action.classification,
+  };
+}
+
 function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
   let projection = null;
   let expiresAt = 0;
@@ -3934,8 +4040,7 @@ function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
     projection = null;
     expiresAt = 0;
   };
-  const observe = (value) => {
-    const candidate = validateCapabilityRegistryProjection(value, clock);
+  const adoptValidated = (candidate) => {
     const scope = candidate.scope;
     if (
       scope.tenantId !== config.operationalTenantId
@@ -3965,86 +4070,22 @@ function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
     refreshRetryAt = 0;
     return candidate;
   };
-  const unavailable = (alias, code, message) => ({
-    allowed: false,
-    actionId: alias?.actionId ?? null,
-    code,
-    message,
-    status: 503,
-    state: "Unavailable",
-  });
+  const observe = (value) => adoptValidated(
+    validateCapabilityRegistryProjection(value, clock),
+  );
   const decide = (alias) => {
-    if (!alias) {
-      return unavailable(
-        null,
-        "canonical_action_alias_unresolved",
-        "The Gateway route does not resolve to one exact canonical Runtime action identity.",
-      );
-    }
-    if (alias.forwarding !== "canonical") {
-      return unavailable(
-        alias,
-        "canonical_action_unavailable",
-        alias.limitation || "The canonical Runtime action is unavailable.",
-      );
+    if (!alias || alias.forwarding !== "canonical") {
+      return decideAdmittedRuntimeAction(alias, projection);
     }
     if (!projection || expiresAt <= clock()) {
       clear();
-      return unavailable(
+      return unavailableRuntimeActionAdmission(
         alias,
         "capability_registry_verification_required",
         "A current Runtime-owned Capability Registry projection is required before this action can be invoked.",
       );
     }
-    const matches = projection.actions.filter((action) => action.actionId === alias.actionId);
-    if (matches.length !== 1) {
-      return unavailable(
-        alias,
-        "canonical_action_identity_invalid",
-        "The Gateway alias did not resolve to exactly one canonical Runtime action record.",
-      );
-    }
-    const action = matches[0];
-    const canonicalAdapterAction = alias.actionId.startsWith("canonical.route.");
-    const expectedInvocationPaths = alias.requiredSurfaces.map((surface) => (
-      surface === "api" || !canonicalAdapterAction
-        ? `${surface}:${alias.runtimeMethod} ${alias.runtimePathTemplate}`
-        : `${surface}:canonical-adapter:${alias.actionId}`
-    ));
-    if (
-      action.method !== alias.runtimeMethod
-      || action.pathTemplate !== alias.runtimePathTemplate
-      || !Array.isArray(action.invocationSurfaces)
-      || alias.requiredSurfaces.some((surface) => !action.invocationSurfaces.includes(surface))
-      || expectedInvocationPaths.some((path) => !action.invocationPaths.includes(path))
-    ) {
-      return unavailable(
-        alias,
-        "canonical_action_contract_mismatch",
-        "The canonical Runtime action no longer matches the fixed Gateway alias contract.",
-      );
-    }
-    if (
-      !INVOCABLE_ACTION_CLASSIFICATIONS.has(action.classification)
-      || action.invocable !== true
-      || action.operationalAvailability !== true
-      || action.authorityGranted !== false
-    ) {
-      const limitations = [
-        action.requiredNextAction,
-        ...(Array.isArray(action.limitations) ? action.limitations : []),
-      ].filter((item) => typeof item === "string" && item.trim());
-      return unavailable(
-        alias,
-        "canonical_action_unavailable",
-        [...new Set(limitations)].join(" ") || `Canonical action ${alias.actionId} is ${action.classification}.`,
-      );
-    }
-    return {
-      allowed: true,
-      actionId: action.actionId,
-      classification: action.classification,
-    };
+    return decideAdmittedRuntimeAction(alias, projection);
   };
   const refresh = async (loadProjection) => {
     if (refreshPromise) return refreshPromise;
@@ -4071,6 +4112,7 @@ function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
     }
   };
   return Object.freeze({
+    adoptValidated,
     clear,
     decide,
     observe,
@@ -4604,6 +4646,204 @@ async function readThroughGateway(
   }
 }
 
+async function settledMapWithConcurrency(items, concurrency, task) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      try {
+        results[index] = {
+          status: "fulfilled",
+          value: await task(items[index], index),
+        };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+function runtimeBootstrapEnvelope(data, registryAdmitted) {
+  const routeKeys = Object.keys(RUNTIME_BOOTSTRAP_ROUTES);
+  const failedRoutes = routeKeys.filter((route) => data[route]?.ok !== true);
+  return {
+    recordType: RUNTIME_BOOTSTRAP_RECORD_TYPE,
+    schemaVersion: RUNTIME_BOOTSTRAP_SCHEMA_VERSION,
+    routeCount: routeKeys.length,
+    registryAdmitted,
+    data,
+    failedRoutes,
+    readOnly: true,
+    secretValuesExposed: false,
+    truth: TRUTH,
+  };
+}
+
+function registryBootstrapFailure(config, tracker, route, result) {
+  const envelope = result?.body;
+  return new GatewayFailure(
+    envelope?.error?.code ?? "capability_registry_verification_required",
+    envelope?.error?.message
+      ?? "A current Runtime-owned Capability Registry projection is required before this route can be read.",
+    envelope?.gateway?.connectionState ?? "Unknown",
+    Number(result?.status) || 502,
+  );
+}
+
+async function handleRuntimeBootstrap(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  cache,
+  tracker,
+  actionAdmission,
+  clock = () => Date.now(),
+) {
+  if (!requestOriginAllowed(request, config)) {
+    return sendJson(response, 403, {
+      ...runtimeBootstrapEnvelope({}, false),
+      error: { code: "origin_denied", message: "Request origin is not allowed." },
+    });
+  }
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, { Allow: "GET, OPTIONS", "Cache-Control": "no-store" });
+    return response.end();
+  }
+  if (request.method !== "GET") {
+    return sendJson(response, 405, {
+      ...runtimeBootstrapEnvelope({}, false),
+      error: { code: "method_not_allowed", message: "The Runtime bootstrap is read-only." },
+    }, { Allow: "GET, OPTIONS" });
+  }
+  const url = new URL(request.url, "http://portal.invalid");
+  if (url.pathname !== RUNTIME_BOOTSTRAP_ROUTE) {
+    return sendJson(response, 404, {
+      ...runtimeBootstrapEnvelope({}, false),
+      error: { code: "route_not_allowlisted", message: "This Runtime bootstrap route is not allowlisted." },
+    });
+  }
+  if (url.search) {
+    return sendJson(response, 400, {
+      ...runtimeBootstrapEnvelope({}, false),
+      error: { code: "query_not_allowed", message: "The Runtime bootstrap does not accept query parameters." },
+    });
+  }
+
+  const registryRoute = "capability-registry";
+  const registryGatewayPath = RUNTIME_BOOTSTRAP_ROUTES[registryRoute];
+  const registryRuntimePath = RUNTIME_ROUTES[registryGatewayPath];
+  let registryResult = await readThroughGateway(
+    registryGatewayPath,
+    registryRuntimePath,
+    request,
+    config,
+    runtimeFetch,
+    cache,
+    tracker,
+    clock,
+  );
+  let admittedProjection = null;
+  if (registryResult.status === 200 && registryResult.body.ok && registryResult.body.data) {
+    try {
+      admittedProjection = actionAdmission.adoptValidated(registryResult.body.data);
+    } catch (error) {
+      actionAdmission.clear();
+      const failure = error instanceof GatewayFailure
+        ? error
+        : new GatewayFailure(
+          "capability_registry_response_invalid",
+          "The Runtime-owned Capability Registry projection failed Gateway admission validation.",
+          "Unknown",
+          502,
+        );
+      registryResult = {
+        status: failure.status,
+        body: failureEnvelope(config, tracker, registryGatewayPath, failure),
+      };
+    }
+  }
+
+  const data = { [registryRoute]: registryResult.body };
+  const childRoutes = Object.entries(RUNTIME_BOOTSTRAP_ROUTES)
+    .filter(([route]) => route !== registryRoute);
+  if (!admittedProjection) {
+    actionAdmission.clear();
+    const failure = registryBootstrapFailure(
+      config,
+      tracker,
+      registryGatewayPath,
+      registryResult,
+    );
+    for (const [route, gatewayPath] of childRoutes) {
+      data[route] = failureEnvelope(config, tracker, gatewayPath, failure);
+    }
+    structuredLog("experience_gateway_bootstrap", {
+      registryAdmitted: false,
+      routeCount: Object.keys(RUNTIME_BOOTSTRAP_ROUTES).length,
+      failedRouteCount: Object.keys(RUNTIME_BOOTSTRAP_ROUTES).length,
+    });
+    return sendJson(response, 200, runtimeBootstrapEnvelope(data, false));
+  }
+
+  const settled = await settledMapWithConcurrency(
+    childRoutes,
+    RUNTIME_BOOTSTRAP_CONCURRENCY,
+    async ([route, gatewayPath]) => {
+      const runtimePath = RUNTIME_ROUTES[gatewayPath];
+      const alias = resolveGatewayRuntimeActionAlias("GET", gatewayPath);
+      if (!runtimePath || !alias || alias.runtimePath !== runtimePath) {
+        const decision = decideAdmittedRuntimeAction(null, admittedProjection);
+        return [route, actionAdmissionFailure(config, tracker, gatewayPath, decision)];
+      }
+      const decision = decideAdmittedRuntimeAction(alias, admittedProjection);
+      if (!decision.allowed) {
+        return [route, actionAdmissionFailure(config, tracker, gatewayPath, decision)];
+      }
+      const result = await readThroughGateway(
+        gatewayPath,
+        runtimePath,
+        request,
+        config,
+        runtimeFetch,
+        cache,
+        tracker,
+        clock,
+      );
+      return [route, result.body];
+    },
+  );
+  settled.forEach((result, index) => {
+    const [route, gatewayPath] = childRoutes[index];
+    if (result.status === "fulfilled") {
+      data[result.value[0]] = result.value[1];
+      return;
+    }
+    const failure = result.reason instanceof GatewayFailure
+      ? result.reason
+      : new GatewayFailure(
+        "gateway_error",
+        "The Experience Gateway could not complete this bounded bootstrap read.",
+        "Unknown",
+        500,
+      );
+    data[route] = failureEnvelope(config, tracker, gatewayPath, failure);
+  });
+  const body = runtimeBootstrapEnvelope(data, true);
+  structuredLog("experience_gateway_bootstrap", {
+    registryAdmitted: true,
+    routeCount: body.routeCount,
+    failedRouteCount: body.failedRoutes.length,
+    upstreamConcurrency: RUNTIME_BOOTSTRAP_CONCURRENCY,
+  });
+  return sendJson(response, 200, body);
+}
+
 async function handleApi(
   request,
   response,
@@ -4678,7 +4918,7 @@ async function handleApi(
   if (runtimePath === "/runtime/capability-registry") {
     if (result.status === 200 && result.body.ok && result.body.data) {
       try {
-        actionAdmission.observe(result.body.data);
+        actionAdmission.adoptValidated(result.body.data);
       } catch (error) {
         actionAdmission.clear();
         const failure = error instanceof GatewayFailure
@@ -4894,6 +5134,24 @@ export function createPortalServer(options = {}) {
         actionAdmission,
       )
         .catch(() => sendJson(response, 500, operationalFailure(config, request.url, "operational_gateway_error", "The hosted operation failed safely.", "Unknown")));
+    } else if (request.url?.startsWith(RUNTIME_BOOTSTRAP_ROUTE)) {
+      handleRuntimeBootstrap(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        cache,
+        tracker,
+        actionAdmission,
+        options.clock,
+      )
+        .catch(() => sendJson(response, 500, {
+          ...runtimeBootstrapEnvelope({}, false),
+          error: {
+            code: "gateway_bootstrap_error",
+            message: "The Experience Gateway could not complete the bounded Runtime bootstrap.",
+          },
+        }));
     } else if (request.url?.startsWith("/api/runtime/realtime/call")) {
       handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, actionAdmission, options.clock)
         .catch(() => sendJson(response, 500, { ok: false, error: { code: "realtime_gateway_error", message: "Realtime session creation failed safely." }, truth: TRUTH }));

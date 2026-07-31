@@ -17,12 +17,19 @@ import {
   resolveCanonicalCapabilityActionAlias,
   resolveGatewayRuntimeActionAlias,
   ROOT_RUNTIME_ACTION_TEMPLATES,
+  RUNTIME_BOOTSTRAP_ROUTE,
+  RUNTIME_BOOTSTRAP_ROUTES,
   RUNTIME_MUTATION_ROUTES,
   RUNTIME_ROUTES,
 } from "../server/portal-server.mjs";
+import { portalClient } from "../src/lib/portal-client.ts";
 
 const servers = [];
-afterEach(async () => Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve)))));
+const originalFetch = globalThis.fetch;
+afterEach(async () => {
+  globalThis.fetch = originalFetch;
+  await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
+});
 
 const GITHUB_READ_ONLY_AUTHORIZATION = (
   "Fine-grained GitHub token scoped only to chris-dfy/nexus-assistant: "
@@ -1178,6 +1185,141 @@ test("a failed concurrent admission refresh has a bounded cooldown instead of cr
   assert.equal(immediateRetry.status, 502);
   assert.equal((await immediateRetry.json()).error.code, "capability_registry_response_invalid");
   assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+});
+
+test("one browser bootstrap stays on one Gateway instance and reads the Runtime Registry once", async () => {
+  let activeRuntimeReads = 0;
+  let maximumRuntimeReads = 0;
+  const runtimePaths = [];
+  const runtimeFetch = async (url) => {
+    const runtimePath = new URL(url).pathname;
+    runtimePaths.push(runtimePath);
+    activeRuntimeReads += 1;
+    maximumRuntimeReads = Math.max(maximumRuntimeReads, activeRuntimeReads);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (runtimePath === "/runtime/capability-registry") {
+        return runtimeResponse(actionAdmissionProjection());
+      }
+      if (runtimePath === "/ready") {
+        return runtimeResponse({
+          processReady: true,
+          platformContractReady: false,
+        }, {
+          status: 503,
+          body: { status: "not_ready" },
+        });
+      }
+      return runtimeResponse({ route: runtimePath });
+    } finally {
+      activeRuntimeReads -= 1;
+    }
+  };
+  const firstBase = await start(runtimeFetch, {
+    testUseProvidedCapabilityRegistry: true,
+    timeoutMs: 250,
+  });
+  const firstServer = servers.at(-1);
+  const secondBase = await start(runtimeFetch, {
+    testUseProvidedCapabilityRegistry: true,
+    timeoutMs: 250,
+  });
+  const secondServer = servers.at(-1);
+  const gatewayBases = [firstBase, secondBase];
+  let browserRequests = 0;
+  globalThis.fetch = (input, init) => {
+    const path = String(input);
+    const base = gatewayBases[browserRequests % gatewayBases.length];
+    browserRequests += 1;
+    return originalFetch(`${base}${path}`, init);
+  };
+
+  const startedAt = Date.now();
+  const result = await portalClient.snapshot(true);
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(browserRequests, 1);
+  assert.equal(
+    runtimePaths.filter((path) => path === "/runtime/capability-registry").length,
+    1,
+  );
+  assert.equal(runtimePaths.length, Object.keys(RUNTIME_BOOTSTRAP_ROUTES).length);
+  assert.ok(maximumRuntimeReads <= 3, `observed ${maximumRuntimeReads} concurrent Runtime reads`);
+  assert.ok(elapsedMs < 1_000, `bootstrap took ${elapsedMs}ms`);
+  assert.equal(result.failures.length, 0);
+  assert.equal(result.data.ready?.gateway.connectionState, "Degraded");
+  assert.equal(result.data.ready?.gateway.attempts, 1);
+  assert.equal(result.data.ready?.data.processReady, true);
+  assert.ok(firstServer.experienceGateway.actionAdmission.snapshot());
+  assert.equal(secondServer.experienceGateway.actionAdmission.snapshot(), null);
+});
+
+test("malformed or unauthorized bootstrap Registry responses fail closed before child dispatch", async () => {
+  for (const scenario of [
+    {
+      name: "malformed",
+      expectedCode: "capability_registry_response_invalid",
+      registryResponse: () => runtimeResponse({ malformed: true }),
+    },
+    {
+      name: "unauthorized",
+      expectedCode: "runtime_unauthorized",
+      registryResponse: () => runtimeResponse({}, { status: 401 }),
+    },
+  ]) {
+    let registryCalls = 0;
+    let childCalls = 0;
+    const base = await start(async (url) => {
+      if (url.endsWith("/runtime/capability-registry")) {
+        registryCalls += 1;
+        return scenario.registryResponse();
+      }
+      childCalls += 1;
+      return runtimeResponse({ shouldNotDispatch: true });
+    }, {
+      testUseProvidedCapabilityRegistry: true,
+    });
+    const response = await originalFetch(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`);
+    const body = await response.json();
+
+    assert.equal(response.status, 200, scenario.name);
+    assert.equal(body.registryAdmitted, false, scenario.name);
+    assert.equal(body.routeCount, Object.keys(RUNTIME_BOOTSTRAP_ROUTES).length, scenario.name);
+    assert.equal(body.failedRoutes.length, body.routeCount, scenario.name);
+    assert.equal(body.data["capability-registry"].error.code, scenario.expectedCode, scenario.name);
+    assert.equal(
+      Object.values(body.data).every((envelope) => envelope.ok === false),
+      true,
+      scenario.name,
+    );
+    assert.equal(registryCalls, 1, scenario.name);
+    assert.equal(childCalls, 0, scenario.name);
+  }
+});
+
+test("Runtime bootstrap remains an exact same-origin read-only route", async () => {
+  let runtimeCalls = 0;
+  const base = await start(async () => {
+    runtimeCalls += 1;
+    return runtimeResponse(actionAdmissionProjection());
+  }, {
+    testUseProvidedCapabilityRegistry: true,
+    allowedOrigins: ["https://portal.example"],
+  });
+  const denied = await originalFetch(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`, {
+    headers: { Origin: "https://hostile.example" },
+  });
+  const queried = await originalFetch(`${base}${RUNTIME_BOOTSTRAP_ROUTE}?route=health`);
+  const mutation = await originalFetch(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`, {
+    method: "POST",
+  });
+  const unknown = await originalFetch(`${base}${RUNTIME_BOOTSTRAP_ROUTE}-other`);
+
+  assert.equal(denied.status, 403);
+  assert.equal(queried.status, 400);
+  assert.equal(mutation.status, 405);
+  assert.equal(unknown.status, 404);
   assert.equal(runtimeCalls, 0);
 });
 
