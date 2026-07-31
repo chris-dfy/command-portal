@@ -7,6 +7,8 @@ import { displayLabel } from "../lib/presentation";
 import { localNexusClient, type VoiceRouteResult } from "../lib/local-client";
 import type { CanonicalActionAvailability } from "../lib/portal-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
+import { browserSpeechAvailability, recognizeBrowserSpeech, speakBrowserResponse } from "../lib/browser-speech";
+import { runBoundedTask } from "../lib/request-coordination.mjs";
 
 type VoiceStatus = {
   state?: string;
@@ -21,6 +23,7 @@ type VoiceStatus = {
 };
 
 type TranscriptEntry = { speaker: "You" | "NEXUS"; text: string };
+const GOVERNED_VOICE_RESPONSE_TIMEOUT_MS = 12_000;
 
 export function VoiceWorkspace({
   realtimeAction,
@@ -39,12 +42,15 @@ export function VoiceWorkspace({
   const [history, setHistory] = useState<TranscriptEntry[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [browserListening, setBrowserListening] = useState(false);
   const [routeResult, setRouteResult] = useState<VoiceRouteResult | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const liveClient = useRef<RealtimeVoiceClient | null>(null);
+  const latestUserTranscript = useRef("");
 
   const connected = !["idle", "error"].includes(voiceState);
   const supported = RealtimeVoiceClient.supported();
+  const browserSpeech = browserSpeechAvailability();
 
   useEffect(() => {
     if (realtimeAction.available) void refreshStatus();
@@ -77,11 +83,22 @@ export function VoiceWorkspace({
       onState: setVoiceState,
       onAmplitude: setAmplitude,
       onUserTranscript: (text) => {
+        latestUserTranscript.current = text;
         setTranscript(text);
         setHistory((items) => [{ speaker: "You", text } as TranscriptEntry, ...items].slice(0, 10));
       },
       onAssistantTranscript: (text) => setAssistantTranscript(text),
-      onError: setMessage,
+      onError: (errorMessage, code) => {
+        setMessage(errorMessage);
+        const captured = latestUserTranscript.current.trim();
+        if (code === "response_timeout" && captured && textAction.available) {
+          void routeGovernedTranscript(
+            captured,
+            "browser_speech",
+            "Live voice timed out, so the captured utterance was sent through the governed Runtime Voice Operator.",
+          );
+        }
+      },
     });
     liveClient.current = client;
     try {
@@ -116,8 +133,12 @@ export function VoiceWorkspace({
     setMessage(muted ? "NEXUS audio is muted. Responses remain visible as text." : "NEXUS audio playback is restored.");
   }
 
-  async function sendText() {
-    if (!transcript.trim()) return;
+  async function routeGovernedTranscript(
+    requestedTranscript: string,
+    source: "browser_speech" | "text_fallback",
+    fallbackContext = "",
+  ) {
+    if (!requestedTranscript.trim()) return;
     if (!textAction.available) {
       setMessage(textAction.reason);
       return;
@@ -125,21 +146,31 @@ export function VoiceWorkspace({
     setBusy(true);
     setMessage(null);
     try {
-      const response = await localNexusClient.routeTranscript(transcript.trim(), "text_fallback");
+      const response = await runBoundedTask(
+        (signal) => localNexusClient.routeTranscript(requestedTranscript.trim(), source, signal),
+        { timeoutMs: GOVERNED_VOICE_RESPONSE_TIMEOUT_MS },
+      );
       const responseText = response.spokenSummary?.trim()
         || response.event?.failureReason?.trim()
         || "NEXUS recorded the request without a spoken summary.";
       const proofId = response.proof?.proofId ?? response.event?.proofId;
       const receiptId = response.receipt?.receiptId ?? response.event?.receiptId;
+      const spoken = source === "browser_speech" && !nexusMuted && speakBrowserResponse(responseText);
       setRouteResult(response);
       setAssistantTranscript(responseText);
       setHistory((items) => [
         { speaker: "NEXUS", text: responseText } as TranscriptEntry,
-        { speaker: "You", text: transcript.trim() } as TranscriptEntry,
+        { speaker: "You", text: requestedTranscript.trim() } as TranscriptEntry,
         ...items,
       ].slice(0, 10));
       setMessage([
+        fallbackContext,
         "Text request was processed by the governed NEXUS Runtime Voice Operator.",
+        source === "browser_speech"
+          ? spoken
+            ? "The browser is playing the actual Runtime response locally."
+            : "Browser speech output is unavailable; the actual Runtime response remains visible as text."
+          : "",
         proofId ? `Proof ${proofId}.` : "",
         receiptId ? `Receipt ${receiptId}.` : "",
       ].filter(Boolean).join(" "));
@@ -147,6 +178,29 @@ export function VoiceWorkspace({
       setMessage(messageFrom(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function sendText() {
+    await routeGovernedTranscript(transcript, "text_fallback");
+  }
+
+  async function useBrowserMicrophone() {
+    if (!textAction.available) {
+      setMessage(textAction.reason);
+      return;
+    }
+    setBrowserListening(true);
+    setMessage("Listening through the browser microphone for up to 8 seconds…");
+    try {
+      const captured = await recognizeBrowserSpeech();
+      latestUserTranscript.current = captured;
+      setTranscript(captured);
+      await routeGovernedTranscript(captured, "browser_speech");
+    } catch (error) {
+      setMessage(messageFrom(error));
+    } finally {
+      setBrowserListening(false);
     }
   }
 
@@ -171,8 +225,10 @@ export function VoiceWorkspace({
       </div>
       <div className="voice-text-fallback">
         <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} disabled={!textAction.available} placeholder={textAction.available ? "Or type a request for the governed Runtime Voice Operator" : "Runtime Voice Operator is unavailable"} />
+        {browserSpeech.input && <button onClick={() => void useBrowserMicrophone()} disabled={!textAction.available || busy || browserListening} title="Uses this browser's speech recognition, then submits the transcript through the governed Runtime Voice Operator"><Mic size={17} /> {browserListening ? "Listening…" : "Use browser microphone"}</button>}
         <button onClick={() => void sendText()} disabled={!textAction.available || busy || !transcript.trim()}><Send size={17} /> Send text</button>
       </div>
+      <p className="boundary-note">{browserSpeech.input ? "Browser microphone fallback is available and bounded to 8 seconds." : "Browser speech recognition is unavailable; typed governed fallback remains available."} {browserSpeech.output ? "Browser speech playback can read the actual Runtime response aloud." : "Browser speech playback is unavailable; responses remain visible as text."}</p>
       {message && <p className="workspace-message" role="status">{message}</p>}
       <p className="boundary-note">Realtime conversation may use model-native knowledge. Organization-specific facts, live operational state, completed actions, and authoritative evidence still require registered Runtime context, connectors, proofs, and receipts.</p>
     </DataPanel>

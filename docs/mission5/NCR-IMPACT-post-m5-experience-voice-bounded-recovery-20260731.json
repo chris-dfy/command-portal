@@ -1,0 +1,42 @@
+{
+  "impact_id": "NCR-IMPACT-post-m5-experience-voice-bounded-recovery-20260731",
+  "artifact_id": "nexus.experience.post-m5-voice-bounded-recovery",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0002@1",
+      "NCR-CON-0006@1",
+      "NCR-CON-0019@1",
+      "NCR-CON-0020@1",
+      "NCR-CON-0026@1",
+      "NCR-CON-0027@1",
+      "NCR-CON-0030@1",
+      "NCR-CON-0033@1",
+      "NCR-ARC-0008@1",
+      "NCR-ARC-0012@1",
+      "NCR-ENG-0006@1",
+      "NCR-ENG-0008@1",
+      "NCR-ENG-0010@1",
+      "NCR-ENG-0011@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:85cc31f78ba6ac34fc58f02b36f6bc469ebf3c21a6343e46fc84bf66a29d3bd2"
+  },
+  "disposition": "no_constitutional_change",
+  "rationale": "This additive hosted Experience repair closes an unbounded Realtime voice presentation state without changing Runtime capability, policy, Authority, or execution semantics. A live provider response now has a ten-second terminal boundary. On timeout the WebRTC transport is closed before the already captured utterance may be submitted through the existing exact, session-scoped canonical Voice Operator action. That governed request has its own twelve-second browser boundary and retains the Gateway and Runtime fail-closed checks. Where supported, browser speech recognition provides an explicit eight-second input fallback and browser speech synthesis reads only the actual Runtime-returned response; neither browser API creates Evidence, proof, receipt, Authority, execution, or a fabricated response. Unsupported or denied browser audio remains explicit and typed governed input stays usable.",
+  "evidence_references": [
+    "command:node --test tests/executive-ui.test.mjs tests/nexus-avatar.test.mjs tests/hosted-capability-gate.test.mjs (41 passed; 0 failed)",
+    "command:npm run build (TypeScript noEmit passed; Vite production build passed; 1632 modules transformed)",
+    "path:src/lib/realtime-voice-client.ts",
+    "path:src/lib/browser-speech.ts",
+    "path:src/components/VoiceWorkspace.tsx",
+    "path:src/lib/local-client.ts",
+    "path:tests/executive-ui.test.mjs",
+    "rollback:revert only the scoped Experience voice bounded-recovery commit; no Runtime, Authority, secret, data, Mission, provider, or deployment rollback is required"
+  ],
+  "conflicts": [],
+  "recorded_by": "NEXUS Engineering",
+  "recorded_at": "2026-07-31T21:18:02Z"
+}

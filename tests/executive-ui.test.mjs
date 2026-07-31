@@ -133,13 +133,14 @@ test("provider sign-out stays within the CSP-closed same-origin request boundary
 });
 
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
-  const [app, registry, intake, projects, voice, realtime, client, hif, documentResult] = await Promise.all([
+  const [app, registry, intake, projects, voice, realtime, browserSpeech, client, hif, documentResult] = await Promise.all([
     read("../src/App.tsx"),
     surfaceRegistry(),
     read("../src/components/DocumentIntake.tsx"),
     read("../src/components/ProjectStudio.tsx"),
     read("../src/components/VoiceWorkspace.tsx"),
     read("../src/lib/realtime-voice-client.ts"),
+    read("../src/lib/browser-speech.ts"),
     read("../src/lib/local-client.ts"),
     read("../src/lib/hif-client.ts"),
     read("../src/lib/document-intake-result.ts"),
@@ -175,9 +176,15 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   for (const control of ["Mute microphone", "Mute NEXUS", "Unmute microphone", "Unmute NEXUS"]) assert.match(voice, new RegExp(control));
   assert.match(voice, /Runtime owns the provider session and truth boundaries/i);
   assert.match(voice, /model-native knowledge/i);
-  assert.equal(/SpeechRecognition|speechSynthesis/.test(voice + realtime), false);
+  assert.match(browserSpeech, /SpeechRecognition/);
+  assert.match(browserSpeech, /speechSynthesis\.speak\(utterance\)/);
+  assert.match(browserSpeech, /Browser microphone did not capture speech within/);
+  assert.match(voice, /speakBrowserResponse\(responseText\)/);
+  assert.match(voice, /actual Runtime response locally/);
+  assert.match(realtime, /REALTIME_RESPONSE_TIMEOUT_MS = 10_000/);
+  assert.match(realtime, /"response_timeout"/);
   for (const event of ["SpeechStarted", "SpeechInterrupted", "ConversationStarted", "AvatarMoveRequested", "NavigationRequested", "FocusRequested", "PresentationStarted", "StreamingChunk"]) assert.match(hif, new RegExp(event));
-  assert.match(voice, /localNexusClient\.routeTranscript\(transcript\.trim\(\), "text_fallback"\)/);
+  assert.match(voice, /localNexusClient\.routeTranscript\(requestedTranscript\.trim\(\), source, signal\)/);
   assert.match(voice, /governed NEXUS Runtime Voice Operator/);
   assert.match(hif, /clientId: "nexus-web"/);
   for (const source of [app, intake, projects, voice, realtime, client, hif]) {
@@ -708,11 +715,12 @@ test("Runtime information renders one canonical capability projection and Execut
 });
 
 test("copilot, HIF, and voice controls fail closed on canonical action availability", async () => {
-  const [app, client, copilot, voice] = await Promise.all([
+  const [app, client, copilot, voice, realtime] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/lib/portal-client.ts"),
     read("../src/components/NexusCopilot.tsx"),
     read("../src/components/VoiceWorkspace.tsx"),
+    read("../src/lib/realtime-voice-client.ts"),
   ]);
   for (const actionId of [
     "context.runtime.route.post.runtime.interactions",
@@ -744,10 +752,15 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
     "VoiceWorkspace must reject unavailable Realtime before connection",
   );
   assert.ok(
-    voice.indexOf("if (!textAction.available)") < voice.indexOf("await localNexusClient.routeTranscript"),
+    voice.indexOf("if (!textAction.available)") < voice.indexOf("localNexusClient.routeTranscript"),
     "VoiceWorkspace must reject unavailable typed text routing before forwarding",
   );
   assert.match(voice, /disabled=\{!textAction\.available/);
+  assert.match(voice, /code === "response_timeout" && captured && textAction\.available/);
+  assert.match(voice, /routeGovernedTranscript\([\s\S]*?captured,[\s\S]*?"browser_speech"/);
+  assert.match(voice, /runBoundedTask\([\s\S]*?GOVERNED_VOICE_RESPONSE_TIMEOUT_MS/);
+  assert.match(realtime, /this\.startResponseBoundary\(\)/);
+  assert.match(realtime, /this\.disposeTransport\(\)[\s\S]*?this\.callbacks\.onState\("error"\)/);
 });
 
 test("canonical execution gates each mutation on registered session proof and its exact action", async () => {

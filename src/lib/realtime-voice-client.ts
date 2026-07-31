@@ -7,8 +7,10 @@ export type RealtimeVoiceCallbacks = {
   onAmplitude: (amplitude: number) => void;
   onUserTranscript: (text: string) => void;
   onAssistantTranscript: (text: string) => void;
-  onError: (message: string) => void;
+  onError: (message: string, code?: "response_timeout") => void;
 };
+
+const REALTIME_RESPONSE_TIMEOUT_MS = 10_000;
 
 type RealtimeEvent = {
   type?: string;
@@ -27,6 +29,7 @@ export class RealtimeVoiceClient {
   private speaking = false;
   private microphoneMuted = false;
   private outputMuted = false;
+  private responseTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly audio: HTMLAudioElement, private readonly callbacks: RealtimeVoiceCallbacks) {}
 
@@ -95,14 +98,22 @@ export class RealtimeVoiceClient {
   }
 
   stop() {
+    this.disposeTransport();
+    this.callbacks.onState("idle");
+  }
+
+  private disposeTransport() {
+    this.clearResponseBoundary();
     if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
     this.animationFrame = null;
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
-    this.channel?.close();
+    const channel = this.channel;
     this.channel = null;
-    this.peer?.close();
+    const peer = this.peer;
     this.peer = null;
+    channel?.close();
+    peer?.close();
     this.audio.pause();
     this.audio.srcObject = null;
     this.audio.muted = false;
@@ -110,7 +121,6 @@ export class RealtimeVoiceClient {
     this.audioContext = null;
     this.speaking = false;
     this.callbacks.onAmplitude(0);
-    this.callbacks.onState("idle");
   }
 
   setMicrophoneMuted(muted: boolean) {
@@ -142,6 +152,7 @@ export class RealtimeVoiceClient {
         break;
       case "input_audio_buffer.speech_stopped":
       case "response.created":
+        this.startResponseBoundary();
         this.callbacks.onState("thinking");
         break;
       case "conversation.item.input_audio_transcription.completed":
@@ -149,17 +160,22 @@ export class RealtimeVoiceClient {
         break;
       case "response.output_audio.delta":
       case "response.audio.delta":
+        this.clearResponseBoundary();
         this.speaking = true;
         this.callbacks.onState("speaking");
         break;
       case "response.output_audio_transcript.delta":
       case "response.audio_transcript.delta":
+      case "response.output_text.delta":
+      case "response.text.delta":
+        this.clearResponseBoundary();
         this.speaking = true;
         this.assistantTranscript += event.delta ?? "";
         this.callbacks.onAssistantTranscript(this.assistantTranscript);
         this.callbacks.onState("speaking");
         break;
       case "response.done":
+        this.clearResponseBoundary();
         this.speaking = false;
         this.assistantTranscript = "";
         this.callbacks.onState("listening");
@@ -174,9 +190,26 @@ export class RealtimeVoiceClient {
     if (this.channel?.readyState === "open") this.channel.send(JSON.stringify(event));
   }
 
-  private fail(message: string) {
+  private startResponseBoundary() {
+    this.clearResponseBoundary();
+    this.responseTimer = setTimeout(() => {
+      this.responseTimer = null;
+      this.fail(
+        "Live voice did not return a response within 10 seconds. The session was closed so the governed browser fallback can be used.",
+        "response_timeout",
+      );
+    }, REALTIME_RESPONSE_TIMEOUT_MS);
+  }
+
+  private clearResponseBoundary() {
+    if (this.responseTimer !== null) clearTimeout(this.responseTimer);
+    this.responseTimer = null;
+  }
+
+  private fail(message: string, code?: "response_timeout") {
+    this.disposeTransport();
     this.callbacks.onState("error");
-    this.callbacks.onError(message);
+    this.callbacks.onError(message, code);
   }
 
   private startAmplitudeMeter(stream: MediaStream) {
