@@ -112,6 +112,34 @@ test("portal client fails malformed and route-mismatched JSON closed as Unknown"
     portalClient.get("health"),
     rejectsWithEnvelope("gateway_response_invalid", "Unknown"),
   );
+
+  globalThis.fetch = async () => new Response(JSON.stringify(gatewayEnvelope({
+    route: "health",
+    ok: false,
+    connectionState: "Healthy",
+    error: {
+      code: "inconsistent_failure",
+      message: "A failure cannot claim a healthy connection.",
+    },
+  })), {
+    status: 502,
+    headers: { "Content-Type": "application/json" },
+  });
+  await assert.rejects(
+    portalClient.get("health"),
+    rejectsWithEnvelope("gateway_response_invalid", "Unknown"),
+  );
+
+  const incompatible = gatewayEnvelope({ route: "health" });
+  incompatible.runtime.schemaVersion = "2.0.0";
+  globalThis.fetch = async () => new Response(JSON.stringify(incompatible), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+  await assert.rejects(
+    portalClient.get("health"),
+    rejectsWithEnvelope("gateway_response_invalid", "Unknown"),
+  );
 });
 
 test("portal client preserves a valid unauthorized failure envelope", async () => {

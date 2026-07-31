@@ -6,6 +6,7 @@ import {
   derivePortalConnectionState,
   registryFirstSettledMap,
   runBoundedTask,
+  selectPortalPrimaryFailure,
 } from "../src/lib/request-coordination.mjs";
 
 const immediate = () => new Promise((resolve) => setImmediate(resolve));
@@ -228,6 +229,28 @@ test("portal connection state preserves degraded readiness and independent avail
     ready: envelope("Unavailable"),
     providers: envelope("Healthy"),
   }, [], false), "Timed Out");
+});
+
+test("primary failure follows the selected trust state instead of route order", () => {
+  const failures = [
+    {
+      gateway: { connectionState: "Unavailable" },
+      error: { message: "Optional provider read failed." },
+    },
+    {
+      gateway: { connectionState: "Unauthorized" },
+      error: { message: "Runtime rejected the server credential." },
+    },
+  ];
+  assert.equal(
+    selectPortalPrimaryFailure(failures, "Unauthorized")?.error?.message,
+    "Runtime rejected the server credential.",
+  );
+  assert.equal(
+    selectPortalPrimaryFailure(failures, "Degraded")?.error?.message,
+    "Optional provider read failed.",
+  );
+  assert.equal(selectPortalPrimaryFailure([], "Unavailable"), null);
 });
 
 test("portal startup wires registry-first bounded serialized snapshots", async () => {

@@ -496,6 +496,105 @@ export type OperationalSession = {
   managed?: boolean;
 };
 
+const operationalSessionRecord = (
+  value: unknown,
+): Record<string, unknown> | null => (
+  value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+const boundedOperationalSessionString = (
+  value: unknown,
+  maximum = 191,
+): value is string => (
+  typeof value === "string"
+  && value.length > 0
+  && value.length <= maximum
+);
+const exactOperationalSessionKeys = (
+  record: Record<string, unknown>,
+  keys: readonly string[],
+) => (
+  Object.keys(record).length === keys.length
+  && keys.every((key) => key in record)
+);
+const AUTHENTICATED_OPERATIONAL_SESSION_KEYS = [
+  "authenticated",
+  "userId",
+  "tenantId",
+  "workspaceId",
+  "role",
+  "scopes",
+  "expiresAt",
+  "csrfToken",
+  "connectionMode",
+  "principalType",
+  "accessBasis",
+  "managed",
+] as const;
+
+export function asOperationalSession(
+  value: unknown,
+  now = Date.now(),
+): OperationalSession | null {
+  const session = operationalSessionRecord(value);
+  if (!session || typeof session.authenticated !== "boolean") return null;
+  if (!session.authenticated) {
+    return exactOperationalSessionKeys(session, ["authenticated"])
+      ? { authenticated: false }
+      : null;
+  }
+  if (
+    !exactOperationalSessionKeys(
+      session,
+      AUTHENTICATED_OPERATIONAL_SESSION_KEYS,
+    )
+    || !boundedOperationalSessionString(session.userId)
+    || !boundedOperationalSessionString(session.tenantId)
+    || !boundedOperationalSessionString(session.workspaceId)
+    || !boundedOperationalSessionString(session.role)
+    || !Array.isArray(session.scopes)
+    || session.scopes.length === 0
+    || session.scopes.length > 64
+    || session.scopes.some(
+      (scope) => !boundedOperationalSessionString(scope),
+    )
+    || new Set(session.scopes).size !== session.scopes.length
+    || !boundedOperationalSessionString(session.expiresAt)
+    || !Number.isFinite(Date.parse(session.expiresAt))
+    || Date.parse(session.expiresAt) <= now
+    || !boundedOperationalSessionString(session.csrfToken, 512)
+    || !["access_key", "automatic_private_workspace"].includes(
+      String(session.connectionMode),
+    )
+    || !["named_operator", "workspace_service"].includes(
+      String(session.principalType),
+    )
+    || !["operator_access_key", "replit_private_deployment"].includes(
+      String(session.accessBasis),
+    )
+    || typeof session.managed !== "boolean"
+  ) {
+    return null;
+  }
+  const automatic = session.connectionMode === "automatic_private_workspace";
+  if (
+    (automatic && (
+      session.principalType !== "workspace_service"
+      || session.accessBasis !== "replit_private_deployment"
+      || session.managed !== true
+    ))
+    || (!automatic && (
+      session.principalType !== "named_operator"
+      || session.accessBasis !== "operator_access_key"
+      || session.managed !== false
+    ))
+  ) {
+    return null;
+  }
+  return session as OperationalSession;
+}
+
 export type RegisteredExecutiveSessionRecord = {
   recordType: "nexus_registered_executive_session";
   schemaVersion: "nexus.registered-executive-session@1.0.0";
@@ -674,9 +773,10 @@ async function sessionRequest(path: string, options: RequestInit = {}): Promise<
       headers: { Accept: "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers ?? {}) },
       ...(signal ? { signal } : {}),
     });
+    const parsed = await response.json() as unknown;
     return {
       response,
-      body: await response.json() as { ok: boolean; session?: OperationalSession; error?: { message?: string } },
+      body: operationalSessionRecord(parsed),
     };
   };
   const { response, body } = readOnly
@@ -688,8 +788,34 @@ async function sessionRequest(path: string, options: RequestInit = {}): Promise<
       },
     )
     : await perform();
-  if (!response.ok || !body.ok || !body.session) throw new Error(body.error?.message ?? `Operational session request failed (${response.status})`);
-  return body.session;
+  const truth = operationalSessionRecord(body?.truth);
+  const error = operationalSessionRecord(body?.error);
+  const session = asOperationalSession(body?.session);
+  const validTruth = (
+    truth?.productionReady === false
+    && truth.enterpriseReady === false
+    && truth.cloudPrimary === false
+    && truth.localSourceOfTruth === true
+    && truth.defaultProvider === "mock_model"
+    && truth.conclave === "unavailable"
+    && truth.actualTrainedSLMs === 0
+    && truth.secretValuesExposed === false
+  );
+  if (
+    !body
+    || typeof body.ok !== "boolean"
+    || response.ok !== body.ok
+    || body.ok !== true
+    || !validTruth
+    || !session
+  ) {
+    throw new Error(
+      typeof error?.message === "string"
+        ? error.message
+        : `Operational session response failed validation (${response.status})`,
+    );
+  }
+  return session;
 }
 
 const operationalSessionStatus = createSerializedRefresh(

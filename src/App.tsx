@@ -53,7 +53,10 @@ import {
   portalFailureEnvelope,
   portalClient,
 } from "./lib/portal-client";
-import { derivePortalConnectionState } from "./lib/request-coordination.mjs";
+import {
+  derivePortalConnectionState,
+  selectPortalPrimaryFailure,
+} from "./lib/request-coordination.mjs";
 import { displayLabel } from "./lib/presentation";
 import type {
   CapabilityRegistryProjection,
@@ -564,6 +567,7 @@ export function App() {
 
   const state = connectionState(snapshot, failures, loading);
   const connectionTone = nexusTone(state);
+  const primaryFailure = selectPortalPrimaryFailure(failures, state);
   const current = AREAS.find((area) => area.id === active) ?? AREAS[0];
   const status = record(snapshot.status?.data);
   const versionData = record(snapshot.version?.data);
@@ -785,7 +789,7 @@ export function App() {
           onToggleCopilot={toggleCopilot}
           onToggleInspector={toggleInspector}
         />
-        {failures.length > 0 && <section className="nx-runtime-alert" role="alert" data-tone={connectionTone}><Activity size={17} /><div><strong>{state}</strong><span>{failures[0]?.error?.message ?? "One or more Runtime signals are unavailable."}</span></div></section>}
+        {failures.length > 0 && <section className="nx-runtime-alert" role="alert" data-tone={connectionTone}><Activity size={17} /><div><strong>{state}</strong><span>{primaryFailure?.error?.message ?? "One or more Runtime signals are unavailable."}</span></div></section>}
         <main id="main-content" className="nx-primary-workspace">
           <NexusWorkspaceFrame
             eyebrow={current.group === "Platform" ? "Hosted Experience Gateway" : "Platform capability"}

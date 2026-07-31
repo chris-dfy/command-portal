@@ -51,6 +51,12 @@ export function derivePortalConnectionState(
   ) ?? "Unavailable";
 }
 
+export function selectPortalPrimaryFailure(failures, connectionState) {
+  return failures.find(
+    (failure) => failure?.gateway?.connectionState === connectionState,
+  ) ?? failures[0] ?? null;
+}
+
 export async function runBoundedTask(
   task,
   {

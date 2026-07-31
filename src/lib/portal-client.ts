@@ -21,6 +21,8 @@ export const RUNTIME_ROUTES: RuntimeRoute[] = [
 const SNAPSHOT_CONCURRENCY = 3;
 const CLIENT_REQUEST_TIMEOUT_MS = 10_000;
 const CLIENT_SNAPSHOT_TIMEOUT_MS = 20_000;
+const SUPPORTED_SCHEMA_VERSION = "1.0.0";
+const SUPPORTED_RUNTIME_VERSION = "0.1.0";
 const CAPABILITY_REGISTRY_RECORD_TYPE = "nexus_live_capability_registry_projection";
 const CAPABILITY_REGISTRY_SCHEMA_VERSION = "nexus.live-capability-registry@1.0.0";
 const CAPABILITY_CLASSIFICATIONS = new Set<CapabilityClassification>([
@@ -377,10 +379,11 @@ function asGatewayEnvelope<T>(value: unknown): GatewayEnvelope<T> | null {
       ? (
         envelope.data === null
         || !runtime
+        || !["Healthy", "Degraded"].includes(connectionState)
         || typeof runtime.status !== "string"
         || typeof runtime.timestamp !== "string"
-        || typeof runtime.schemaVersion !== "string"
-        || typeof runtime.runtimeVersion !== "string"
+        || runtime.schemaVersion !== SUPPORTED_SCHEMA_VERSION
+        || runtime.runtimeVersion !== SUPPORTED_RUNTIME_VERSION
         || !stringArray(runtime.proofIds)
         || !stringArray(runtime.limitations)
         || envelope.error !== undefined
@@ -388,6 +391,14 @@ function asGatewayEnvelope<T>(value: unknown): GatewayEnvelope<T> | null {
       : (
         envelope.data !== null
         || envelope.runtime !== null
+        || ![
+          "Unauthorized",
+          "Schema Mismatch",
+          "Version Mismatch",
+          "Timed Out",
+          "Unavailable",
+          "Unknown",
+        ].includes(connectionState)
         || !error
         || typeof error.code !== "string"
         || typeof error.message !== "string"

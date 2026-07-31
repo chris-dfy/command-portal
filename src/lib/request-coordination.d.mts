@@ -14,6 +14,11 @@ export function derivePortalConnectionState(
   loading: boolean,
 ): string;
 
+export function selectPortalPrimaryFailure<Envelope extends ConnectionEnvelope>(
+  failures: Envelope[],
+  connectionState: string,
+): Envelope | null;
+
 export function runBoundedTask<T>(
   task: (signal: AbortSignal) => Promise<T> | T,
   options: {
