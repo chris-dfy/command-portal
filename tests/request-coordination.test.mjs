@@ -198,7 +198,7 @@ test("a completed bounded task clears its timer without a later abort", async ()
   assert.equal(signal.aborted, false);
 });
 
-test("portal connection state preserves degraded readiness and independent availability", () => {
+test("portal connection state keeps capability readiness separate from healthy transport", () => {
   const envelope = (connectionState) => ({
     gateway: { connectionState },
   });
@@ -209,7 +209,7 @@ test("portal connection state preserves degraded readiness and independent avail
     health: envelope("Healthy"),
     ready: envelope("Degraded"),
     providers: envelope("Healthy"),
-  }, [], false), "Degraded");
+  }, [], false), "Healthy");
   assert.equal(derivePortalConnectionState({
     health: envelope("Healthy"),
     ready: envelope("Healthy"),
@@ -219,7 +219,7 @@ test("portal connection state preserves degraded readiness and independent avail
     health: envelope("Healthy"),
     ready: envelope("Healthy"),
     providers: envelope("Unavailable"),
-  }, [envelope("Unavailable")], false), "Degraded");
+  }, [envelope("Unavailable")], false), "Healthy");
   assert.equal(derivePortalConnectionState({
     health: envelope("Healthy"),
     ready: envelope("Healthy"),
@@ -253,17 +253,17 @@ test("primary failure follows the selected trust state instead of route order", 
   assert.equal(selectPortalPrimaryFailure([], "Unavailable"), null);
 });
 
-test("portal startup wires registry-first bounded serialized snapshots", async () => {
+test("portal startup wires one bounded serialized bootstrap request", async () => {
   const [source, app, localClient] = await Promise.all([
     readFile(new URL("../src/lib/portal-client.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/App.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/local-client.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(source, /const SNAPSHOT_CONCURRENCY = 3;/);
   assert.match(source, /const CLIENT_REQUEST_TIMEOUT_MS = 10_000;/);
   assert.match(source, /const CLIENT_SNAPSHOT_TIMEOUT_MS = 20_000;/);
-  assert.match(source, /registryFirstSettledMap\(RUNTIME_ROUTES/);
-  assert.match(source, /registryItem: "capability-registry"/);
+  assert.match(source, /const RUNTIME_BOOTSTRAP_ROUTE = "\/api\/runtime\/bootstrap";/);
+  assert.match(source, /response = await fetch\(RUNTIME_BOOTSTRAP_ROUTE/);
+  assert.doesNotMatch(source, /registryFirstSettledMap\(RUNTIME_ROUTES/);
   assert.match(source, /const snapshot = createSerializedRefresh\(loadSnapshot\);/);
   assert.match(source, /gateway_snapshot_timed_out/);
   assert.match(app, /setSnapshot\(\(current\) => \(\{ \.\.\.current, \.\.\.result\.data \}\)\);/);
