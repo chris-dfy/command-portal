@@ -192,6 +192,9 @@
 .nx-context-drawer__evidence span { color: var(--nx-text-muted, var(--muted)); font-size: .48rem; text-transform: uppercase; }
 .nx-context-drawer__evidence code { overflow: hidden; color: var(--nexus-accent, var(--accent)); font-size: .51rem; text-overflow: ellipsis; }
 .nx-context-drawer > footer { display: flex; gap: 9px; padding: 16px 14px; }
+.nx-assistant-launcher { overflow: visible; }
+.nx-assistant-launcher .nexus-avatar { pointer-events: none; }
+
 .nx-context-drawer > footer > svg { width: 15px; flex: 0 0 auto; color: var(--nexus-accent, var(--accent)); }
 .nx-context-drawer > footer strong { font-size: .6rem; }
 .nx-context-drawer > footer p { margin: 4px 0 8px; }
@@ -335,6 +338,10 @@
   .nx-context-drawer,
   .nx-app-shell .nexus-copilot,
   .nx-app-shell .nexus-copilot.is-expanded { order: 1; }
+  /* At 820px and below the assistant panel itself scrolls so the composer and footer stay keyboard-reachable. */
+  .nx-app-shell .nexus-copilot,
+  .nx-app-shell .nexus-copilot.is-expanded { display: block; overflow-y: auto; overflow-x: clip; -webkit-overflow-scrolling: touch; }
+  .nx-app-shell .nexus-copilot .nexus-copilot__conversation { min-height: 120px; max-height: 40vh; }
   .nx-platform-stage { order: 2; }
   .nx-platform-rail > header button { display: grid; }
   .nx-workspace-commandbar .nx-icon-button:first-child { display: inline-grid; }

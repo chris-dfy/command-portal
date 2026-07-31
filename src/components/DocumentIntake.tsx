@@ -46,7 +46,7 @@ export function DocumentIntake() {
     <DataPanel eyebrow="Runtime-owned capability" title="Document intelligence" icon={<UploadCloud size={18} />} className="span-2">
       <p className="workspace-intro">Add project documents through the authenticated Experience Gateway. The workspace-scoped Runtime extracts evidence, scans sensitive content, records proof, and treats source text as data—not instructions.</p>
       <div className={`upload-zone${dragging ? " is-dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); void upload(Array.from(event.dataTransfer.files)); }}>
-        <UploadCloud size={28} /><div><strong>Drop Nexicron project documents</strong><span>PDF, Office files, CSV, JSON, HTML, text, Markdown, and exported email</span></div>
+        <UploadCloud size={28} /><div><strong>Drop NEXUS project documents</strong><span>PDF, Office files, CSV, JSON, HTML, text, Markdown, and exported email</span></div>
         <button type="button" onClick={() => input.current?.click()} disabled={busy}>Choose files</button>
         <input ref={input} className="sr-only" type="file" multiple accept=".pdf,.docx,.pptx,.xlsx,.csv,.json,.html,.htm,.txt,.md,.eml,.mbox" onChange={(event) => void upload(Array.from(event.target.files ?? []))} />
       </div>

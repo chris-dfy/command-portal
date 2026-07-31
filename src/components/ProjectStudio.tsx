@@ -23,7 +23,7 @@ export function ProjectStudio() {
   async function create() {
     setBusy(true); setMessage(null);
     try {
-      const project = await localNexusClient.projectCreate(projectName.trim() || "New Nexicron Project");
+      const project = await localNexusClient.projectCreate(projectName.trim() || "New NEXUS Project");
       setProjectId(project.projectId); setProjectName(project.name);
       setMessage(`Created ${project.name}. Add evidence before relying on scope or pricing.`);
     } catch (error) { setMessage(messageFrom(error)); }
@@ -60,9 +60,9 @@ export function ProjectStudio() {
   const currency = estimate?.currency ?? range?.currency ?? "";
 
   return <div className="experience-grid local-workspace">
-    <DataPanel eyebrow="Nexicron projects" title="Project control" icon={<FolderKanban size={18} />} className="span-2">
+    <DataPanel eyebrow="NEXUS Projects" title="Project control" icon={<FolderKanban size={18} />} className="span-2">
       <div className="project-control-grid">
-        <label className="workspace-field"><span>Project name</span><input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Nexicron customer transformation" /></label>
+        <label className="workspace-field"><span>Project name</span><input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Customer transformation program" /></label>
         <button onClick={() => void create()} disabled={busy}><Plus size={15} /> Create project</button>
         <label className="workspace-field"><span>Active project ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="PROJECT-…" /></label>
         <button onClick={() => void analyze()} disabled={busy || !projectId.trim()}><RefreshCw size={15} /> Build project context</button>

@@ -1,0 +1,112 @@
+/* NEXUS procedural assistant avatar — six truthful states, amplitude-reactive, reduced-motion aware. */
+
+.nexus-avatar {
+  --nx-avatar-amplitude: 0;
+  --nx-avatar-size: 42px;
+  --nx-avatar-tone: var(--accent-rgb);
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--nx-avatar-size);
+  height: var(--nx-avatar-size);
+  flex: 0 0 auto;
+}
+.nexus-avatar[data-size="xs"] { --nx-avatar-size: 20px; }
+.nexus-avatar[data-size="sm"] { --nx-avatar-size: 42px; }
+.nexus-avatar[data-size="md"] { --nx-avatar-size: 72px; }
+.nexus-avatar[data-size="lg"] { --nx-avatar-size: 116px; }
+
+.nexus-avatar[data-state="interrupted"] { --nx-avatar-tone: 242, 198, 109; }
+.nexus-avatar[data-state="error"] { --nx-avatar-tone: 205, 92, 74; }
+
+/* Halo: amplitude-reactive outer glow. Amplitude comes from real audio analysis only. */
+.nexus-avatar__halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--nx-avatar-tone), calc(.14 + .3 * var(--nx-avatar-amplitude))), transparent 70%);
+  transform: scale(calc(1.05 + .45 * var(--nx-avatar-amplitude)));
+  transition: transform 90ms linear, background 90ms linear;
+}
+
+/* Orbit ring: state-specific motion. */
+.nexus-avatar__orbit {
+  position: absolute;
+  inset: 6%;
+  border: 1px solid rgba(var(--nx-avatar-tone), .38);
+  border-radius: 50%;
+  transition: border-color 180ms ease, opacity 180ms ease;
+}
+.nexus-avatar[data-state="thinking"] .nexus-avatar__orbit {
+  border-style: dashed;
+  border-color: rgba(var(--nx-avatar-tone), .6);
+  animation: nexus-avatar-orbit 2.4s linear infinite;
+}
+.nexus-avatar[data-state="listening"] .nexus-avatar__orbit {
+  border-color: rgba(var(--nx-avatar-tone), calc(.4 + .5 * var(--nx-avatar-amplitude)));
+  animation: nexus-avatar-breathe 2.6s ease-in-out infinite;
+}
+.nexus-avatar[data-state="speaking"] .nexus-avatar__orbit {
+  border-color: rgba(var(--nx-avatar-tone), .78);
+  transform: scale(calc(1 + .07 * var(--nx-avatar-amplitude)));
+}
+.nexus-avatar[data-state="interrupted"] .nexus-avatar__orbit { animation: nexus-avatar-interrupt 460ms ease-out 1; }
+.nexus-avatar[data-state="error"] .nexus-avatar__orbit { border-color: rgba(var(--nx-avatar-tone), .7); }
+.nexus-avatar[data-state="idle"] .nexus-avatar__orbit { animation: nexus-avatar-breathe 5.2s ease-in-out infinite; }
+
+/* Core disc. */
+.nexus-avatar__core {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72%;
+  height: 72%;
+  border: 1px solid rgba(var(--nx-avatar-tone), .5);
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, rgba(var(--nx-avatar-tone), .32), rgba(var(--nx-avatar-tone), .05) 70%);
+  box-shadow: 0 0 calc(6px + 22px * var(--nx-avatar-amplitude)) rgba(var(--nx-avatar-tone), calc(.12 + .3 * var(--nx-avatar-amplitude)));
+  transform: scale(calc(1 + .09 * var(--nx-avatar-amplitude)));
+  transition: transform 90ms linear, box-shadow 90ms linear, border-color 180ms ease;
+}
+.nexus-avatar[data-state="error"] .nexus-avatar__core { background: radial-gradient(circle at 34% 28%, rgba(var(--nx-avatar-tone), .24), rgba(var(--nx-avatar-tone), .04) 70%); }
+
+/* Equalizer glyph: four bars expressing the active state. */
+.nexus-avatar__glyph { display: flex; align-items: center; gap: 9%; width: 52%; height: 46%; }
+.nexus-avatar__glyph i {
+  flex: 1;
+  height: 30%;
+  border-radius: 999px;
+  background: rgba(var(--nx-avatar-tone), .9);
+  transition: height 120ms ease, background 180ms ease, opacity 180ms ease;
+}
+.nexus-avatar[data-state="idle"] .nexus-avatar__glyph i { height: 26%; opacity: .74; }
+.nexus-avatar[data-state="idle"] .nexus-avatar__glyph i:nth-child(2), .nexus-avatar[data-state="idle"] .nexus-avatar__glyph i:nth-child(3) { height: 42%; }
+.nexus-avatar[data-state="listening"] .nexus-avatar__glyph i { height: calc(24% + 58% * var(--nx-avatar-amplitude)); }
+.nexus-avatar[data-state="listening"] .nexus-avatar__glyph i:nth-child(1), .nexus-avatar[data-state="listening"] .nexus-avatar__glyph i:nth-child(4) { height: calc(18% + 40% * var(--nx-avatar-amplitude)); }
+.nexus-avatar[data-state="thinking"] .nexus-avatar__glyph i { animation: nexus-avatar-think 1.15s ease-in-out infinite; }
+.nexus-avatar[data-state="thinking"] .nexus-avatar__glyph i:nth-child(2) { animation-delay: -.28s; }
+.nexus-avatar[data-state="thinking"] .nexus-avatar__glyph i:nth-child(3) { animation-delay: -.56s; }
+.nexus-avatar[data-state="thinking"] .nexus-avatar__glyph i:nth-child(4) { animation-delay: -.84s; }
+.nexus-avatar[data-state="speaking"] .nexus-avatar__glyph i { animation: nexus-avatar-speak .62s ease-in-out infinite; height: calc(30% + 50% * var(--nx-avatar-amplitude)); }
+.nexus-avatar[data-state="speaking"] .nexus-avatar__glyph i:nth-child(2) { animation-delay: -.16s; }
+.nexus-avatar[data-state="speaking"] .nexus-avatar__glyph i:nth-child(3) { animation-delay: -.31s; }
+.nexus-avatar[data-state="speaking"] .nexus-avatar__glyph i:nth-child(4) { animation-delay: -.47s; }
+.nexus-avatar[data-state="interrupted"] .nexus-avatar__glyph i { height: 20%; opacity: .85; }
+.nexus-avatar[data-state="error"] .nexus-avatar__glyph i { height: 16%; opacity: .9; }
+.nexus-avatar[data-state="error"] .nexus-avatar__glyph i:nth-child(2), .nexus-avatar[data-state="error"] .nexus-avatar__glyph i:nth-child(3) { height: 58%; }
+
+/* Truthful modifiers. */
+.nexus-avatar[data-mic-muted] .nexus-avatar__glyph i { opacity: .45; }
+.nexus-avatar[data-unavailable] { opacity: .55; filter: saturate(.55); }
+.nexus-avatar[data-unavailable] .nexus-avatar__orbit, .nexus-avatar[data-unavailable] .nexus-avatar__glyph i { animation: none; }
+
+@keyframes nexus-avatar-orbit { to { transform: rotate(360deg); } }
+@keyframes nexus-avatar-breathe { 0%, 100% { opacity: .55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.045); } }
+@keyframes nexus-avatar-think { 0%, 100% { height: 22%; } 50% { height: 66%; } }
+@keyframes nexus-avatar-speak { 0%, 100% { transform: scaleY(.72); } 50% { transform: scaleY(1.18); } }
+@keyframes nexus-avatar-interrupt { 0% { transform: scale(1.14); opacity: 1; } 100% { transform: scale(1); opacity: .8; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .nexus-avatar__halo, .nexus-avatar__orbit, .nexus-avatar__core, .nexus-avatar__glyph i { animation: none !important; transition: none !important; transform: none !important; }
+  /* State remains legible without motion via tone, border, and static bar heights. */
+}

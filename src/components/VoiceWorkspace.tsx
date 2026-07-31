@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Send, Volume2, VolumeX, Waves } from "lucide-react";
+import { Mic, MicOff, Send, Volume2, VolumeX } from "lucide-react";
+import { deriveAssistantAvatarState, NexusAvatar } from "./NexusAvatar";
+import "./NexusAvatar.css";
 import { DataPanel } from "./DataPanel";
 import { displayLabel } from "../lib/presentation";
 import { localNexusClient, type VoiceRouteResult } from "../lib/local-client";
@@ -153,9 +155,7 @@ export function VoiceWorkspace({
     <DataPanel eyebrow="Runtime-managed Realtime voice" title="Speak with NEXUS" icon={<Mic size={18} />} className="span-2">
       <p className="workspace-intro">A natural, full-duplex voice session with server voice detection, streaming audio, and interruption. The Runtime owns the provider session and truth boundaries; this browser owns only microphone capture and playback.</p>
       <div className="realtime-voice-stage">
-        <div className={`voice-orb voice-${voiceState}`} style={{ "--voice-amplitude": amplitude } as React.CSSProperties}>
-          <span><Waves size={31} /></span>
-        </div>
+        <NexusAvatar state={deriveAssistantAvatarState({ voiceState, textBusy: busy, hasError: false })} amplitude={amplitude} size="lg" micMuted={microphoneMuted && connected} unavailable={!connected && status?.state !== "available"} />
         <div className="voice-stage-copy">
           <small>LIVE VOICE STATE</small>
           <strong>{microphoneMuted && connected ? "Microphone muted" : displayLabel(voiceState)}</strong>
