@@ -810,6 +810,7 @@ export function App() {
         onNavigate={(area) => navigate(COPILOT_TO_PLATFORM[area])}
         interactionAction={copilotInteractionAction}
         realtimeAction={realtimeVoiceAction}
+        textAction={voiceOperatorTranscriptAction}
         open={copilotOpen}
         expanded={copilotExpanded}
         onOpenChange={setCopilotPanelOpen}
