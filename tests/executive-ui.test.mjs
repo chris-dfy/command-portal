@@ -211,7 +211,7 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /REALTIME_RESPONSE_TIMEOUT_MS = 10_000/);
   assert.match(realtime, /"response_timeout"/);
   for (const event of ["SpeechStarted", "SpeechInterrupted", "ConversationStarted", "AvatarMoveRequested", "NavigationRequested", "FocusRequested", "PresentationStarted", "StreamingChunk"]) assert.match(hif, new RegExp(event));
-  assert.match(voice, /localNexusClient\.routeTranscript\(requestedTranscript\.trim\(\), source, signal\)/);
+  assert.match(voice, /localNexusClient\.routeTranscript\([\s\S]*?operation\.transcript,[\s\S]*?operation\.source,[\s\S]*?signal,[\s\S]*?operation\.idempotencyKey/);
   assert.match(voice, /setTranscript\(""\)/);
   assert.match(voice, /governed NEXUS Runtime Voice Operator/);
   assert.match(hif, /clientId: "nexus-web"/);
@@ -284,7 +284,7 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
     read("../src/lib/local-client.ts"), read("../src/styles.css")
   ]);
   assert.equal(registry.surfaces.find((surface) => surface.id === "conclave")?.label, "Conclave");
-  assert.match(app, /<ConclaveWorkspace readiness=\{operationalReadiness\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\}/);
+  assert.match(app, /<ConclaveWorkspace onReplay=\{openReplay\} readiness=\{operationalReadiness\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\}/);
   for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
   assert.match(client, /localNexusClient\.createConclaveWorkspace/);
   assert.match(client, /localNexusClient\.runConclaveWorkspace/);
@@ -557,7 +557,7 @@ test("hosted Project, Knowledge, Edge, Voice, Copilot, and canonical execution c
     read("../src/components/CanonicalExecutionSpine.tsx"),
     read("../src/lib/hosted-capability-gate.ts"),
   ]);
-  assert.match(app, /<ProjectStudio capabilityRegistry=\{capabilityRegistry\} session=\{operationalSession\}/);
+  assert.match(app, /<ProjectStudio onReplay=\{openReplay\} capabilityRegistry=\{capabilityRegistry\} session=\{operationalSession\}/);
   assert.match(app, /<KnowledgeWorkspace snapshot=\{snapshot\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\}/);
   assert.match(app, /<EdgeAdmissionWorkspace capabilityRegistry=\{capabilityRegistry\}/);
   assert.match(app, /<CanonicalExecutionSpine capabilityRegistry=\{capabilityRegistry\}/);
@@ -605,6 +605,8 @@ test("hosted Project, Knowledge, Edge, Voice, Copilot, and canonical execution c
   }
   assert.match(edgeAdmission, /ADMISSION_REQUEST_SCOPE/);
   assert.match(edgeAdmission, /ADMISSION_REVIEW_SCOPE/);
+  assert.match(edgeAdmission, /if \(!createAction\.available\) \{ setActionError\(createAction\.reason\); return; \}/);
+  assert.match(edgeAdmission, /disabled=\{!createAction\.available \|\| \(!canCreate && !pendingCreate\)\}/);
   assert.match(edgeAdmission, /!cancelAction\.available/);
   assert.match(edgeAdmission, /!reissueAction\.available/);
 
@@ -784,9 +786,11 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
   assert.match(copilot, /disabled=\{!interactionAction\.available/);
   assert.match(copilot, /disabled=\{!voiceAvailable \|\| !realtimeAction\.available/);
   assert.ok(
-    voice.indexOf("if (!audio.current || !realtimeAction.available)") < voice.indexOf("await client.connect()"),
+    voice.indexOf("if (!audio.current || !liveProviderAvailable)") < voice.indexOf("await client.connect()"),
     "VoiceWorkspace must reject unavailable Realtime before connection",
   );
+  assert.match(voice, /const liveProviderAvailable = realtimeAction\.available[\s\S]*status\?\.state === "available"/);
+  assert.match(voice, /disabled=\{!liveProviderAvailable \|\| voiceState === "connecting"\}/);
   assert.ok(
     voice.indexOf("if (!textAction.available)") < voice.indexOf("localNexusClient.routeTranscript"),
     "VoiceWorkspace must reject unavailable typed text routing before forwarding",

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BrainCircuit, CheckCircle2, FilePlus2, RefreshCw, Scale, ShieldAlert, TriangleAlert } from "lucide-react";
 import { DataPanel } from "./DataPanel";
+import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
 import {
   conclaveRunFromWorkspace,
@@ -73,10 +74,12 @@ const reconcileRefreshedRun = (
 };
 
 export function ConclaveWorkspace({
+  onReplay,
   readiness = null,
   session = { authenticated: false },
   capabilityRegistry = null,
 }: {
+  onReplay?: OpenOperationalReplay;
   readiness?: Record<string, unknown> | null;
   session?: OperationalSession;
   capabilityRegistry?: CapabilityRegistryProjection | null;
@@ -273,47 +276,58 @@ export function ConclaveWorkspace({
   }
 
   async function admitEvidence() {
-    if (!workspace || !selectedEvidenceTaskId || busy) return;
+    if (!workspace || busy) return;
+    let admission = pendingEvidence?.missionId === workspace.missionId
+      ? pendingEvidence
+      : null;
+    if (!selectedEvidenceTaskId && !admission) return;
     if (!evidenceAdmissionAllowed) {
       setError(evidenceAdmissionReason);
       return;
     }
-    const confidence = Number(evidenceConfidence);
-    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-      setError("Evidence confidence must be a number between zero and one.");
-      return;
-    }
-    let operationalContext: Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(evidenceOperationalContext) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("not an object");
+    if (!admission) {
+      const confidence = Number(evidenceConfidence);
+      if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+        setError("Evidence confidence must be a number between zero and one.");
+        return;
       }
-      operationalContext = parsed as Record<string, unknown>;
-    } catch {
-      setError("Operational Context must be a valid JSON object.");
-      return;
-    }
-    const evidence: ConclaveEvidenceAdmissionRequest = {
-      origin: evidenceOrigin,
-      sourceClassification: evidenceSourceClassification,
-      confidence,
-      claim: evidenceClaim,
-      supportingArtifacts: lines(evidenceArtifacts),
-      relationships: lines(evidenceRelationships),
-      operationalContext,
-    };
-    setBusy(true);
-    setError(null);
-    try {
-      const admission = resolvePendingConclaveEvidenceAdmission(
-        pendingEvidence,
+      let operationalContext: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(evidenceOperationalContext) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("not an object");
+        }
+        operationalContext = parsed as Record<string, unknown>;
+      } catch {
+        setError("Operational Context must be a valid JSON object.");
+        return;
+      }
+      const evidence: ConclaveEvidenceAdmissionRequest = {
+        origin: evidenceOrigin,
+        sourceClassification: evidenceSourceClassification,
+        confidence,
+        claim: evidenceClaim,
+        supportingArtifacts: lines(evidenceArtifacts),
+        relationships: lines(evidenceRelationships),
+        operationalContext,
+      };
+      admission = resolvePendingConclaveEvidenceAdmission(
+        null,
         workspace.missionId,
         selectedEvidenceTaskId,
         evidence,
         () => globalThis.crypto.randomUUID(),
       );
       setPendingEvidence(admission);
+      setEvidenceOrigin("");
+      setEvidenceClaim("");
+      setEvidenceArtifacts("");
+      setEvidenceRelationships("");
+      setEvidenceOperationalContext("{}");
+    }
+    setBusy(true);
+    setError(null);
+    try {
       const refreshed = await localNexusClient.admitConclaveEvidence(
         admission.missionId,
         admission.taskId,
@@ -328,11 +342,6 @@ export function ConclaveWorkspace({
         ...current.filter((item) => item.missionId !== refreshed.missionId),
       ]));
       setEvidenceTaskId("");
-      setEvidenceOrigin("");
-      setEvidenceClaim("");
-      setEvidenceArtifacts("");
-      setEvidenceRelationships("");
-      setEvidenceOperationalContext("{}");
       setSourceState("available");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -369,7 +378,7 @@ export function ConclaveWorkspace({
 
     {verifiedResult && workspace && <section className="conclave-result" aria-label="Verified Conclave Review result">
       <CheckCircle2 size={22} />
-      <div><span>Verified canonical Review result</span><strong>{synthesis || workspace.recommendedNextAction}</strong><small>Review integrity verified · Terminal receipt verified{terminalReceiptReference ? <> · receipt <code title={terminalReceiptReference}>{compactReference(terminalReceiptReference)}</code></> : null} · Replay <code title={workspace.operationalReplay.runId}>{compactReference(workspace.operationalReplay.runId)}</code></small></div>
+      <div><span>Verified canonical Review result</span><strong>{synthesis || workspace.recommendedNextAction}</strong><small>Review integrity verified · Terminal receipt verified.</small><OperationalResultLineage receiptId={terminalReceiptReference} replayId={workspace.operationalReplay.runId} missionId={workspace.missionId} onOpenReplay={onReplay} /></div>
     </section>}
 
     {legacyPromptOnly && workspace && <section className="conclave-legacy-notice" aria-label="Legacy prompt-only record">
@@ -394,15 +403,15 @@ export function ConclaveWorkspace({
 
     {workspace?.waitingForEvidence && workspace.lifecyclePosture === "canonical_operational" && <DataPanel eyebrow="Evidence admission" title="Unblock an evidence-waiting task" icon={<FilePlus2 size={18} />}>
       <form className="conclave-evidence-intake" onSubmit={(event) => { event.preventDefault(); void admitEvidence(); }}>
-        <label><span>Evidence-waiting task</span><select value={selectedEvidenceTaskId} onChange={(event) => setEvidenceTaskId(event.target.value)} required>{waitingTasks.map((task) => <option key={task.task_id} value={task.task_id}>{task.objective} · {compactReference(task.task_id)}</option>)}</select></label>
-        <label><span>Source origin</span><input value={evidenceOrigin} onChange={(event) => setEvidenceOrigin(event.target.value)} placeholder="runtime://edge/node/observation-id" maxLength={2000} required /></label>
-        <label><span>Source classification</span><select value={evidenceSourceClassification} onChange={(event) => setEvidenceSourceClassification(event.target.value as ConclaveEvidenceAdmissionRequest["sourceClassification"])}>{evidenceSourceClassifications.map((classification) => <option key={classification} value={classification}>{displayLabel(classification)}</option>)}</select></label>
-        <label><span>Confidence input</span><input type="number" min="0" max="1" step="0.01" value={evidenceConfidence} onChange={(event) => setEvidenceConfidence(event.target.value)} required /></label>
-        <label className="span-2"><span>Evidence claim</span><textarea value={evidenceClaim} onChange={(event) => setEvidenceClaim(event.target.value)} placeholder="State only what this source supports, contradicts, or contextualizes." maxLength={8000} required /></label>
-        <label><span>Supporting artifact refs</span><textarea value={evidenceArtifacts} onChange={(event) => setEvidenceArtifacts(event.target.value)} placeholder={"One immutable reference per line"} /></label>
-        <label><span>Relationship refs</span><textarea value={evidenceRelationships} onChange={(event) => setEvidenceRelationships(event.target.value)} placeholder={"One relationship per line"} /></label>
-        <label className="span-2"><span>Operational Context (JSON object)</span><textarea value={evidenceOperationalContext} onChange={(event) => setEvidenceOperationalContext(event.target.value)} spellCheck={false} /></label>
-        <div className="conclave-evidence-intake__actions span-2"><p className="boundary-note">{evidenceAdmissionReason} The Runtime derives the collector from the authenticated principal and decides admission; this client cannot mark the task complete.</p><button type="submit" disabled={busy || !evidenceAdmissionAllowed || !selectedEvidenceTaskId || !evidenceOrigin.trim() || !evidenceClaim.trim()}><FilePlus2 size={16} />{pendingEvidence ? "Retry exact Evidence admission" : "Admit scoped Evidence"}</button></div>
+        <label><span>Evidence-waiting task</span><select value={selectedEvidenceTaskId} onChange={(event) => { setEvidenceTaskId(event.target.value); setPendingEvidence(null); }} required>{waitingTasks.map((task) => <option key={task.task_id} value={task.task_id}>{task.objective} · {compactReference(task.task_id)}</option>)}</select></label>
+        <label><span>Source origin</span><input value={evidenceOrigin} onChange={(event) => { setEvidenceOrigin(event.target.value); setPendingEvidence(null); }} placeholder="runtime://edge/node/observation-id" maxLength={2000} autoComplete="off" required /></label>
+        <label><span>Source classification</span><select value={evidenceSourceClassification} onChange={(event) => { setEvidenceSourceClassification(event.target.value as ConclaveEvidenceAdmissionRequest["sourceClassification"]); setPendingEvidence(null); }}>{evidenceSourceClassifications.map((classification) => <option key={classification} value={classification}>{displayLabel(classification)}</option>)}</select></label>
+        <label><span>Confidence input</span><input type="number" min="0" max="1" step="0.01" value={evidenceConfidence} onChange={(event) => { setEvidenceConfidence(event.target.value); setPendingEvidence(null); }} required /></label>
+        <label className="span-2"><span>Evidence claim</span><textarea value={evidenceClaim} onChange={(event) => { setEvidenceClaim(event.target.value); setPendingEvidence(null); }} placeholder="State only what this source supports, contradicts, or contextualizes." maxLength={8000} autoComplete="off" required /></label>
+        <label><span>Supporting artifact refs</span><textarea value={evidenceArtifacts} onChange={(event) => { setEvidenceArtifacts(event.target.value); setPendingEvidence(null); }} placeholder={"One immutable reference per line"} autoComplete="off" /></label>
+        <label><span>Relationship refs</span><textarea value={evidenceRelationships} onChange={(event) => { setEvidenceRelationships(event.target.value); setPendingEvidence(null); }} placeholder={"One relationship per line"} autoComplete="off" /></label>
+        <label className="span-2"><span>Operational Context (JSON object)</span><textarea value={evidenceOperationalContext} onChange={(event) => { setEvidenceOperationalContext(event.target.value); setPendingEvidence(null); }} spellCheck={false} autoComplete="off" /></label>
+        <div className="conclave-evidence-intake__actions span-2"><p className="boundary-note">{evidenceAdmissionReason} The Runtime derives the collector from the authenticated principal and decides admission; this client cannot mark the task complete.</p><button type="submit" disabled={busy || !evidenceAdmissionAllowed || (!pendingEvidence && (!selectedEvidenceTaskId || !evidenceOrigin.trim() || !evidenceClaim.trim()))}><FilePlus2 size={16} />{pendingEvidence ? "Retry exact Evidence admission" : "Admit scoped Evidence"}</button></div>
       </form>
     </DataPanel>}
 

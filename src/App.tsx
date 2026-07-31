@@ -8,10 +8,12 @@ import { DocumentIntake } from "./components/DocumentIntake";
 import { EdgeAdmissionWorkspace } from "./components/EdgeAdmissionWorkspace";
 import { EdgeRuntime } from "./components/EdgeRuntime";
 import { ExecutiveStatusBar } from "./components/ExecutiveStatusBar";
+import { HostedCommandDirectory } from "./components/HostedCommandDirectory";
 import { KnowledgeWorkspace } from "./components/KnowledgeWorkspace";
 import { MissionDashboard } from "./components/MissionDashboard";
 import { NexusCopilot } from "./components/NexusCopilot";
 import { OperationalReplay } from "./components/OperationalReplay";
+import type { OperationalReplayTarget } from "./components/OperationalResultLineage";
 import { OperationsCenter } from "./components/OperationsCenter";
 import { OperationsWorkspace } from "./components/OperationsWorkspace";
 import { OperationalAccessGate } from "./components/OperationalAccessGate";
@@ -400,7 +402,7 @@ export function App() {
   const [query, setQuery] = useState("");
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [copilotExpanded, setCopilotExpanded] = useState(false);
-  const [replayMissionId, setReplayMissionId] = useState<string>();
+  const [replayTarget, setReplayTarget] = useState<OperationalReplayTarget>();
   const [sessionBootstrapComplete, setSessionBootstrapComplete] = useState(false);
   const [hostedOperationalConfigured, setHostedOperationalConfigured] = useState(false);
   const [operationalSession, setOperationalSession] = useState<OperationalSession>({ authenticated: false });
@@ -618,7 +620,7 @@ export function App() {
     setMenuOpen(false);
     window.scrollTo({ top: 0 });
   }
-  function openReplay(missionId?: string) { setReplayMissionId(missionId); navigate("replay"); }
+  function openReplay(target: OperationalReplayTarget) { setReplayTarget(target); navigate("replay"); }
   function toggleCopilot() {
     const next = !copilotOpen;
     setCopilotOpen(next);
@@ -647,18 +649,19 @@ export function App() {
   }
 
   const webModuleComponents: Record<string, ReactNode> = {
+    "web.dashboard.command-center": <HostedCommandDirectory onAsk={() => { setCopilotOpen(true); setInspectorOpen(false); }} onNavigate={navigate} />,
     "web.dashboard.executive-status": <ExecutiveStatusBar snapshot={snapshot} connectionState={state} />,
     "web.dashboard.operations-center": <OperationsCenter assessment={eox ?? null} />,
     "web.missions.dashboard": <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
     "web.missions.runtime-evidence": <MissionRuntimeEvidence />,
     "web.missions.step-execution": <MissionStepExecutionPosture readiness={operationalReadiness} />,
-    "web.replay.timeline": <OperationalReplay requestedMissionId={replayMissionId} />,
-    "web.conclave.workspace": <ConclaveWorkspace readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
+    "web.replay.timeline": <OperationalReplay requestedTarget={replayTarget} />,
+    "web.conclave.workspace": <ConclaveWorkspace onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
     "web.knowledge.workspace": <KnowledgeWorkspace snapshot={snapshot} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
     "web.edge.monitoring": <EdgeRuntime snapshot={snapshot} />,
     "web.edge.diagnostics-topology": <RuntimeTopology snapshot={snapshot} />,
     "web.edge.admission-request": <EdgeAdmissionWorkspace capabilityRegistry={capabilityRegistry} onFleetRefresh={() => refresh(true)} />,
-    "web.mission-control.operations-workspace": <OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} capabilityRegistry={capabilityRegistry} />,
+    "web.mission-control.operations-workspace": <OperationsWorkspace onReplay={openReplay} session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} capabilityRegistry={capabilityRegistry} />,
     "web.mission-control.mission-dashboard": <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
     "web.mission-control.runtime-missions": <RuntimeMissionInventory />,
     "web.mission-control.functional-readiness": <FunctionalReadinessDiagnostics readiness={operationalReadiness} />,
@@ -668,7 +671,7 @@ export function App() {
     "web.settings.registered-executive": <RegisteredExecutiveSession />,
     "web.settings.canonical-execution": <CanonicalExecutionSpine capabilityRegistry={capabilityRegistry} />,
     "web.documents.intake": <DocumentIntake capabilityRegistry={capabilityRegistry} session={operationalSession} />,
-    "web.projects.planning": <ProjectStudio capabilityRegistry={capabilityRegistry} session={operationalSession} />,
+    "web.projects.planning": <ProjectStudio onReplay={openReplay} capabilityRegistry={capabilityRegistry} session={operationalSession} />,
     "web.providers.registry": <ProviderRegistry snapshot={snapshot} />,
     "web.providers.truth-boundary": <ProviderTruth snapshot={snapshot} />,
     "web.governance.readiness": <GovernanceReadinessDiagnostics />,
@@ -682,10 +685,10 @@ export function App() {
     "web.receipts.execution-receipts": <ExecutionReceipts snapshot={snapshot} />,
     "web.receipts.proofs": <ProofReferences snapshot={snapshot} />,
     "web.receipts.release-provenance": <ReleaseProvenance runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />,
-    "web.voice.operator": <VoiceWorkspace realtimeAction={realtimeVoiceAction} textAction={voiceOperatorTranscriptAction} />,
+    "web.voice.operator": <VoiceWorkspace onReplay={openReplay} realtimeAction={realtimeVoiceAction} textAction={voiceOperatorTranscriptAction} />,
     "web.voice.runtime-status": <VoiceRuntimeStatus />,
     "web.executive-views.operations-center": <OperationsCenter assessment={eox ?? null} />,
-    "web.work-sessions.workspace": <WorkSessionsWorkspace capabilityRegistry={capabilityRegistry} session={operationalSession} />,
+    "web.work-sessions.workspace": <WorkSessionsWorkspace onReplay={openReplay} capabilityRegistry={capabilityRegistry} session={operationalSession} />,
   };
   assertNexusModuleComponentMap("web", webModuleComponents);
 

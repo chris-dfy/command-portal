@@ -61,9 +61,9 @@
               "componentKey": "desktop.dashboard.command-center"
             },
             "web": {
-              "state": "unavailable",
-              "reason": "The hosted dashboard uses separate evidence-backed executive status modules; the local Command Center is not copied into the browser.",
-              "componentKey": null
+              "state": "read_only",
+              "reason": "Hosted NEXUS provides a read-only command directory into governed Copilot, Mission, Project, Document, Voice, and Work Session modules; every mutation remains independently exact-action gated.",
+              "componentKey": "web.dashboard.command-center"
             }
           }
         },
@@ -1569,7 +1569,11 @@
             "web": {
               "state": "unavailable",
               "reason": "The hosted Evidence surface has no separately verified acceptance-receipt projection.",
-              "componentKey": null
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient.receipt"]
+              }
             }
           }
         },
@@ -1587,7 +1591,11 @@
             "web": {
               "state": "unavailable",
               "reason": "The hosted Evidence surface has no separately verified distribution-receipt projection.",
-              "componentKey": null
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient.receipt"]
+              }
             }
           }
         },
@@ -1605,7 +1613,11 @@
             "web": {
               "state": "unavailable",
               "reason": "The hosted Evidence surface has no package-manifest contract.",
-              "componentKey": null
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient"]
+              }
             }
           }
         },
@@ -1781,7 +1793,11 @@
             "web": {
               "state": "unavailable",
               "reason": "The hosted Receipts surface has no separate operator acceptance-trial projection.",
-              "componentKey": null
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient.receipt"]
+              }
             }
           }
         },
@@ -1817,7 +1833,11 @@
             "web": {
               "state": "unavailable",
               "reason": "The hosted Receipts surface has no separately verified distribution receipt projection.",
-              "componentKey": null
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient.receipt"]
+              }
             }
           }
         },

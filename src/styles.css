@@ -720,6 +720,72 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
 }
 .replay-toolbar > div { flex-wrap: wrap; }
 
+.hosted-command-directory {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--nx-space-2);
+}
+.hosted-command-directory button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 4.5rem;
+  align-items: center;
+  gap: var(--nx-space-3);
+  padding: var(--nx-space-3);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-md);
+  color: var(--nx-text);
+  text-align: left;
+  background: var(--nx-surface-2);
+}
+.hosted-command-directory button > span { display: grid; min-width: 0; gap: var(--nx-space-1); }
+.hosted-command-directory button strong { overflow-wrap: normal; word-break: normal; }
+.hosted-command-directory button small { color: var(--nx-text-muted); line-height: 1.45; overflow-wrap: anywhere; }
+.hosted-command-directory button:focus-visible { outline: 0; box-shadow: var(--nx-focus-ring); }
+
+.operational-result-lineage {
+  display: grid;
+  min-width: 0;
+  gap: var(--nx-space-2);
+  margin-top: var(--nx-space-3);
+}
+.operational-result-lineage dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  min-width: 0;
+  gap: var(--nx-space-2);
+  margin: 0;
+}
+.operational-result-lineage dl > div {
+  display: grid;
+  min-width: 0;
+  gap: var(--nx-space-1);
+  padding: var(--nx-space-2);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-sm);
+  background: var(--nx-surface-2);
+}
+.operational-result-lineage dt { display: inline-flex; align-items: center; gap: 5px; color: var(--nx-text-muted); font-size: .58rem; }
+.operational-result-lineage dd { min-width: 0; margin: 0; }
+.operational-result-lineage code { display: block; max-width: 100%; color: var(--nx-accent); white-space: normal; overflow-wrap: anywhere; }
+.operational-result-lineage > p { margin: 0; color: var(--nx-text-muted); line-height: 1.5; }
+.operational-result-lineage > button {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--nx-border-strong);
+  border-radius: var(--nx-radius-sm);
+  color: var(--nx-text);
+  white-space: normal;
+  background: var(--nx-accent-soft);
+}
+.operational-result-lineage > button:focus-visible { outline: 0; box-shadow: var(--nx-focus-ring); }
+
 /* Mission dashboard and independent executor */
 .mission-dashboard, .operational-replay, .knowledge-workspace { display: grid; gap: 0; }.mission-dashboard__grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px; }.mission-compose { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 9px; margin-bottom: 12px; padding: 13px; border: 1px solid var(--border); border-radius: 10px; background: rgba(8,19,27,.72); }.mission-compose label { display: grid; gap: 5px; }.mission-compose label span { color: var(--muted); font-size: .58rem; }.mission-compose textarea { min-height: 48px; padding: 9px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: rgba(0,0,0,.2); resize: vertical; }.mission-compose button, .mission-task-graph button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 7px 11px; border: 1px solid var(--border-strong); border-radius: 7px; color: var(--text); background: rgba(var(--accent-rgb),.09); }.mission-list { display: grid; gap: 6px; }.mission-list > button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); text-align: left; background: rgba(0,0,0,.12); }.mission-list > button[data-active="true"] { border-color: var(--border-strong); background: rgba(var(--accent-rgb),.08); box-shadow: inset 2px 0 var(--accent); }.mission-list > button div { display: grid; gap: 3px; }.mission-list small { color: var(--muted); font-size: .55rem; }.mission-progress { position: relative; height: 28px; overflow: hidden; border: 1px solid var(--border); border-radius: 999px; background: rgba(0,0,0,.2); }.mission-progress span { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, rgba(var(--accent-rgb),.35), var(--accent)); }.mission-progress strong { position: relative; z-index: 1; display: grid; height: 100%; place-items: center; font-size: .61rem; }.mission-task-graph { display: grid; gap: 5px; }.mission-task-graph article { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 7px; }.mission-task-graph article > span { color: var(--muted); font: .55rem ui-monospace, monospace; }.mission-task-graph article > div { display: grid; gap: 2px; }.mission-task-graph small { color: var(--muted); font-size: .54rem; }
 
@@ -1149,4 +1215,7 @@ dialog > footer { border-top: 1px solid var(--border); border-bottom: 0; color: 
   .edge-admission-governance dl { grid-template-columns: 1fr; }
   .edge-admission-failure { grid-template-columns: auto minmax(0, 1fr); }
   .edge-admission-failure > .nx-status { grid-column: 2; justify-self: start; }
+  .hosted-command-directory button { grid-template-columns: auto minmax(0, 1fr); }
+  .hosted-command-directory button > svg:last-child { display: none; }
+  .operational-result-lineage > button { width: 100%; }
 }

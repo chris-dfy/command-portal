@@ -59,6 +59,10 @@ type AdmissionForm = {
 type MissionOption = { missionId: string; label: string; status: string };
 type SafeArtifact = { id: string; status: string; result: string; recordedAt: string };
 type SafeReplayEvent = { eventId: string; stage: string; status: string; occurredAt: string; summary: string };
+type PendingAdmissionCreate = {
+  payload: RuntimeAdmissionIntentRequest;
+  idempotencyKey: string;
+};
 
 const INITIAL_FORM: AdmissionForm = {
   missionId: "",
@@ -344,7 +348,7 @@ export function EdgeAdmissionWorkspace({
   const [mutating, setMutating] = useState<"cancel" | "reissue" | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [pendingCreateKey, setPendingCreateKey] = useState<string | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<PendingAdmissionCreate | null>(null);
   const [pendingMutation, setPendingMutation] = useState<{ operation: string; requestId: string; key: string } | null>(null);
   const [receipt, setReceipt] = useState<SafeArtifact | null>(null);
   const [replayEvents, setReplayEvents] = useState<SafeReplayEvent[]>([]);
@@ -476,35 +480,45 @@ export function EdgeAdmissionWorkspace({
 
   function updateForm<K extends keyof AdmissionForm>(key: K, value: AdmissionForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
-    setPendingCreateKey(null);
+    setPendingCreate(null);
     setActionError(null);
   }
 
   async function createAdmission(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canCreate) { setActionError(gateReason); return; }
-    const idempotencyKey = pendingCreateKey ?? `edge-admission:${globalThis.crypto.randomUUID()}`;
-    setPendingCreateKey(idempotencyKey);
-    const payload: RuntimeAdmissionIntentRequest = {
-      missionId: form.missionId,
-      intent: {
-        displayName: form.displayName.trim(),
-        nodeClass: form.nodeClass.trim(),
-        requestedCapabilities,
-        operationalPurpose: form.operationalPurpose.trim(),
-        ...(form.location.trim() ? { location: form.location.trim() } : {}),
-        ...(form.deploymentProfile.trim() ? { deploymentMetadata: { profile: form.deploymentProfile.trim() } } : {}),
-        ...(evidenceRefs.length ? { evidenceRefs } : {}),
+    if (!createAction.available) { setActionError(createAction.reason); return; }
+    if (!pendingCreate && !canCreate) { setActionError(gateReason); return; }
+    const operation = pendingCreate ?? {
+      idempotencyKey: `edge-admission:${globalThis.crypto.randomUUID()}`,
+      payload: {
+        missionId: form.missionId,
+        intent: {
+          displayName: form.displayName.trim(),
+          nodeClass: form.nodeClass.trim(),
+          requestedCapabilities,
+          operationalPurpose: form.operationalPurpose.trim(),
+          ...(form.location.trim() ? { location: form.location.trim() } : {}),
+          ...(form.deploymentProfile.trim() ? { deploymentMetadata: { profile: form.deploymentProfile.trim() } } : {}),
+          ...(evidenceRefs.length ? { evidenceRefs } : {}),
+        },
       },
-    };
+    } satisfies PendingAdmissionCreate;
+    if (!pendingCreate) {
+      setPendingCreate(operation);
+      setForm({
+        ...INITIAL_FORM,
+        missionId: operation.payload.missionId,
+        nodeClass: operation.payload.intent.nodeClass,
+      });
+    }
     setCreating(true);
     setActionError(null);
     try {
-      const admission = responseAdmission(await localNexusClient.createRuntimeAdmission(payload, idempotencyKey));
+      const admission = responseAdmission(await localNexusClient.createRuntimeAdmission(operation.payload, operation.idempotencyKey));
       setAdmissions((current) => [admission, ...current.filter((item) => item.admissionRequestId !== admission.admissionRequestId)]);
       setSelectedAdmission(admission);
       setSelectedId(admission.admissionRequestId);
-      setPendingCreateKey(null);
+      setPendingCreate(null);
       setForm((current) => ({ ...INITIAL_FORM, missionId: current.missionId, nodeClass: current.nodeClass }));
       onFleetRefresh();
     } catch (error) {
@@ -616,14 +630,15 @@ export function EdgeAdmissionWorkspace({
           <label><span>Owning Mission</span><select value={form.missionId} onChange={(event) => updateForm("missionId", event.target.value)} required><option value="">Select an existing Mission</option>{missions.map((mission) => <option key={mission.missionId} value={mission.missionId}>{mission.label} · {mission.missionId}</option>)}</select><small>{selectedMission ? `Bound to ${selectedMission.missionId} (${readable(selectedMission.status)}).` : "Admission cannot begin without an existing Mission."}</small></label>
           <label><span>Node display name</span><input value={form.displayName} onChange={(event) => updateForm("displayName", event.target.value)} maxLength={120} placeholder="North operations node" autoComplete="off" required /></label>
           <label><span>Operational asset class</span><input value={form.nodeClass} onChange={(event) => updateForm("nodeClass", event.target.value)} maxLength={80} placeholder="edge_runtime_node" autoComplete="off" spellCheck={false} required /></label>
-          <label><span>Operational purpose</span><textarea rows={3} value={form.operationalPurpose} onChange={(event) => updateForm("operationalPurpose", event.target.value)} maxLength={1000} placeholder="Describe the operational outcome this node will support." required /></label>
-          <label><span>Requested capabilities</span><textarea rows={3} value={form.requestedCapabilities} onChange={(event) => updateForm("requestedCapabilities", event.target.value)} aria-invalid={!capabilitiesValid} /><small>Canonical nexus.* capability identifiers, separated by commas or lines.</small></label>
+          <label><span>Operational purpose</span><textarea rows={3} value={form.operationalPurpose} onChange={(event) => updateForm("operationalPurpose", event.target.value)} maxLength={1000} placeholder="Describe the operational outcome this node will support." autoComplete="off" required /></label>
+          <label><span>Requested capabilities</span><textarea rows={3} value={form.requestedCapabilities} onChange={(event) => updateForm("requestedCapabilities", event.target.value)} aria-invalid={!capabilitiesValid} autoComplete="off" /><small>Canonical nexus.* capability identifiers, separated by commas or lines.</small></label>
           <div className="edge-admission-form-row"><label><span>Location (optional)</span><input value={form.location} onChange={(event) => updateForm("location", event.target.value)} maxLength={240} placeholder="Operations lab" autoComplete="off" /></label><label><span>Deployment profile (optional)</span><input value={form.deploymentProfile} onChange={(event) => updateForm("deploymentProfile", event.target.value)} maxLength={240} placeholder="raspberry-pi" autoComplete="off" /></label></div>
-          <label><span>Existing Evidence references (optional)</span><textarea rows={2} value={form.evidenceRefs} onChange={(event) => updateForm("evidenceRefs", event.target.value)} placeholder="Evidence IDs only—never secure enrollment material" /></label>
+          <label><span>Existing Evidence references (optional)</span><textarea rows={2} value={form.evidenceRefs} onChange={(event) => updateForm("evidenceRefs", event.target.value)} placeholder="Evidence IDs only—never secure enrollment material" autoComplete="off" /></label>
           {!capabilitiesValid && <p className="edge-admission-error"><TriangleAlert />At least one canonical nexus.* capability is required.</p>}
           {actionError && <p className="edge-admission-error" role="alert"><TriangleAlert />{actionError}</p>}
-          {!canCreate && <p className="edge-admission-gate"><ShieldCheck />{gateReason}</p>}
-          <footer><NexusButton variant="primary" type="submit" loading={creating} disabled={!canCreate}><Plus />Request governed admission</NexusButton></footer>
+          {!canCreate && !pendingCreate && <p className="edge-admission-gate"><ShieldCheck />{gateReason}</p>}
+          {pendingCreate && <p className="edge-admission-gate"><ShieldCheck />The failed request is held privately with its exact idempotency key; submitted text will not be restored into editable fields.</p>}
+          <footer><NexusButton variant="primary" type="submit" loading={creating} disabled={!createAction.available || (!canCreate && !pendingCreate)}><Plus />{pendingCreate ? "Retry exact governed admission" : "Request governed admission"}</NexusButton></footer>
         </form>
       </NexusPanel>
 

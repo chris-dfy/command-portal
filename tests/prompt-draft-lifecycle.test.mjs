@@ -44,6 +44,57 @@ test("Conclave clears the proposal without losing the exact pending retry identi
   assert.match(source, /id="conclave-proposal"[\s\S]{0,300}autoComplete="off"/);
 });
 
+test("Conclave Evidence clears transient fields and retries the private exact admission", async () => {
+  const source = await read("../src/components/ConclaveWorkspace.tsx");
+  const admission = source.slice(source.indexOf("async function admitEvidence"), source.indexOf("async function refreshWorkspace"));
+  assertOrder(admission, [
+    "admission = resolvePendingConclaveEvidenceAdmission(",
+    "setPendingEvidence(admission)",
+    'setEvidenceOrigin("")',
+    'setEvidenceClaim("")',
+    "await localNexusClient.admitConclaveEvidence(",
+  ]);
+  assert.match(admission, /pendingEvidence\?\.missionId === workspace\.missionId/);
+  assert.match(admission, /admission\.idempotencyKey/);
+  assert.match(admission, /catch \(caught\)[\s\S]*setError/);
+  assert.match(source, /pendingEvidence \? "Retry exact Evidence admission"/);
+  assert.doesNotMatch(source, /value=\{pendingEvidence[^}]*\}/);
+  assert.ok((source.match(/autoComplete="off"/g) ?? []).length >= 6);
+});
+
+test("Knowledge intake snapshots payload and idempotency before clearing private retry drafts", async () => {
+  const source = await read("../src/components/KnowledgeWorkspace.tsx");
+  const intake = source.slice(source.indexOf("async function submitIntake"), source.indexOf("async function establishBaseline"));
+  assertOrder(intake, [
+    "operation = {",
+    "setPendingIntake(operation)",
+    'setIntakeOrigin("")',
+    'setIntakeClaim("")',
+    "await localNexusClient.knowledgeIntake(operation.payload, operation.idempotencyKey)",
+  ]);
+  assert.match(intake, /let operation = pendingIntake/);
+  assert.match(intake, /catch \(caught\)[\s\S]*Knowledge intake failed safely/);
+  assert.match(source, /pendingIntake \? "Retry exact Evidence admission"/);
+  assert.doesNotMatch(source, /value=\{pendingIntake[^}]*\}/);
+  assert.match(source, /value=\{intakeClaim\}[\s\S]{0,300}autoComplete="off"/);
+});
+
+test("Edge admission snapshots exact intent and key before clearing transient operational text", async () => {
+  const source = await read("../src/components/EdgeAdmissionWorkspace.tsx");
+  const creation = source.slice(source.indexOf("async function createAdmission"), source.indexOf("async function mutateAdmission"));
+  assertOrder(creation, [
+    "const operation = pendingCreate ?? {",
+    "setPendingCreate(operation)",
+    "setForm({",
+    "await localNexusClient.createRuntimeAdmission(operation.payload, operation.idempotencyKey)",
+  ]);
+  assert.match(creation, /catch \(error\)[\s\S]*setActionError/);
+  assert.match(source, /pendingCreate \? "Retry exact governed admission"/);
+  assert.match(source, /submitted text will not be restored into editable fields/);
+  assert.doesNotMatch(source, /value=\{pendingCreate[^}]*\}/);
+  assert.ok((source.match(/autoComplete="off"/g) ?? []).length >= 7);
+});
+
 test("Voice keeps transcripts in history and never rehydrates the typed draft", async () => {
   const source = await read("../src/components/VoiceWorkspace.tsx");
   const userTranscript = source.slice(
@@ -56,7 +107,7 @@ test("Voice keeps transcripts in history and never rehydrates the typed draft", 
     "async function routeGovernedTranscript(",
     'setTranscript("")',
     "await runBoundedTask(",
-    "localNexusClient.routeTranscript(requestedTranscript.trim(), source, signal)",
+    "localNexusClient.routeTranscript(",
   ]);
   const browserMicrophone = source.slice(
     source.indexOf("async function useBrowserMicrophone"),
@@ -64,6 +115,10 @@ test("Voice keeps transcripts in history and never rehydrates the typed draft", 
   );
   assert.doesNotMatch(browserMicrophone, /setTranscript\(captured\)/);
   assert.match(source, /historyAlreadyRecorded = false/);
+  assert.match(source, /setPendingRequest\(operation\)[\s\S]*setTranscript\(""\)/);
+  assert.match(source, /operation\.idempotencyKey/);
+  assert.match(source, /pendingRequest && <button[\s\S]*Retry exact governed request/);
+  assert.doesNotMatch(source, /value=\{pendingRequest[^}]*\}/);
   assert.match(source, /value=\{transcript\}[\s\S]{0,300}autoComplete="off"/);
 });
 
@@ -115,4 +170,5 @@ test("Copilot remains the reference pattern: clear draft, retain message history
   assert.equal(source.includes("sessionStorage"), false);
   assert.equal((source.match(/localStorage/g) ?? []).length, 2);
   assert.match(source, /introductionKey/);
+  assert.match(source, /aria-label="Ask NEXUS" autoComplete="off"/);
 });

@@ -42,7 +42,7 @@ test("the persistent copilot, voice workspace, launcher, and introduction share 
     assert.match(source, /NexusAvatar/);
     assert.match(source, /NexusAvatar\.css/);
   }
-  assert.match(copilot, /deriveAssistantAvatarState\(\{ voiceState, textBusy: busy, hasError: Boolean\(error\) \}\)/);
+  assert.match(copilot, /deriveAssistantAvatarState\(\{ voiceState, textBusy: busy \|\| browserListening, hasError: Boolean\(error\) \}\)/);
   assert.match(voice, /deriveAssistantAvatarState\(\{ voiceState, textBusy: busy, hasError: false \}\)/);
   // The launcher mirrors presentation state through the presence store and owns no session state.
   assert.match(chrome, /assistantPresence/);

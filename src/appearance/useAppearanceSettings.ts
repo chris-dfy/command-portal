@@ -15,6 +15,11 @@ import {
   type NexusThemeId,
 } from "./themes";
 import { resolveAccessibleAccent } from "./accentContrast.js";
+import {
+  COLOR_MODE_STORAGE_KEY,
+  readColorModePreference,
+  persistColorModePreference,
+} from "./colorModePreference.js";
 
 export type AppearanceSettings = {
   theme: NexusThemeId;
@@ -53,7 +58,7 @@ export type ResolvedAppearance = {
   forcedColors: boolean;
 };
 
-export const APPEARANCE_STORAGE_KEY = "nexus.command.appearance.v2";
+export const APPEARANCE_STORAGE_KEY = COLOR_MODE_STORAGE_KEY;
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   theme: DEFAULT_THEME_ID,
@@ -154,25 +159,17 @@ export function validateAppearanceSettings(value: unknown): AppearanceSettings {
 }
 
 export function readAppearanceSettings(storage: Storage | null = browserStorage()): AppearanceSettings {
-  if (!storage) return { ...DEFAULT_APPEARANCE };
-  try {
-    return validateAppearanceSettings(JSON.parse(storage.getItem(APPEARANCE_STORAGE_KEY) ?? "null"));
-  } catch {
-    return { ...DEFAULT_APPEARANCE };
-  }
+  return {
+    ...DEFAULT_APPEARANCE,
+    colorMode: readColorModePreference(storage, DEFAULT_APPEARANCE.colorMode),
+  };
 }
 
 export function persistAppearanceSettings(
   settings: AppearanceSettings,
   storage: Storage | null = browserStorage(),
 ): boolean {
-  if (!storage) return false;
-  try {
-    storage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(settings));
-    return true;
-  } catch {
-    return false;
-  }
+  return persistColorModePreference(settings.colorMode, storage);
 }
 
 export function readSystemAppearance(): SystemAppearance {
@@ -335,11 +332,14 @@ export function useAppearanceSettings() {
     const syncStoredSettings = (event: StorageEvent) => {
       if (event.key !== APPEARANCE_STORAGE_KEY) return;
       if (event.newValue === null) {
-        setSettingsState({ ...DEFAULT_APPEARANCE });
+        setSettingsState((current) => ({ ...current, colorMode: DEFAULT_APPEARANCE.colorMode }));
         return;
       }
       try {
-        setSettingsState(validateAppearanceSettings(JSON.parse(event.newValue)));
+        const parsed = JSON.parse(event.newValue) as { colorMode?: unknown };
+        if (isColorMode(parsed.colorMode)) {
+          setSettingsState((current) => ({ ...current, colorMode: parsed.colorMode as NexusColorMode }));
+        }
       } catch {
         // Ignore malformed writes from another tab and preserve the last valid local settings.
       }

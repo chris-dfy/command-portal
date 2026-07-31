@@ -17,11 +17,14 @@ import {
 } from "../lib/hosted-capability-gate";
 import { displayLabel } from "../lib/presentation";
 import type { CapabilityRegistryProjection } from "../lib/types";
+import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 
 export function ProjectStudio({
+  onReplay,
   capabilityRegistry = null,
   session = { authenticated: false },
 }: {
+  onReplay?: OpenOperationalReplay;
   capabilityRegistry?: CapabilityRegistryProjection | null;
   session?: OperationalSession;
 } = {}) {
@@ -153,7 +156,7 @@ export function ProjectStudio({
         <button onClick={() => void compile()} disabled={busy || !projectId.trim() || !compileAction.available} title={compileAction.available ? undefined : compileAction.reason}><FileCheck2 size={15} /> Compile</button>
         <p className="boundary-note">Compile action: {compileAction.reason}</p>
       </div>
-      {artifact && <div className="artifact-result"><strong>{displayLabel(artifact.status ?? "unknown")}</strong><span>{artifact.confidence ?? "Unrated"} confidence · {displayLabel(artifact.estimateStatus ?? "no estimate")}</span><code>{artifact.proofId ?? artifact.reason ?? "Proof unavailable"}</code></div>}
+      {artifact && <div className="artifact-result"><strong>{displayLabel(artifact.status ?? "unknown")}</strong><span>{artifact.confidence ?? "Unrated"} confidence · {displayLabel(artifact.estimateStatus ?? "no estimate")}</span>{artifact.reason && <p>{artifact.reason}</p>}<OperationalResultLineage proofId={artifact.proofId} receiptId={artifact.receiptId} onOpenReplay={onReplay} empty={artifact.status === "compiled_verified" ? "The Runtime returned a verified artifact without discoverable proof or receipt lineage." : "No proof or receipt is claimed for this unavailable artifact."} /></div>}
     </DataPanel>
   </div>;
 }

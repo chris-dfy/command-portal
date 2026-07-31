@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const registryPath = new URL("../src/platform/surface-registry.json", import.meta.url);
+const registrySourcePath = new URL("../src/platform/surfaceRegistry.ts", import.meta.url);
 const appPath = new URL("../src/App.tsx", import.meta.url);
 const navigationPath = new URL("../src/platform/navigation.ts", import.meta.url);
 const clientPath = new URL("../src/lib/local-client.ts", import.meta.url);
@@ -120,6 +121,53 @@ test("every client surface has an explicit truthful state and reason", async () 
     document.surfaces.filter((surface) => surface.executive).map((surface) => surface.id),
     expectedSurfaceIds.slice(0, 8),
   );
+});
+
+test("portable cross-client asymmetry requires contract-backed limitation proof", async () => {
+  const [document, source, app] = await Promise.all([
+    registry(),
+    readFile(registrySourcePath, "utf8"),
+    readFile(appPath, "utf8"),
+  ]);
+  const allowedBases = new Set([
+    "runtime_contract",
+    "authority_boundary",
+    "hardware_dependency",
+    "external_provider_evidence",
+  ]);
+  const provenLimitations = [];
+  for (const surface of document.surfaces) {
+    for (const module of surface.modules) {
+      if (module.portability !== "portable") continue;
+      if (module.clients.desktop.state === module.clients.web.state) continue;
+      for (const client of document.clients) {
+        const projection = module.clients[client];
+        if (projection.state !== "unavailable") continue;
+        assert.ok(projection.limitationProof, `${module.moduleId}:${client} must provide limitation proof`);
+        assert.ok(allowedBases.has(projection.limitationProof.basis), `${module.moduleId}:${client} limitation basis`);
+        assert.ok(projection.limitationProof.evidenceRefs.length > 0, `${module.moduleId}:${client} evidence refs`);
+        assert.equal(projection.limitationProof.evidenceRefs.every((reference) => reference.trim().length > 0), true);
+        assert.doesNotMatch(projection.reason, /not (?:copied|implemented)|source (?:is|was) absent/i);
+        provenLimitations.push(`${module.moduleId}:${client}`);
+      }
+    }
+  }
+  assert.deepEqual(provenLimitations, [
+    "evidence.acceptance-receipt:web",
+    "evidence.distribution-receipt:web",
+    "evidence.package-manifest:web",
+    "receipts.acceptance-trial:web",
+    "receipts.distribution-receipt:web",
+  ]);
+  assert.match(source, /assertNexusPortableLimitationProofs\(\);/);
+  assert.match(source, /contract-backed limitation proof/);
+
+  const commandCenter = document.surfaces
+    .find((surface) => surface.id === "dashboard")
+    ?.modules.find((module) => module.moduleId === "dashboard.command-center");
+  assert.equal(commandCenter?.clients.web.state, "read_only");
+  assert.equal(commandCenter?.clients.web.componentKey, "web.dashboard.command-center");
+  assert.match(app, /"web\.dashboard\.command-center": <HostedCommandDirectory/);
 });
 
 test("web state reflects the implemented Work Session and connector boundaries", async () => {

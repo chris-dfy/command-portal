@@ -6,6 +6,12 @@ import {
   MINIMUM_ACCENT_CONTRAST,
   resolveAccessibleAccent,
 } from "../src/appearance/accentContrast.js";
+import {
+  COLOR_MODE_STORAGE_KEY,
+  LEGACY_APPEARANCE_STORAGE_KEYS,
+  persistColorModePreference,
+  readColorModePreference,
+} from "../src/appearance/colorModePreference.js";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -35,7 +41,9 @@ test("appearance themes preserve the canonical NEXUS palette and browser color m
 
 test("appearance persistence and document attributes are browser safe", async () => {
   const source = await read("../src/appearance/useAppearanceSettings.ts");
-  assert.match(source, /nexus\.command\.appearance\.v2/);
+  assert.match(source, /COLOR_MODE_STORAGE_KEY/);
+  assert.match(source, /persistColorModePreference\(settings\.colorMode, storage\)/);
+  assert.doesNotMatch(source, /JSON\.stringify\(settings\)/);
   assert.match(source, /candidate\.accentColor\.toLowerCase\(\) === "#62d2ff"/);
   assert.match(source, /"--nx-accent": resolved\.accentColor/);
   assert.match(source, /typeof window === "undefined"/);
@@ -75,6 +83,33 @@ test("appearance persistence and document attributes are browser safe", async ()
   assert.match(source, /addEventListener\("change"/);
   assert.match(source, /removeEventListener\("change"/);
   assert.doesNotMatch(source, /@tauri|\binvoke\s*\(|windowBridge|runtimeBridge/i);
+});
+
+test("persistence retains only the Light Dark System preference and migrates legacy appearance payloads", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+
+  values.set(LEGACY_APPEARANCE_STORAGE_KEYS[0], JSON.stringify({
+    colorMode: "light",
+    accentColor: "#ff0000",
+    transparency: 55,
+    compactMode: true,
+  }));
+  assert.equal(readColorModePreference(storage), "light");
+  assert.equal(persistColorModePreference("dark", storage), true);
+  assert.deepEqual([...values.entries()], [[
+    COLOR_MODE_STORAGE_KEY,
+    JSON.stringify({ colorMode: "dark" }),
+  ]]);
+  assert.equal(readColorModePreference(storage), "dark");
+  assert.equal(persistColorModePreference("system", storage), true);
+  assert.deepEqual(JSON.parse(values.get(COLOR_MODE_STORAGE_KEY)), { colorMode: "system" });
+  assert.equal(persistColorModePreference("sepia", storage), false);
+  assert.deepEqual(JSON.parse(values.get(COLOR_MODE_STORAGE_KEY)), { colorMode: "system" });
 });
 
 test("light appearance rejects low-contrast persisted accents", async () => {

@@ -33,6 +33,7 @@ import {
   matchesOperationalReplayExplanation,
   matchesOperationalReplayStage,
 } from "../lib/operational-replay-selection";
+import type { OperationalReplayTarget } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
 
 type RuntimeRecord = Record<string, unknown>;
@@ -223,7 +224,7 @@ function safeStageExport(stage: ReplayStage) {
   };
 }
 
-export function OperationalReplay({ requestedMissionId }: { requestedMissionId?: string }) {
+export function OperationalReplay({ requestedTarget }: { requestedTarget?: OperationalReplayTarget }) {
   const [sessions, setSessions] = useState<ReplaySession[]>([]);
   const sessionsRef = useRef<ReplaySession[]>([]);
   const [sourceState, setSourceState] = useState<SourceState>("loading");
@@ -233,6 +234,7 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
   const replayListSequenceRef = useRef(0);
   const replayStageSequenceRef = useRef(0);
   const explanationSequenceRef = useRef(0);
+  const targetLoadSequenceRef = useRef(0);
   const currentStageIdRef = useRef("");
   const stageButtonsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const [detail, setDetail] = useState<RuntimeRecord | null>(null);
@@ -266,7 +268,12 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
     ]);
     if (requestSequence !== replayListSequenceRef.current) return;
     if (replaysResult.status === "fulfilled") {
-      const next = sessionsFrom(replaysResult.value);
+      const listed = sessionsFrom(replaysResult.value);
+      const selected = selectedReplayIdRef.current;
+      const retained = selected
+        ? sessionsRef.current.filter((session) => session.id === selected)
+        : [];
+      const next = [...new Map([...retained, ...listed].map((session) => [session.id, session])).values()];
       sessionsRef.current = next;
       setSessions(next);
       setSourceState(next.length ? "available" : "empty");
@@ -289,13 +296,18 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
 
   useEffect(() => { void refreshList(); }, [refreshList]);
   useEffect(() => {
-    if (!requestedMissionId) return;
-    let cancelled = false;
-    localNexusClient.operationalReplayForMission(requestedMissionId).then((value) => {
-      if (cancelled) return;
+    if (!requestedTarget?.id) return;
+    const requestSequence = ++targetLoadSequenceRef.current;
+    const request = requestedTarget.kind === "mission"
+      ? localNexusClient.operationalReplayForMission(requestedTarget.id)
+      : requestedTarget.kind === "receipt"
+        ? localNexusClient.operationalReplayForReceipt(requestedTarget.id)
+        : localNexusClient.operationalReplay(requestedTarget.id);
+    request.then((value) => {
+      if (requestSequence !== targetLoadSequenceRef.current) return;
       const linked = sessionsFrom(value);
       if (!linked.length) {
-        setSourceNotice(`Runtime returned no Replay linked to mission ${requestedMissionId}.`);
+        setSourceNotice(`Runtime returned no Replay linked to ${requestedTarget.kind} ${requestedTarget.id}.`);
         return;
       }
       const merged = new Map(sessionsRef.current.map((item) => [item.id, item]));
@@ -306,10 +318,12 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
       selectReplay(linked[0].id);
       setSourceState("available");
     }).catch((caught) => {
-      if (!cancelled) setSourceNotice(caught instanceof Error ? caught.message : "Mission-linked Replay is unavailable.");
+      if (requestSequence === targetLoadSequenceRef.current) {
+        setSourceNotice(caught instanceof Error ? caught.message : "Linked Operational Replay is unavailable.");
+      }
     });
-    return () => { cancelled = true; };
-  }, [requestedMissionId, selectReplay]);
+    return () => { targetLoadSequenceRef.current += 1; };
+  }, [requestedTarget?.id, requestedTarget?.kind, selectReplay]);
 
   const loadReplay = useCallback(async (replayId: string, quiet = false) => {
     if (!replayId) return;

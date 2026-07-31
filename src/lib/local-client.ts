@@ -1068,14 +1068,19 @@ export const localNexusClient = Object.freeze({
   projectCompile: (projectId: string, artifactType: string, options: Record<string, unknown>) => post<CompiledArtifact>(`/projects/${encodeURIComponent(projectId)}/compile`, { artifactType, options }),
   voiceStatus: () => request<Record<string, unknown>>("/voice-operator/status"),
   voiceHistory: () => request<{ events?: Array<Record<string, unknown>> }>("/voice-operator/history"),
-  routeTranscript: (transcript: string, source: "browser_speech" | "text_fallback", signal?: AbortSignal) => request<VoiceRouteResult>(
+  routeTranscript: (
+    transcript: string,
+    source: "browser_speech" | "text_fallback",
+    signal?: AbortSignal,
+    idempotencyKey = `voice-transcript:${globalThis.crypto.randomUUID()}`,
+  ) => request<VoiceRouteResult>(
     "/voice-operator/route-transcript",
     {
       method: "POST",
       body: JSON.stringify({ transcript, source }),
       ...(signal ? { signal } : {}),
     },
-    `voice-transcript:${globalThis.crypto.randomUUID()}`,
+    idempotencyKey,
   ),
   missions: () => request<Record<string, unknown>>("/missions"),
   mission: (missionId: string) => request<Record<string, unknown>>(

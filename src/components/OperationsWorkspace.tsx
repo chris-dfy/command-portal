@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Activity, ClipboardCheck, FileCheck2, Network, RefreshCw, Route, ShieldAlert, ShieldCheck } from "lucide-react";
 import { DataPanel, EmptyRecord } from "./DataPanel";
+import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
 import { localNexusClient, operationalSessionClient, type OperationalSession } from "../lib/local-client";
 import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
@@ -33,12 +34,14 @@ const missionId = (mission: RuntimeRecord) => text(mission.missionId ?? mission.
 const revisionLabel = (value: string) => /^[0-9a-f]{32,}$/i.test(value) ? value.slice(0, 12) : value;
 
 export function OperationsWorkspace({
+  onReplay,
   session,
   onSessionChange,
   runtimeCommit,
   programAlphaCommit,
   capabilityRegistry,
 }: {
+  onReplay?: OpenOperationalReplay;
   session: OperationalSession;
   onSessionChange: (session: OperationalSession) => void;
   runtimeCommit?: string;
@@ -156,6 +159,13 @@ export function OperationsWorkspace({
   const replayId = missionReplay
     ? text(missionReplay.replayId ?? missionReplay.runId ?? missionReplay.run_id ?? missionReplay.id, "")
     : text(object(selectedMission?.replay).replayId ?? selectedMission?.replay_run_id, "Not recorded");
+  const selectedMissionIdentity = selectedMission ? missionId(selectedMission) : "";
+  const selectedReceiptId = missionReceipts.length
+    ? text(missionReceipts[0].receiptId ?? missionReceipts[0].receipt_id, "")
+    : "";
+  const plannedMissionId = result
+    ? text(result.missionId ?? object(result.mission).missionId ?? object(result.mission).mission_id, "")
+    : "";
 
   async function planMission() {
     if (!missionCreationAllowed) {
@@ -222,7 +232,7 @@ export function OperationsWorkspace({
       <div className="operation-actions"><button onClick={() => void planMission()} disabled={busy || !objective.trim() || !missionCreationAllowed}><ClipboardCheck size={15} /> Plan governed Mission</button><button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} /> Refresh</button></div>
       <p className="boundary-note">Mission planning gate for <code>POST /missions/plan</code>: {missionCreationReason}</p>
       <p className="boundary-note">Readiness context only: {missionCapabilityReadinessNote}</p>
-      {result && <p className="boundary-note">Runtime accepted mission {text(result.missionId ?? object(result.mission).missionId ?? object(result.mission).mission_id, "response recorded")}.</p>}
+      {result && <><p className="boundary-note">Runtime accepted mission {plannedMissionId || "response recorded"}.</p><OperationalResultLineage missionId={plannedMissionId} onOpenReplay={onReplay} empty="The accepted Mission response did not include a discoverable Mission identity." /></>}
     </DataPanel>
 
     <DataPanel eyebrow="Mission portfolio" title="Runtime Mission Executor state" icon={<Network size={18} />}>
@@ -239,6 +249,7 @@ export function OperationsWorkspace({
 
     <DataPanel eyebrow="Operational Replay" title="Mission evolution reference" icon={<FileCheck2 size={18} />}>
       {missionReplay ? <div className="compact-records"><article><strong>{replayId}</strong><span>{text(missionReplay.status, "recorded")} · {text(missionReplay.contentDigest ?? missionReplay.content_digest, "digest unavailable")}</span><StatusPill value={text(missionReplay.status, "recorded")} /></article></div> : <EmptyRecord>The selected mission has no retrievable Replay reference.</EmptyRecord>}
+      {selectedMission && <OperationalResultLineage replayId={replayId === "Not recorded" ? undefined : replayId} receiptId={selectedReceiptId} missionId={selectedMissionIdentity} onOpenReplay={onReplay} />}
       <p className="boundary-note">Mission status, task graph, receipts, and Replay come from independent canonical Runtime routes. One unavailable source does not fabricate or erase another.</p>
     </DataPanel>
   </div>;

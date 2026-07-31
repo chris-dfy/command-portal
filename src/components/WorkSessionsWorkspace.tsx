@@ -9,6 +9,7 @@ import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gat
 import type { CapabilityRegistryProjection } from "../lib/types";
 import { nexusModuleById } from "../platform/surfaceRegistry";
 import { DataPanel, EmptyRecord } from "./DataPanel";
+import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
 
 type WorkSessionRecord = {
@@ -55,9 +56,11 @@ function workSessionList(value: unknown): WorkSessionRecord[] {
 }
 
 export function WorkSessionsWorkspace({
+  onReplay,
   capabilityRegistry = null,
   session = { authenticated: false },
 }: {
+  onReplay?: OpenOperationalReplay;
   capabilityRegistry?: CapabilityRegistryProjection | null;
   session?: OperationalSession;
 } = {}) {
@@ -191,6 +194,13 @@ export function WorkSessionsWorkspace({
     !stepAvailable ? `Step: ${stepAction.available ? stepModule?.clients.web.reason : stepAction.reason}` : "",
     !continueAvailable ? `Continue: ${continueAction.available ? continueModule?.clients.web.reason : continueAction.reason}` : "",
   ].filter(Boolean);
+  const loadedReceiptId = typeof receipt?.receiptId === "string"
+    ? receipt.receiptId
+    : typeof receipt?.workSessionReceiptId === "string"
+      ? receipt.workSessionReceiptId
+      : undefined;
+  const resultReceiptId = loadedReceiptId ?? selected?.receiptIds?.[0];
+  const resultProofId = selected?.proofIds?.[0];
   return <div className="experience-grid work-sessions-workspace">
     <DataPanel eyebrow="Governed autonomy" title="Bounded Work Session" icon={<Route size={18} />} className="span-2">
       <p className="boundary-note">
@@ -234,6 +244,7 @@ export function WorkSessionsWorkspace({
           <div><dt>Approvals</dt><dd>{selected.approvalIds?.length ?? 0}</dd></div>
         </dl>
         {selected.honestNarration && <p>{selected.honestNarration}</p>}
+        <OperationalResultLineage proofId={resultProofId} receiptId={resultReceiptId} onOpenReplay={onReplay} empty="This Work Session has not returned proof, receipt, or Replay lineage." />
         <div className="work-sessions-workspace__actions">
           <button type="button" disabled={!canStep} title={stepAvailable ? undefined : stepAction.available ? stepModule?.clients.web.reason : stepAction.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "step"))}>
             <StepForward size={15} aria-hidden="true" /> step

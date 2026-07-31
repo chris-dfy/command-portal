@@ -22,6 +22,10 @@ import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 
 type RuntimeRecord = Record<string, unknown>;
+type PendingKnowledgeIntake = {
+  payload: Parameters<typeof localNexusClient.knowledgeIntake>[0];
+  idempotencyKey: string;
+};
 type SourceState = "loading" | "available" | "empty" | "unavailable";
 type KnowledgeSources = {
   readiness: RuntimeRecord | null;
@@ -144,6 +148,7 @@ export function KnowledgeWorkspace({
   const [intakeSource, setIntakeSource] = useState<"model_native" | "platform_knowledge" | "tenant_knowledge" | "retrieved_evidence" | "live_external_source" | "runtime_evidence">("runtime_evidence");
   const [completeIntakeTask, setCompleteIntakeTask] = useState(false);
   const [expectedDeployedCommit, setExpectedDeployedCommit] = useState("");
+  const [pendingIntake, setPendingIntake] = useState<PendingKnowledgeIntake | null>(null);
   const [busy, setBusy] = useState<"" | "intake" | "baseline" | "candidate" | "promotion">("");
   const [errors, setErrors] = useState<string[]>([]);
   const [operationResult, setOperationResult] = useState<RuntimeRecord | null>(null);
@@ -348,30 +353,39 @@ export function KnowledgeWorkspace({
 
   async function submitIntake() {
     if (!intakeGate.allowed) { setErrors([intakeGate.reason]); return; }
-    const missionId = identifier(intakeMission ?? {}, ["missionId", "mission_id", "id"]);
-    const confidence = Number(intakeConfidence);
-    if (!missionId || !intakeTaskId || !intakeOrigin.trim() || !intakeClaim.trim() || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-      setErrors(["Select a mission task and provide a valid origin, factual claim, and confidence between zero and one."]);
-      return;
-    }
-    setBusy("intake"); setErrors([]); setOperationResult(null);
-    try {
-      const result = await localNexusClient.knowledgeIntake({
-        missionId,
-        taskId: intakeTaskId,
-        origin: intakeOrigin.trim(),
-        sourceClassification: intakeSource,
-        confidence,
-        claim: intakeClaim.trim(),
-        supportingArtifacts: [],
-        relationships: [],
-        operationalContext: {},
-        completeTask: completeIntakeTask,
-      }, `knowledge-intake-${globalThis.crypto.randomUUID()}`);
-      setOperationResult(result);
+    let operation = pendingIntake;
+    if (!operation) {
+      const missionId = identifier(intakeMission ?? {}, ["missionId", "mission_id", "id"]);
+      const confidence = Number(intakeConfidence);
+      if (!missionId || !intakeTaskId || !intakeOrigin.trim() || !intakeClaim.trim() || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+        setErrors(["Select a mission task and provide a valid origin, factual claim, and confidence between zero and one."]);
+        return;
+      }
+      operation = {
+        payload: {
+          missionId,
+          taskId: intakeTaskId,
+          origin: intakeOrigin.trim(),
+          sourceClassification: intakeSource,
+          confidence,
+          claim: intakeClaim.trim(),
+          supportingArtifacts: [],
+          relationships: [],
+          operationalContext: {},
+          completeTask: completeIntakeTask,
+        },
+        idempotencyKey: `knowledge-intake-${globalThis.crypto.randomUUID()}`,
+      };
+      setPendingIntake(operation);
       setIntakeOrigin("");
       setIntakeClaim("");
       setCompleteIntakeTask(false);
+    }
+    setBusy("intake"); setErrors([]); setOperationResult(null);
+    try {
+      const result = await localNexusClient.knowledgeIntake(operation.payload, operation.idempotencyKey);
+      setOperationResult(result);
+      setPendingIntake(null);
       await refresh();
     } catch (caught) {
       setErrors([caught instanceof Error ? caught.message : "Knowledge intake failed safely."]);
@@ -380,9 +394,11 @@ export function KnowledgeWorkspace({
 
   async function establishBaseline() {
     if (!baselineGate.allowed) { setErrors([baselineGate.reason]); return; }
+    const submittedExpectedCommit = expectedDeployedCommit.trim();
+    setExpectedDeployedCommit("");
     setBusy("baseline"); setErrors([]); setOperationResult(null);
     try {
-      const payload = expectedDeployedCommit.trim() ? { expectedDeployedCommit: expectedDeployedCommit.trim() } : {};
+      const payload = submittedExpectedCommit ? { expectedDeployedCommit: submittedExpectedCommit } : {};
       const result = await localNexusClient.establishRuntimeBaseline(payload, `baseline-${globalThis.crypto.randomUUID()}`);
       setOperationResult(result);
       await refresh();
@@ -442,14 +458,14 @@ export function KnowledgeWorkspace({
     </DataPanel>
     <DataPanel eyebrow="Knowledge intake" title="Admit factual Evidence to a Mission task" icon={<BookOpen size={18} />}>
       <p className="boundary-note">Intake adds an evidence-backed record to the temporary Mission Store. It does not promote anything into permanent Knowledge Store.</p>
-      <label className="operation-field"><span>Acquisition mission</span><select value={selectedAcquisition} onChange={(event) => setSelectedAcquisition(event.target.value)} disabled={!sources.acquisitions.length}>{sources.acquisitions.length ? sources.acquisitions.map((item, index) => { const id = identifier(item, ["missionId", "mission_id", "id"], `mission-${index + 1}`); return <option key={id} value={id}>{text(item.title ?? item.objective, id)}</option>; }) : <option value="">No Mission Store record available</option>}</select></label>
-      <label className="operation-field"><span>Mission task</span><select value={intakeTaskId} onChange={(event) => setIntakeTaskId(event.target.value)} disabled={!intakeTasks.length}>{intakeTasks.length ? intakeTasks.map((task, index) => { const id = identifier(task, ["taskId", "task_id", "id"], `task-${index + 1}`); return <option key={id} value={id}>{text(task.objective ?? task.title, id)} · {stateOf(task, "unknown")}</option>; }) : <option value="">No task available for intake</option>}</select></label>
-      <label className="operation-field"><span>Evidence origin</span><input value={intakeOrigin} onChange={(event) => setIntakeOrigin(event.target.value)} placeholder="runtime://collector/source or governed source locator" autoComplete="off" /></label>
-      <label className="operation-field"><span>Source classification</span><select value={intakeSource} onChange={(event) => setIntakeSource(event.target.value as typeof intakeSource)}><option value="runtime_evidence">Runtime Evidence</option><option value="live_external_source">Live external source</option><option value="retrieved_evidence">Retrieved Evidence</option><option value="tenant_knowledge">Tenant knowledge</option><option value="platform_knowledge">Platform knowledge</option><option value="model_native">Model-native candidate</option></select></label>
-      <label className="operation-field"><span>Factual claim</span><textarea value={intakeClaim} onChange={(event) => setIntakeClaim(event.target.value)} placeholder="Record the observed claim without adding Authority or approval assertions." /></label>
-      <label className="operation-field"><span>Evidence confidence (0–1)</span><input type="number" min="0" max="1" step="0.01" value={intakeConfidence} onChange={(event) => setIntakeConfidence(event.target.value)} /></label>
-      <label className="operation-field"><span><input type="checkbox" checked={completeIntakeTask} onChange={(event) => setCompleteIntakeTask(event.target.checked)} /> Mark task complete only if this Evidence satisfies its recorded criterion</span></label>
-      <button className="nx-action" onClick={() => void submitIntake()} disabled={!selectedAcquisition || !intakeTaskId || !intakeOrigin.trim() || !intakeClaim.trim() || Boolean(busy) || !intakeGate.allowed}><BookOpen size={14} />{busy === "intake" ? "Admitting Evidence…" : "Admit Evidence"}</button>
+      <label className="operation-field"><span>Acquisition mission</span><select value={selectedAcquisition} onChange={(event) => { setSelectedAcquisition(event.target.value); setPendingIntake(null); }} disabled={!sources.acquisitions.length}>{sources.acquisitions.length ? sources.acquisitions.map((item, index) => { const id = identifier(item, ["missionId", "mission_id", "id"], `mission-${index + 1}`); return <option key={id} value={id}>{text(item.title ?? item.objective, id)}</option>; }) : <option value="">No Mission Store record available</option>}</select></label>
+      <label className="operation-field"><span>Mission task</span><select value={intakeTaskId} onChange={(event) => { setIntakeTaskId(event.target.value); setPendingIntake(null); }} disabled={!intakeTasks.length}>{intakeTasks.length ? intakeTasks.map((task, index) => { const id = identifier(task, ["taskId", "task_id", "id"], `task-${index + 1}`); return <option key={id} value={id}>{text(task.objective ?? task.title, id)} · {stateOf(task, "unknown")}</option>; }) : <option value="">No task available for intake</option>}</select></label>
+      <label className="operation-field"><span>Evidence origin</span><input value={intakeOrigin} onChange={(event) => { setIntakeOrigin(event.target.value); setPendingIntake(null); }} placeholder="runtime://collector/source or governed source locator" autoComplete="off" /></label>
+      <label className="operation-field"><span>Source classification</span><select value={intakeSource} onChange={(event) => { setIntakeSource(event.target.value as typeof intakeSource); setPendingIntake(null); }}><option value="runtime_evidence">Runtime Evidence</option><option value="live_external_source">Live external source</option><option value="retrieved_evidence">Retrieved Evidence</option><option value="tenant_knowledge">Tenant knowledge</option><option value="platform_knowledge">Platform knowledge</option><option value="model_native">Model-native candidate</option></select></label>
+      <label className="operation-field"><span>Factual claim</span><textarea value={intakeClaim} onChange={(event) => { setIntakeClaim(event.target.value); setPendingIntake(null); }} placeholder="Record the observed claim without adding Authority or approval assertions." autoComplete="off" /></label>
+      <label className="operation-field"><span>Evidence confidence (0–1)</span><input type="number" min="0" max="1" step="0.01" value={intakeConfidence} onChange={(event) => { setIntakeConfidence(event.target.value); setPendingIntake(null); }} /></label>
+      <label className="operation-field"><span><input type="checkbox" checked={completeIntakeTask} onChange={(event) => { setCompleteIntakeTask(event.target.checked); setPendingIntake(null); }} /> Mark task complete only if this Evidence satisfies its recorded criterion</span></label>
+      <button className="nx-action" onClick={() => void submitIntake()} disabled={(!pendingIntake && (!selectedAcquisition || !intakeTaskId || !intakeOrigin.trim() || !intakeClaim.trim())) || Boolean(busy) || !intakeGate.allowed}><BookOpen size={14} />{busy === "intake" ? "Admitting Evidence…" : pendingIntake ? "Retry exact Evidence admission" : "Admit Evidence"}</button>
       <p className="boundary-note">Knowledge intake gate: {intakeGate.reason}</p>
       <p className="boundary-note">Mission detail source: {missionStoreDetail ? "Mission Store" : "unavailable"}. Acquisition detail source: {acquisitionDetail ? "Knowledge Acquisition" : "unavailable"}.</p>
     </DataPanel>

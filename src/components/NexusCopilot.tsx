@@ -273,7 +273,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       </section>
 
       <form className="nexus-copilot__composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}>
-        <input value={input} onChange={(event) => setInput(event.target.value)} disabled={!interactionAction.available} placeholder={interactionAction.available ? "Ask NEXUS…" : "NEXUS interaction is unavailable"} aria-label="Ask NEXUS" />
+        <input value={input} onChange={(event) => setInput(event.target.value)} disabled={!interactionAction.available} placeholder={interactionAction.available ? "Ask NEXUS…" : "NEXUS interaction is unavailable"} aria-label="Ask NEXUS" autoComplete="off" />
         <button type="button" onClick={voiceConnected ? toggleMicrophoneMute : () => void askByVoice()} disabled={voiceConnected ? !realtimeAction.available : !browserSpeech.input || !textAction.available || browserListening} aria-label={voiceConnected ? microphoneMuted ? "Unmute microphone" : "Mute microphone" : "Ask NEXUS by voice"}>{microphoneMuted ? <MicOff size={17} /> : <Mic size={17} />}</button>
         <button type="submit" disabled={!interactionAction.available || !input.trim() || busy} aria-label="Send message"><Send size={17} /></button>
       </form>
