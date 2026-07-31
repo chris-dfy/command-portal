@@ -584,7 +584,7 @@ export function App() {
       capabilityRegistryFailure,
     ),
     hostedActionAccess,
-    "operations:write",
+    "operations:read",
   );
   const registryRailGroups = RAIL_GROUPS.map((group) => ({
     ...group,

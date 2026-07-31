@@ -2825,6 +2825,69 @@ test("Document query requires operations read without borrowing upload or write 
   assert.equal(observed.length, 1);
 });
 
+test("Voice transcript routing requires operations read without borrowing realtime write scope", async () => {
+  const observed = [];
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "operator",
+    operationalScopes: ["operations:read"],
+    operationalCookieSecure: false,
+  };
+  const base = await start(
+    async () => runtimeResponse({}),
+    config,
+    async () => localResponse({}),
+    async (url, options) => {
+      observed.push({ url, options });
+      return localResponse({
+        recordType: "nexus_voice_operator_route_result",
+        routed: true,
+        secretValuesExposed: false,
+      });
+    },
+  );
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const headers = {
+    Cookie: cookie,
+    "Content-Type": "application/json",
+    "X-CSRF-Token": session.session.csrfToken,
+    "Idempotency-Key": "voice-route-read-scope-0001",
+  };
+  const transcript = await fetch(`${base}/api/operations/voice-operator/route-transcript`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ transcript: "Summarize project Alpha", source: "text_fallback" }),
+  });
+  assert.equal(transcript.status, 200);
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].url, "http://127.0.0.1:9876/voice-operator/route-transcript");
+  assert.equal(observed[0].options.headers["X-NEXUS-Scopes"], "operations:read");
+  const realtime = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/sdp",
+      "X-CSRF-Token": session.session.csrfToken,
+    },
+    body: "v=0\r\na=offer\r\n".repeat(12),
+  });
+  assert.equal(realtime.status, 403);
+  assert.equal(observed.length, 1);
+});
+
 test("hosted Knowledge intake is canonical, scoped, CSRF-protected, idempotent, and server-bound", async () => {
   const observed = [];
   const config = {

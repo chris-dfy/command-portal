@@ -526,7 +526,11 @@ test("hosted Project, Knowledge, Edge, Voice, Copilot, and canonical execution c
   ]) {
     assert.match(app, new RegExp(`PORTAL_CANONICAL_ACTIONS\\.${actionName}`));
   }
-  assert.ok((app.match(/"operations:write"/g) ?? []).length >= 3);
+  assert.ok((app.match(/"operations:write"/g) ?? []).length >= 2);
+  assert.match(
+    app,
+    /PORTAL_CANONICAL_ACTIONS\.voiceOperatorTranscript[\s\S]{0,240}"operations:read"/,
+  );
 
   assert.match(projects, /capabilityId: PROJECTS_PLANNING_CAPABILITY_ID/);
   assert.match(hostedGate, /PROJECTS_PLANNING_CAPABILITY_ID = "projects\.nexicron_planning"/);
