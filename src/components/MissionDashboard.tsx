@@ -197,16 +197,17 @@ export function MissionDashboard({
   }, [selected]);
 
   async function plan() {
-    if (!objective.trim()) return;
+    const submittedObjective = objective.trim();
+    if (!submittedObjective) return;
     if (hosted && !missionCreationAllowed) {
       setError(missionCreationReason);
       return;
     }
+    setObjective("");
     setBusy(true);
     setError("");
     try {
-      await localNexusClient.planMission(objective.trim());
-      setObjective("");
+      await localNexusClient.planMission(submittedObjective);
       await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Mission planning failed safely.");
@@ -320,7 +321,7 @@ export function MissionDashboard({
       <NexusMetric label="Mission Health" value={health} detail={selectedMission ? `${progress}% selected progress` : "No selected Runtime mission"} tone={health === "operational" || health === "stable" ? "success" : health === "attention" ? "attention" : "neutral"} />
     </section>
     {error && <section className="operation-error" role="alert"><ShieldAlert size={18} /><span>{error}</span></section>}
-    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the governed outcome NEXUS should coordinate…" /></label><button onClick={() => void plan()} disabled={busy || !objective.trim() || !missionCreationAllowed}><Network size={15} />Plan governed mission</button><small>{missionCreationReason} {missionReadinessNote}</small></div>
+    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the governed outcome NEXUS should coordinate…" autoComplete="off" /></label><button onClick={() => void plan()} disabled={busy || !objective.trim() || !missionCreationAllowed}><Network size={15} />Plan governed mission</button><small>{missionCreationReason} {missionReadinessNote}</small></div>
     <div className="mission-dashboard__grid">
       <DataPanel eyebrow="Mission portfolio" title="Active, blocked, and completed missions" icon={<CircleGauge size={18} />}>
         <div className="mission-list">{missionState === "loading" ? <p className="replay-loading">Loading mission history from Runtime…</p> : missionState === "unavailable" ? <EmptyRecord>Runtime did not supply mission history. Mission status is unavailable.</EmptyRecord> : missions.length ? missions.map((mission) => { const id = missionId(mission); return <button key={id} data-active={id === selected} onClick={() => setSelected(id)}><div><strong>{text(mission.userObjective ?? mission.objective ?? mission.title, "Mission")}</strong><small>{id}</small></div><StatusPill value={statusOf(mission)} /></button>; }) : <EmptyRecord>No missions have been recorded by Runtime.</EmptyRecord>}</div>

@@ -203,7 +203,11 @@ export function ConclaveWorkspace({
   async function startInvestigation() {
     const restartCanonical = workspace?.lifecyclePosture === "legacy_read_only"
       && workspace.availableActions.includes("restart_canonical");
-    const value = (restartCanonical ? workspace.proposal : proposal).trim();
+    const value = (
+      restartCanonical
+        ? workspace.proposal
+        : proposal.trim() || pendingCreate?.proposal || ""
+    ).trim();
     if (!value || busy) return;
     if (!creationAllowed) {
       setError(creationReason);
@@ -227,6 +231,7 @@ export function ConclaveWorkspace({
         () => globalThis.crypto.randomUUID(),
       );
       setPendingCreate(createIdentity);
+      setProposal("");
       const next = await startConclaveInvestigation(
         {
           proposal: createIdentity.proposal,
@@ -238,7 +243,6 @@ export function ConclaveWorkspace({
       setRun(next);
       setWorkspaces((current) => orderConclaveDirectory([next.workspace, ...current.filter((item) => item.missionId !== next.workspace.missionId)]));
       setSourceState("available");
-      setProposal("");
       if (next.runPending) {
         setError(`${next.runError ?? "The governed run did not complete."} The created workspace was preserved; retry the exact idempotent run below.`);
       }
@@ -355,7 +359,7 @@ export function ConclaveWorkspace({
     </section>
 
     <DataPanel eyebrow="Investigation mission" title="Frame the operational question" icon={<Scale size={18} />}>
-      <div className="conclave-composer"><label htmlFor="conclave-workspace">Durable Runtime records</label><select id="conclave-workspace" value={workspace?.missionId ?? ""} onChange={(event) => { const selected = workspaces.find((item) => item.missionId === event.target.value); setRun(selected ? conclaveRunFromWorkspace(selected) : null); }} disabled={sourceState === "loading"}><option value="">{sourceState === "loading" ? "Loading Runtime records…" : "New governed Review — browser-local draft"}</option>{orderedWorkspaces.map((item) => <option key={item.missionId} value={item.missionId}>{conclaveDirectoryLabel(item)}</option>)}</select><label htmlFor="conclave-proposal">Browser-local Review draft</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000 · not yet a Runtime record</small><span className="conclave-composer__actions">{run?.runPending && <button className="conclave-secondary-action" onClick={() => void retryInvestigation()} disabled={busy || !runAllowed} title={runAllowed ? undefined : runAction.reason}><RefreshCw size={16} />Run governed review</button>}{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={busy || !creationAllowed || (workspace ? !(workspace.lifecyclePosture === "legacy_read_only" && workspace.availableActions.includes("restart_canonical")) : !proposal.trim())} title={creationAllowed ? undefined : creationReason}><BrainCircuit size={16} />{busy ? "Coordinating…" : workspace?.lifecyclePosture === "legacy_read_only" ? "Restart as canonical Review" : pendingCreate ? "Retry governed start" : "Start governed Review"}</button></span></div></div>
+      <div className="conclave-composer"><label htmlFor="conclave-workspace">Durable Runtime records</label><select id="conclave-workspace" value={workspace?.missionId ?? ""} onChange={(event) => { const selected = workspaces.find((item) => item.missionId === event.target.value); setRun(selected ? conclaveRunFromWorkspace(selected) : null); }} disabled={sourceState === "loading"}><option value="">{sourceState === "loading" ? "Loading Runtime records…" : "New governed Review — browser-local draft"}</option>{orderedWorkspaces.map((item) => <option key={item.missionId} value={item.missionId}>{conclaveDirectoryLabel(item)}</option>)}</select><label htmlFor="conclave-proposal">Browser-local Review draft</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} autoComplete="off" /><div><small>{proposal.length.toLocaleString()} / 8,000 · not yet a Runtime record</small><span className="conclave-composer__actions">{run?.runPending && <button className="conclave-secondary-action" onClick={() => void retryInvestigation()} disabled={busy || !runAllowed} title={runAllowed ? undefined : runAction.reason}><RefreshCw size={16} />Run governed review</button>}{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={busy || !creationAllowed || (workspace ? !(workspace.lifecyclePosture === "legacy_read_only" && workspace.availableActions.includes("restart_canonical")) : !proposal.trim() && !pendingCreate?.proposal)} title={creationAllowed ? undefined : creationReason}><BrainCircuit size={16} />{busy ? "Coordinating…" : workspace?.lifecyclePosture === "legacy_read_only" ? "Restart as canonical Review" : pendingCreate ? "Retry governed start" : "Start governed Review"}</button></span></div></div>
       {error && <p className="conclave-error" role="alert">{error}</p>}
       <p className="boundary-note">Typing remains browser-local. No Runtime record is requested until the operator invokes Start governed Review and both exact create and run admissions are available.</p>
       <p className="boundary-note">Workspace directory: <strong>{sourceState}</strong>. The portal does not substitute a static one-shot review when durable Conclave is unavailable.</p>

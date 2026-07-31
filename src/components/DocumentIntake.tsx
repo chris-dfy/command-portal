@@ -106,12 +106,15 @@ export function DocumentIntake({
   }
 
   async function ask() {
+    const submittedQuestion = question.trim();
+    if (!submittedQuestion) return;
     if (!queryAction.available) {
       setAnswer(queryAction.reason);
       return;
     }
+    setQuestion("");
     setBusy(true); setAnswer(null);
-    try { setAnswer((await localNexusClient.intakeQuery(question, projectId.trim() || undefined)).answer); }
+    try { setAnswer((await localNexusClient.intakeQuery(submittedQuestion, projectId.trim() || undefined)).answer); }
     catch (error) { setAnswer(messageFrom(error)); }
     finally { setBusy(false); }
   }
@@ -134,7 +137,7 @@ export function DocumentIntake({
     </DataPanel>
 
     <DataPanel eyebrow="Evidence-grounded" title="Ask ingested sources" icon={<Search size={18} />}>
-      <div className="workspace-stack"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What requirements, prices, quantities, risks, and deadlines are supported by the source evidence?" /><button onClick={() => void ask()} disabled={busy || !question.trim() || !queryAction.available} title={queryAction.available ? undefined : queryAction.reason}><Search size={15} /> Ask sources</button></div>
+      <div className="workspace-stack"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What requirements, prices, quantities, risks, and deadlines are supported by the source evidence?" autoComplete="off" /><button onClick={() => void ask()} disabled={busy || !question.trim() || !queryAction.available} title={queryAction.available ? undefined : queryAction.reason}><Search size={15} /> Ask sources</button></div>
       {answer && <pre className="evidence-answer">{answer}</pre>}
       <p className="boundary-note">Query action: {queryAction.reason}</p>
     </DataPanel>

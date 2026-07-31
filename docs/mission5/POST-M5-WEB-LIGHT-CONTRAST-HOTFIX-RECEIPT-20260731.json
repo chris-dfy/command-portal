@@ -1,0 +1,76 @@
+{
+  "recordType": "nexus_experience_corrective_receipt",
+  "schemaVersion": "nexus.experience-corrective-receipt@1.0.0",
+  "receiptId": "POST-M5-WEB-LIGHT-CONTRAST-HOTFIX-20260731",
+  "status": "live_verified",
+  "scope": "additive post-acceptance Experience light-theme accessibility correction",
+  "source": {
+    "branch": "codex/web-light-theme-contrast-hotfix",
+    "baseCommit": "d446059e35de886b413bfdddc18232f8905e6d66",
+    "sourceCommit": "091c505d919df92c60e754a199d4a3fb4d3124cb",
+    "sourceTree": "90f1de0ee44977355829db201ec047fce18d5cee",
+    "constitutionalRelease": "NCR-1.0.0",
+    "constitutionalReleaseDigest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principleImpactRecord": "NCR-IMPACT-post-m5-web-light-contrast-20260731"
+  },
+  "lineage": {
+    "predecessorExperienceCommit": "d446059e35de886b413bfdddc18232f8905e6d66",
+    "acceptedMission5GateMutated": false,
+    "historicalReceiptMutated": false,
+    "mission6CreatedOrAdmitted": false
+  },
+  "deployment": {
+    "provider": "Replit",
+    "environment": "private_non_production_experience_gateway",
+    "url": "https://command-portal.replit.app",
+    "publicationTimelineRelease": "22ce9091",
+    "servingDeploymentInstance": "ac7120fd",
+    "builtJavascript": "/assets/index-D6ysmPBa.js",
+    "builtStylesheet": "/assets/index-RXMDF-mh.css",
+    "secretValuesExposed": false
+  },
+  "postconditions": {
+    "lightThemeAccent": "#075744",
+    "lightThemeSuccess": "#075744",
+    "lightThemeCanvas": "#f4f0e9",
+    "accentContrastOnCanvas": 7.53,
+    "accentContrastOnPanel": 8.41,
+    "minimumPersistedAccentContrast": 4.5,
+    "previousObservedAccentContrast": 1.15,
+    "wcagSmallTextAA": true,
+    "liveComputedStyleVerified": true,
+    "liveAssetsMatchVerifiedBuild": true,
+    "gatewayStatus": "Healthy",
+    "runtimeReadinessState": "Degraded",
+    "runtimeReadinessPreservedAsCapabilityDegraded": true,
+    "transportCollapsedToUnavailable": false,
+    "independentUsableModulesRemainVisible": true,
+    "secretValuesExposed": false
+  },
+  "verification": {
+    "focusedTestsPassed": 8,
+    "focusedTestsFailed": 0,
+    "productionBuildModules": 1632,
+    "productionBuildPassed": true,
+    "assetVerificationPassed": true,
+    "runtimeBootstrapRouteCount": 15,
+    "runtimeBootstrapFailedRouteCount": 0,
+    "runtimeBootstrapUpstreamConcurrency": 3,
+    "authenticatedHostedReadinessStatus": 200,
+    "liveRuntimeRoutesReturned200": true,
+    "liveScreenshot": "/tmp/nexus-live-light-contrast-fixed.png"
+  },
+  "limitations": [
+    "The non-production Runtime continues to report its explicit degraded readiness boundary; this correction does not relabel unavailable physical Edge admission as healthy.",
+    "The existing production-build chunk-size advisory remains non_blocking_degraded and does not affect this accessibility postcondition."
+  ],
+  "rollback": {
+    "source": "Additively revert commit 091c505d919df92c60e754a199d4a3fb4d3124cb; do not reset or rewrite history.",
+    "deployment": "Redeploy the previous private Experience Gateway release c1ddef74 from Experience commit d446059e35de886b413bfdddc18232f8905e6d66.",
+    "preservation": "Retain this receipt, its PIR, and the superseded deployment as historical evidence."
+  },
+  "impedimentClassification": "non_blocking_degraded",
+  "operatorActionRequired": false,
+  "sanitized": true,
+  "recordedAt": "2026-07-31T22:19:10Z"
+}

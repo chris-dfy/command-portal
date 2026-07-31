@@ -117,6 +117,15 @@ export function WorkSessionsWorkspace({
     }
   }
 
+  async function submitObjective(
+    operation: (submittedObjective: string) => Promise<Record<string, unknown>>,
+  ) {
+    const submittedObjective = objective.trim();
+    if (!submittedObjective || busy) return;
+    setObjective("");
+    await run(() => operation(submittedObjective));
+  }
+
   async function showReceipt() {
     if (!selected) return;
     setBusy(true);
@@ -197,13 +206,14 @@ export function WorkSessionsWorkspace({
           placeholder="Describe one bounded objective."
           maxLength={4_000}
           disabled={busy}
+          autoComplete="off"
         />
       </label>
       <div className="work-sessions-workspace__actions">
-        <button type="button" disabled={!canSubmit || !planAvailable} title={planAvailable ? undefined : planAction.reason} onClick={() => void run(() => localNexusClient.planWorkSession(objective.trim()))}>
+        <button type="button" disabled={!canSubmit || !planAvailable} title={planAvailable ? undefined : planAction.reason} onClick={() => void submitObjective((submittedObjective) => localNexusClient.planWorkSession(submittedObjective))}>
           <Route size={15} aria-hidden="true" /> Plan
         </button>
-        <button type="button" disabled={!canSubmit || !startAvailable} title={startAvailable ? undefined : startAction.reason} onClick={() => void run(() => localNexusClient.startWorkSession(objective.trim()))}>
+        <button type="button" disabled={!canSubmit || !startAvailable} title={startAvailable ? undefined : startAction.reason} onClick={() => void submitObjective((submittedObjective) => localNexusClient.startWorkSession(submittedObjective))}>
           <Play size={15} aria-hidden="true" /> Start
         </button>
       </div>

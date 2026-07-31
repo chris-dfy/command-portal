@@ -70,10 +70,12 @@ export function ProjectStudio({
       setMessage(createAction.reason);
       return;
     }
+    const submittedName = projectName.trim() || "New NEXUS Project";
+    setProjectName("");
     setBusy(true); setMessage(null);
     try {
-      const project = await localNexusClient.projectCreate(projectName.trim() || "New NEXUS Project");
-      setProjectId(project.projectId); setProjectName(project.name);
+      const project = await localNexusClient.projectCreate(submittedName);
+      setProjectId(project.projectId);
       setMessage(`Created ${project.name}. Add evidence before relying on scope or pricing.`);
     } catch (error) { setMessage(messageFrom(error)); }
     finally { setBusy(false); }
@@ -96,11 +98,17 @@ export function ProjectStudio({
       setMessage(compileAction.reason);
       return;
     }
+    const submittedProjectId = projectId.trim();
+    if (!submittedProjectId) return;
+    const submittedWeeks = weeks;
+    const submittedAssumption = assumption.trim();
+    setWeeks("");
+    setAssumption("");
     setBusy(true); setMessage(null);
     try {
-      const result = await localNexusClient.projectCompile(projectId, artifactType, {
-        ...(weeks ? { defaultPhaseDurationWeeks: Number(weeks) } : {}),
-        assumptions: assumption.trim() ? [assumption.trim()] : []
+      const result = await localNexusClient.projectCompile(submittedProjectId, artifactType, {
+        ...(submittedWeeks ? { defaultPhaseDurationWeeks: Number(submittedWeeks) } : {}),
+        assumptions: submittedAssumption ? [submittedAssumption] : []
       });
       setArtifact(result);
       setMessage(result.status === "compiled_verified" ? "Artifact compiled and recorded with proof." : `Artifact ${result.status ?? "unavailable"}: ${result.reason ?? "not implemented"}.`);
@@ -115,7 +123,7 @@ export function ProjectStudio({
   return <div className="experience-grid local-workspace">
     <DataPanel eyebrow="NEXUS Projects" title="Project control" icon={<FolderKanban size={18} />} className="span-2">
       <div className="project-control-grid">
-        <label className="workspace-field"><span>Project name</span><input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Customer transformation program" /></label>
+        <label className="workspace-field"><span>Project name</span><input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Customer transformation program" autoComplete="off" /></label>
         <button onClick={() => void create()} disabled={busy || !createAction.available} title={createAction.available ? undefined : createAction.reason}><Plus size={15} /> Create project</button>
         <label className="workspace-field"><span>Active project ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="PROJECT-…" /></label>
         <button onClick={() => void analyze()} disabled={busy || !projectId.trim()}><RefreshCw size={15} /> Build project context</button>
@@ -140,8 +148,8 @@ export function ProjectStudio({
       <div className="planning-summary"><span><strong>{planning?.sourceCount ?? 0}</strong> linked sources</span><span><strong>{planning?.requirements?.length ?? 0}</strong> planning requirements</span><span><strong>{planning?.openQuestions?.length ?? 0}</strong> open questions</span></div>
       <div className="artifact-controls">
         <label className="workspace-field"><span>Artifact</span><select value={artifactType} onChange={(event) => setArtifactType(event.target.value)}>{definitions.map((definition) => <option key={definition.artifactType} value={definition.artifactType}>{definition.name} · {definition.status}</option>)}</select></label>
-        <label className="workspace-field"><span>Default phase weeks</span><input type="number" min="0.5" max="520" step="0.5" value={weeks} onChange={(event) => setWeeks(event.target.value)} placeholder="Optional" /></label>
-        <label className="workspace-field span-input"><span>Explicit operator assumption</span><input value={assumption} onChange={(event) => setAssumption(event.target.value)} placeholder="Clearly labeled; never treated as source evidence" /></label>
+        <label className="workspace-field"><span>Default phase weeks</span><input type="number" min="0.5" max="520" step="0.5" value={weeks} onChange={(event) => setWeeks(event.target.value)} placeholder="Optional" autoComplete="off" /></label>
+        <label className="workspace-field span-input"><span>Explicit operator assumption</span><input value={assumption} onChange={(event) => setAssumption(event.target.value)} placeholder="Clearly labeled; never treated as source evidence" autoComplete="off" /></label>
         <button onClick={() => void compile()} disabled={busy || !projectId.trim() || !compileAction.available} title={compileAction.available ? undefined : compileAction.reason}><FileCheck2 size={15} /> Compile</button>
         <p className="boundary-note">Compile action: {compileAction.reason}</p>
       </div>

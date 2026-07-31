@@ -84,7 +84,6 @@ export function VoiceWorkspace({
       onAmplitude: setAmplitude,
       onUserTranscript: (text) => {
         latestUserTranscript.current = text;
-        setTranscript(text);
         setHistory((items) => [{ speaker: "You", text } as TranscriptEntry, ...items].slice(0, 10));
       },
       onAssistantTranscript: (text) => setAssistantTranscript(text),
@@ -96,6 +95,7 @@ export function VoiceWorkspace({
             captured,
             "browser_speech",
             "Live voice timed out, so the captured utterance was sent through the governed Runtime Voice Operator.",
+            true,
           );
         }
       },
@@ -137,12 +137,14 @@ export function VoiceWorkspace({
     requestedTranscript: string,
     source: "browser_speech" | "text_fallback",
     fallbackContext = "",
+    historyAlreadyRecorded = false,
   ) {
     if (!requestedTranscript.trim()) return;
     if (!textAction.available) {
       setMessage(textAction.reason);
       return;
     }
+    setTranscript("");
     setBusy(true);
     setMessage(null);
     try {
@@ -160,7 +162,9 @@ export function VoiceWorkspace({
       setAssistantTranscript(responseText);
       setHistory((items) => [
         { speaker: "NEXUS", text: responseText } as TranscriptEntry,
-        { speaker: "You", text: requestedTranscript.trim() } as TranscriptEntry,
+        ...(!historyAlreadyRecorded
+          ? [{ speaker: "You", text: requestedTranscript.trim() } as TranscriptEntry]
+          : []),
         ...items,
       ].slice(0, 10));
       setMessage([
@@ -195,7 +199,6 @@ export function VoiceWorkspace({
     try {
       const captured = await recognizeBrowserSpeech();
       latestUserTranscript.current = captured;
-      setTranscript(captured);
       await routeGovernedTranscript(captured, "browser_speech");
     } catch (error) {
       setMessage(messageFrom(error));
@@ -224,7 +227,7 @@ export function VoiceWorkspace({
         </button>}
       </div>
       <div className="voice-text-fallback">
-        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} disabled={!textAction.available} placeholder={textAction.available ? "Or type a request for the governed Runtime Voice Operator" : "Runtime Voice Operator is unavailable"} />
+        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} disabled={!textAction.available} placeholder={textAction.available ? "Or type a request for the governed Runtime Voice Operator" : "Runtime Voice Operator is unavailable"} autoComplete="off" />
         {browserSpeech.input && <button onClick={() => void useBrowserMicrophone()} disabled={!textAction.available || busy || browserListening} title="Uses this browser's speech recognition, then submits the transcript through the governed Runtime Voice Operator"><Mic size={17} /> {browserListening ? "Listening…" : "Use browser microphone"}</button>}
         <button onClick={() => void sendText()} disabled={!textAction.available || busy || !transcript.trim()}><Send size={17} /> Send text</button>
       </div>

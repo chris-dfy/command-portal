@@ -746,6 +746,8 @@ export function App() {
       connectionLabel={state}
       connectionTone={connectionTone}
       alertCount={failures.length}
+      colorMode={appearance.settings.colorMode}
+      onColorModeChange={(colorMode) => appearance.updateSettings({ colorMode })}
       onNavigate={(id) => navigate(id as AreaId)}
       onSearch={focusPlatformSearch}
     />

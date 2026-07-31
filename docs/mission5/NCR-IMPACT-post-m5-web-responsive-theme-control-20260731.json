@@ -1,0 +1,32 @@
+{
+  "impact_id": "NCR-IMPACT-post-m5-web-responsive-theme-control-20260731",
+  "artifact_id": "nexus.experience.post-m5-responsive-theme-control-hotfix",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0027@1",
+      "NCR-ENG-0008@1",
+      "NCR-ENG-0010@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:d64c1492d77a5f05a398e453b0483d7b2a49706f71e24b1ca07d98c469d6c0c4"
+  },
+  "disposition": "no_constitutional_change",
+  "rationale": "This additive Experience-only presentation repair makes the Runtime health ribbon respond to the actual workspace container after a docked assistant reduces the available width, prohibits within-word breaks in its human-readable labels and values, and exposes the existing browser-local Dark, Light, and System preference in the persistent application header. It reuses the canonical appearance state and storage adapter; it creates no parallel state, Runtime claim, capability, Authority path, Evidence, Mission, or operational mutation.",
+  "evidence_references": [
+    "command:node --test tests/appearance.test.mjs tests/design-system.test.mjs tests/executive-ui.test.mjs (36 passed; 0 failed)",
+    "command:npm run build (TypeScript noEmit and Vite production build passed; 1632 modules transformed)",
+    "command:npm run verify:build (hashed assets present; secretValuesExposed=false)",
+    "browser:docked assistant at 1328px viewport produced a 647px Runtime ribbon with two 318px columns, clientWidth=scrollWidth=647, overflowWrap=normal, and wordBreak=normal",
+    "browser:global Color mode selector changed the resolved application from dark to light with preference=light, scheme=light, canvas=#f4f0e9, and accent=#075744",
+    "path:src/platform/NexusExecutiveNavigation.tsx",
+    "path:src/platform/nexus-platform.css",
+    "path:src/styles.css",
+    "rollback:additively revert only this responsive ribbon and header color-mode control commit"
+  ],
+  "conflicts": [],
+  "recorded_by": "NEXUS Engineering",
+  "recorded_at": "2026-07-31T22:24:40Z"
+}

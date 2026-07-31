@@ -94,7 +94,7 @@ export const NEXUS_THEMES: readonly NexusTheme[] = [
       text: "#1e1e1e",
       muted: "#626762",
       border: "rgba(30, 30, 30, .18)",
-      accent: "#0e8167",
+      accent: "#075744",
     },
   },
   {

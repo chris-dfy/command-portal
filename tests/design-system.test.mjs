@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { accentContrastRatio, MINIMUM_ACCENT_CONTRAST } from "../src/appearance/accentContrast.js";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+const tokenValue = (block, name) => block.match(new RegExp(`${name}:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
 
 test("canonical tokens provide theme, contrast, motion, and legacy compatibility contracts", async () => {
   const tokens = await read("../src/design-system/nexus-tokens.css");
@@ -55,6 +58,37 @@ test("canonical tokens provide theme, contrast, motion, and legacy compatibility
   };
   for (const [alias, semantic] of Object.entries(aliases)) {
     assert.match(tokens, new RegExp(`--${alias}:\\s*var\\(${semantic}\\)`));
+  }
+});
+
+test("light semantic accents meet readable foreground contrast", async () => {
+  const tokens = await read("../src/design-system/nexus-tokens.css");
+  const lightBlock = tokens.match(/:root\[data-nexus-color-scheme="light"\][\s\S]*?\{([\s\S]*?)\n\}/)?.[1];
+  const systemLightBlock = tokens.match(/:root\[data-nexus-theme="system"\],[\s\S]*?\{([\s\S]*?)\n  \}/)?.[1];
+  for (const [name, block] of [["light", lightBlock], ["system light", systemLightBlock]]) {
+    assert.ok(block, `${name} token block must exist`);
+    const accent = tokenValue(block, "--nx-accent");
+    const canvas = tokenValue(block, "--nx-canvas");
+    const surface = tokenValue(block, "--nx-surface-1");
+    const inverse = tokenValue(block, "--nx-text-inverse");
+    const success = tokenValue(block, "--nx-success");
+    for (const [backgroundName, background] of [["canvas", canvas], ["surface", surface]]) {
+      assert.ok(accent && background, `${name} ${backgroundName} contrast tokens must be hexadecimal`);
+      assert.ok(
+        accentContrastRatio(accent, background) >= MINIMUM_ACCENT_CONTRAST,
+        `${name} accent ${accent} must be readable on ${backgroundName} ${background}`,
+      );
+    }
+    assert.ok(accent && inverse, `${name} inverse-text tokens must be hexadecimal`);
+    assert.ok(
+      accentContrastRatio(inverse, accent) >= MINIMUM_ACCENT_CONTRAST,
+      `${name} inverse text ${inverse} must be readable on accent fill ${accent}`,
+    );
+    assert.ok(success && canvas, `${name} success-text tokens must be hexadecimal`);
+    assert.ok(
+      accentContrastRatio(success, canvas) >= MINIMUM_ACCENT_CONTRAST,
+      `${name} success text ${success} must be readable on canvas ${canvas}`,
+    );
   }
 });
 

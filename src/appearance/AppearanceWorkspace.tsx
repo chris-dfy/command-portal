@@ -163,7 +163,7 @@ export function AppearanceWorkspace({ appearance }: { appearance: ReturnType<typ
         <NexusButton variant="ghost" size="sm" onClick={resetSettings}>
           Restore defaults
         </NexusButton>
-        <NexusStatus tone="neutral">Presentation only</NexusStatus>
+        <NexusStatus tone="neutral">Saved in this browser</NexusStatus>
         {(systemAppearance.prefersHighContrast || systemAppearance.prefersReducedMotion || systemAppearance.forcedColors) && (
           <small role="status">
             Active operating-system accessibility preferences are applied automatically.
