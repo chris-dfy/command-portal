@@ -23,6 +23,7 @@ const CLIENT_REQUEST_TIMEOUT_MS = 10_000;
 const CLIENT_SNAPSHOT_TIMEOUT_MS = 20_000;
 const SUPPORTED_SCHEMA_VERSION = "1.0.0";
 const SUPPORTED_RUNTIME_VERSION = "0.1.0";
+const SEMANTIC_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const CAPABILITY_REGISTRY_RECORD_TYPE = "nexus_live_capability_registry_projection";
 const CAPABILITY_REGISTRY_SCHEMA_VERSION = "nexus.live-capability-registry@1.0.0";
 const CAPABILITY_CLASSIFICATIONS = new Set<CapabilityClassification>([
@@ -74,6 +75,17 @@ const validIdentity = (value: unknown): value is string => (
 const unique = (records: Record<string, unknown>[], key: string) => (
   new Set(records.map((item) => item[key])).size === records.length
 );
+const compatibleRuntimeVersion = (value: unknown) => {
+  if (typeof value !== "string") return false;
+  const supported = SEMANTIC_VERSION_PATTERN.exec(SUPPORTED_RUNTIME_VERSION);
+  const received = SEMANTIC_VERSION_PATTERN.exec(value);
+  return Boolean(
+    supported
+    && received
+    && received[1] === supported[1]
+    && received[2] === supported[2],
+  );
+};
 
 export function asCapabilityRegistryProjection(value: unknown): CapabilityRegistryProjection | null {
   const projection = objectRecord(value);
@@ -383,7 +395,7 @@ function asGatewayEnvelope<T>(value: unknown): GatewayEnvelope<T> | null {
         || typeof runtime.status !== "string"
         || typeof runtime.timestamp !== "string"
         || runtime.schemaVersion !== SUPPORTED_SCHEMA_VERSION
-        || runtime.runtimeVersion !== SUPPORTED_RUNTIME_VERSION
+        || !compatibleRuntimeVersion(runtime.runtimeVersion)
         || !stringArray(runtime.proofIds)
         || !stringArray(runtime.limitations)
         || envelope.error !== undefined

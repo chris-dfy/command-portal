@@ -89,6 +89,32 @@ test("portal client preserves a structurally valid degraded readiness response i
   assert.equal(calls, 1);
 });
 
+test("portal client accepts compatible Runtime patches but rejects minor-version drift", async () => {
+  const compatible = gatewayEnvelope({ route: "version" });
+  compatible.runtime.runtimeVersion = "0.1.1";
+  globalThis.fetch = async () => new Response(JSON.stringify(compatible), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(
+    (await portalClient.get("version")).runtime.runtimeVersion,
+    "0.1.1",
+  );
+
+  for (const runtimeVersion of ["0.2.0", "0.1.x"]) {
+    const incompatible = gatewayEnvelope({ route: "version" });
+    incompatible.runtime.runtimeVersion = runtimeVersion;
+    globalThis.fetch = async () => new Response(JSON.stringify(incompatible), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    await assert.rejects(
+      portalClient.get("version"),
+      rejectsWithEnvelope("gateway_response_invalid", "Unknown"),
+    );
+  }
+});
+
 test("portal client fails malformed and route-mismatched JSON closed as Unknown", async () => {
   globalThis.fetch = async () => new Response(JSON.stringify({
     ok: true,
