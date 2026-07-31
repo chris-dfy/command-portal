@@ -1912,23 +1912,24 @@ function strictKeys(payload, allowed) {
   if (unknown.length) throw new GatewayFailure("request_invalid", `Unsupported request field: ${unknown[0]}.`, "Unknown", 400);
 }
 
-function rejectUntrustedOperationalFields(value, trail = []) {
+function rejectUntrustedOperationalFields(value, trail = [], allowedPaths = new Set()) {
   if (Array.isArray(value)) {
-    value.forEach((item, index) => rejectUntrustedOperationalFields(item, [...trail, String(index)]));
+    value.forEach((item, index) => rejectUntrustedOperationalFields(item, [...trail, String(index)], allowedPaths));
     return;
   }
   if (!value || typeof value !== "object") return;
   for (const [key, item] of Object.entries(value)) {
     const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (UNTRUSTED_OPERATIONAL_FIELDS.has(normalized)) {
+    const fieldPath = [...trail, key].join(".");
+    if (UNTRUSTED_OPERATIONAL_FIELDS.has(normalized) && !allowedPaths.has(fieldPath)) {
       throw new GatewayFailure(
         "untrusted_identity_field",
-        `Request field ${[...trail, key].join(".")} cannot select or strengthen Runtime identity, approval, or Authority.`,
+        `Request field ${fieldPath} cannot select or strengthen Runtime identity, approval, or Authority.`,
         "Unauthorized",
         403,
       );
     }
-    rejectUntrustedOperationalFields(item, [...trail, key]);
+    rejectUntrustedOperationalFields(item, [...trail, key], allowedPaths);
   }
 }
 
@@ -2065,8 +2066,39 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
     };
   }
   if (runtimePath === "/conclave/workspaces") {
-    strictKeys(payload, new Set(["proposal"]));
-    return { proposal: boundedText(payload.proposal, "proposal", 8_000) };
+    strictKeys(payload, new Set(["proposal", "predecessor"]));
+    const proposal = boundedText(payload.proposal, "proposal", 8_000);
+    if (payload.predecessor === undefined) return { proposal };
+    const rawPredecessor = payload.predecessor;
+    if (!rawPredecessor || typeof rawPredecessor !== "object" || Array.isArray(rawPredecessor)) {
+      throw new GatewayFailure("request_invalid", "predecessor must be an object.", "Unknown", 400);
+    }
+    strictKeys(rawPredecessor, new Set(["missionId", "workspaceId", "workspaceVersion"]));
+    const predecessor = {
+      missionId: boundedText(rawPredecessor.missionId, "predecessor.missionId", 160),
+      workspaceId: boundedText(rawPredecessor.workspaceId, "predecessor.workspaceId", 160),
+      workspaceVersion: boundedText(rawPredecessor.workspaceVersion, "predecessor.workspaceVersion", 71),
+    };
+    if (
+      !OPERATIONAL_RECORD_ID_PATTERN.test(predecessor.missionId)
+      || !OPERATIONAL_RECORD_ID_PATTERN.test(predecessor.workspaceId)
+    ) {
+      throw new GatewayFailure(
+        "request_invalid",
+        "predecessor Mission or workspace identity is invalid.",
+        "Unknown",
+        400,
+      );
+    }
+    if (!/^sha256:[a-f0-9]{64}$/.test(predecessor.workspaceVersion)) {
+      throw new GatewayFailure(
+        "request_invalid",
+        "predecessor.workspaceVersion must be an exact sha256 digest.",
+        "Unknown",
+        400,
+      );
+    }
+    return { proposal, predecessor };
   }
   if (/^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/run$/.test(runtimePath)) {
     strictKeys(payload, new Set(["expectedWorkspaceVersion"]));
@@ -2091,8 +2123,13 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
       "supportingArtifacts", "relationships", "operationalContext",
     ]));
     const sourceClassification = boundedText(payload.sourceClassification, "sourceClassification", 80);
-    if (!["model_native", "platform_knowledge", "tenant_knowledge", "retrieved_evidence", "live_external_source", "runtime_evidence"].includes(sourceClassification)) {
-      throw new GatewayFailure("request_invalid", "sourceClassification is not registered.", "Unknown", 400);
+    if (!["tenant_knowledge", "retrieved_evidence"].includes(sourceClassification)) {
+      throw new GatewayFailure(
+        "request_invalid",
+        "Conclave operator Evidence must be classified as tenant_knowledge or retrieved_evidence.",
+        "Unknown",
+        400,
+      );
     }
     const confidence = Number(payload.confidence);
     if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
@@ -2761,8 +2798,28 @@ async function handleOperationalApi(
   }
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
-    if (resolved.method === "POST") rejectUntrustedOperationalFields(rawPayload);
-    const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
+    let payload;
+    if (
+      resolved.method === "POST"
+      && resolved.runtimePath === "/conclave/workspaces"
+      && rawPayload?.predecessor !== undefined
+    ) {
+      payload = validateLocalPayload(
+        resolved.runtimePath,
+        rawPayload,
+        config.localMaxRequestBytes,
+      );
+      rejectUntrustedOperationalFields(
+        rawPayload,
+        [],
+        new Set(["predecessor.missionId", "predecessor.workspaceId"]),
+      );
+    } else {
+      if (resolved.method === "POST") rejectUntrustedOperationalFields(rawPayload);
+      payload = resolved.method === "POST"
+        ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes)
+        : undefined;
+    }
     if (resolved.method === "POST" && payload?.idempotencyKey && payload.idempotencyKey !== request.headers["idempotency-key"]) {
       throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match the request body.", "Unknown", 400);
     }
@@ -3230,7 +3287,9 @@ async function handleLocalApi(
       resolved.method === "POST"
       && (
         /^\/runtime-coordination\/admissions(?:\/[^/]+\/(?:cancel|challenge\/reissue))?$/.test(resolved.runtimePath)
+        || resolved.runtimePath === "/conclave/workspaces"
         || /^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/run$/.test(resolved.runtimePath)
+        || /^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/tasks\/[A-Za-z0-9_.:-]+\/evidence$/.test(resolved.runtimePath)
       )
     ) {
       const requestKey = String(request.headers["idempotency-key"] ?? "");
@@ -3371,13 +3430,16 @@ function validateCapabilityRegistryProjection(
     || typeof sourceIdentity.rootRevision !== "string"
     || !ROOT_REVISION_PATTERN.test(sourceIdentity.rootRevision)
     || sourceIdentity.rootRevisionVerified !== true
+    || typeof sourceIdentity.runtimeRevision !== "string"
+    || !ROOT_REVISION_PATTERN.test(sourceIdentity.runtimeRevision)
+    || sourceIdentity.runtimeRevisionVerified !== true
     || !["local_git_worktree", "program_alpha_source_attestation"].includes(sourceIdentity.verificationMethod)
     || typeof sourceIdentity.sourceTreeDigest !== "string"
     || !/^sha256:[0-9a-f]{64}$/.test(sourceIdentity.sourceTreeDigest)
     || sourceIdentity.sourceTreeClean !== true
     || sourceIdentity.environmentRevisionMatched !== true
   ) {
-    invalid("Capability Registry root source identity is unverified.");
+    invalid("Capability Registry root or Runtime source identity is unverified.");
   }
   if (projection.owner !== CAPABILITY_REGISTRY_OWNER || projection.projectionOwner !== CAPABILITY_REGISTRY_PROJECTION_OWNER) {
     invalid("Capability Registry is not the Runtime-owned canonical projection.");

@@ -4,6 +4,8 @@ import {
   canonicalExecutionClient,
   type CanonicalExecutionGatewayResponse,
 } from "../lib/local-client";
+import { canonicalHostedActionAvailability } from "../lib/hosted-capability-gate";
+import type { CapabilityRegistryProjection } from "../lib/types";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 
@@ -13,8 +15,12 @@ const EDITED_FIXTURE = `${JSON.stringify({
   value: "NEXUS-M4-VERIFIED",
 })}\n`;
 
-export function CanonicalExecutionSpine() {
-  const [capabilityReady, setCapabilityReady] = useState(false);
+export function CanonicalExecutionSpine({
+  capabilityRegistry = null,
+}: {
+  capabilityRegistry?: CapabilityRegistryProjection | null;
+} = {}) {
+  const [registeredExecutiveSessionVerified, setRegisteredExecutiveSessionVerified] = useState(false);
   const [mission, setMission] = useState<CanonicalExecutionGatewayResponse["data"]>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -26,13 +32,9 @@ export function CanonicalExecutionSpine() {
     setMessage("");
     try {
       const next = await work();
-      const capabilities = next.data?.capabilities;
-      if (Array.isArray(capabilities)) {
-        setCapabilityReady(
-          capabilities.length > 0
-          && capabilities.every((item) => item.operationalAvailability),
-        );
-      }
+      setRegisteredExecutiveSessionVerified(
+        next.registeredExecutiveSessionVerified === true,
+      );
       if (next.data?.mission) setMission(next.data);
     } catch (caught) {
       setMessage(
@@ -51,8 +53,24 @@ export function CanonicalExecutionSpine() {
 
   const record = mission?.mission;
   const fixture = record?.fixture;
-  const ready = capabilityReady;
+  const ready = registeredExecutiveSessionVerified;
   const completed = record?.state === "completed";
+  const createAction = canonicalHostedActionAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "canonical_execution_spine",
+      method: "POST",
+      pathTemplate: "/executive-authority/canonical-execution/missions",
+    },
+  );
+  const executeAction = canonicalHostedActionAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "canonical_execution_spine",
+      method: "POST",
+      pathTemplate: "/executive-authority/canonical-execution/missions/{mission_id}/actions",
+    },
+  );
 
   return <DataPanel
     eyebrow="Mission 4 non-production proof"
@@ -107,7 +125,8 @@ export function CanonicalExecutionSpine() {
     <div className="operation-actions">
       {!record && <button
         onClick={() => void run(() => canonicalExecutionClient.createMission())}
-        disabled={busy || !ready}
+        disabled={busy || !ready || !createAction.available}
+        title={createAction.available ? undefined : createAction.reason}
       >
         <ShieldCheck size={15} /> Authorize exact Mission
       </button>}
@@ -118,7 +137,10 @@ export function CanonicalExecutionSpine() {
           fixture.currentDigest,
           EDITED_FIXTURE,
         ))}
-        disabled={busy}
+        disabled={busy || !ready || !executeAction.available}
+        title={!ready
+          ? "Registered Executive session verification is required."
+          : executeAction.available ? undefined : executeAction.reason}
       >
         <CheckCircle2 size={15} /> Execute bounded edit
       </button>}
@@ -129,7 +151,10 @@ export function CanonicalExecutionSpine() {
           fixture.currentDigest,
           fixture.baselineDigest,
         ))}
-        disabled={busy}
+        disabled={busy || !ready || !executeAction.available}
+        title={!ready
+          ? "Registered Executive session verification is required."
+          : executeAction.available ? undefined : executeAction.reason}
       >
         <RotateCcw size={15} /> Execute compensation
       </button>}
@@ -147,8 +172,11 @@ export function CanonicalExecutionSpine() {
     </div>
     <p className="boundary-note">
       This surface is non-production and exact-resource only. Capability health
-      never grants Authority; Mission 5 remains unadmitted until the Mission 4
-      acceptance gate passes.
+      never grants Authority; the accepted Mission history remains governed by
+      its recorded gate and receipt lineage.
+    </p>
+    <p className="boundary-note">
+      Mission creation: {createAction.reason} Action edit and compensation: {executeAction.reason}
     </p>
   </DataPanel>;
 }

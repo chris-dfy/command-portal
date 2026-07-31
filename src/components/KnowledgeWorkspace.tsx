@@ -10,8 +10,13 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
-import { localNexusClient, type OperationalSession } from "../lib/local-client";
-import type { RuntimeSnapshot } from "../lib/types";
+import {
+  localNexusClient,
+  operationalSessionClient,
+  type OperationalSession,
+} from "../lib/local-client";
+import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import type { CapabilityRegistryProjection, RuntimeSnapshot } from "../lib/types";
 import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
@@ -106,9 +111,11 @@ function ReadinessRecord({ readiness }: { readiness: RuntimeRecord | null }) {
 export function KnowledgeWorkspace({
   snapshot,
   session = { authenticated: false },
+  capabilityRegistry = null,
 }: {
   snapshot?: RuntimeSnapshot;
   session?: OperationalSession;
+  capabilityRegistry?: CapabilityRegistryProjection | null;
 }) {
   const [sources, setSources] = useState<KnowledgeSources>(EMPTY_SOURCES);
   const [states, setStates] = useState<Record<keyof KnowledgeSources, SourceState>>({
@@ -306,21 +313,32 @@ export function KnowledgeWorkspace({
     [intakeMission],
   );
   const runtimeConnection = snapshot?.status?.gateway.connectionState ?? "Unavailable";
-  const capabilityRecords = rows(sources.readiness, ["capabilities", "items", "records"]);
-  const actionGate = (capabilityId: string, scope: string) => {
-    const capability = capabilityRecords.find((item) => identifier(item, ["capabilityId", "capability_id", "id"]) === capabilityId);
-    const available = stateOf(capability ?? {}, "unavailable").toLowerCase() === "available";
-    const scoped = session.scopes?.includes(scope) === true;
-    return {
-      allowed: available && scoped,
-      reason: !available
-        ? reasonsOf(capability ?? {}, `${capabilityId} capability readiness is unavailable.`)
-        : scoped ? `${capabilityId} and ${scope} are available.` : `The hosted session lacks ${scope}.`,
-    };
+  const hostedAccess = {
+    hosted: operationalSessionClient.mode() === "hosted",
+    authenticated: session.authenticated,
+    scopes: session.scopes,
   };
-  const intakeGate = actionGate("knowledge_intake", "evidence:write");
-  const acquisitionGate = actionGate("knowledge_acquisition", "operations:write");
-  const promotionGate = actionGate("knowledge_promotion", "knowledge:promote");
+  const actionGate = (
+    capabilityId: string,
+    pathTemplate: string,
+    scope: string,
+  ) => {
+    const action = canonicalHostedControlAvailability(
+      capabilityRegistry,
+      { capabilityId, method: "POST", pathTemplate },
+      hostedAccess,
+      scope,
+    );
+    return { allowed: action.available, reason: action.reason };
+  };
+  const intakeGate = actionGate("knowledge_intake", "/knowledge/intake", "evidence:write");
+  const baselineGate = actionGate("knowledge_acquisition", "/runtime/baselines", "operations:write");
+  const candidateGate = actionGate(
+    "knowledge_promotion",
+    "/knowledge/acquisitions/{mission_id}/promotion-candidates",
+    "operations:write",
+  );
+  const promotionGate = actionGate("knowledge_promotion", "/knowledge/promotions", "knowledge:promote");
 
   useEffect(() => {
     setIntakeTaskId((current) => current && intakeTasks.some((task) => identifier(task, ["taskId", "task_id", "id"]) === current)
@@ -361,7 +379,7 @@ export function KnowledgeWorkspace({
   }
 
   async function establishBaseline() {
-    if (!acquisitionGate.allowed) { setErrors([acquisitionGate.reason]); return; }
+    if (!baselineGate.allowed) { setErrors([baselineGate.reason]); return; }
     setBusy("baseline"); setErrors([]); setOperationResult(null);
     try {
       const payload = expectedDeployedCommit.trim() ? { expectedDeployedCommit: expectedDeployedCommit.trim() } : {};
@@ -374,7 +392,7 @@ export function KnowledgeWorkspace({
   }
 
   async function createPromotionCandidate() {
-    if (!acquisitionGate.allowed) { setErrors([acquisitionGate.reason]); return; }
+    if (!candidateGate.allowed) { setErrors([candidateGate.reason]); return; }
     if (!selectedAcquisitionRecord) return;
     const missionId = identifier(selectedAcquisitionRecord, ["missionId", "mission_id", "id"]);
     if (!missionId) return;
@@ -451,8 +469,8 @@ export function KnowledgeWorkspace({
           const id = identifier(item, ["missionId", "mission_id", "acquisitionId", "id"], `acquisition-${index + 1}`);
           return <label key={id} data-eligible="true"><input type="radio" name="knowledge-acquisition" checked={selectedAcquisition === id} onChange={() => setSelectedAcquisition(id)} /><span><strong>{text(item.title ?? item.objective ?? item.proposal, id)}</strong><small>{id} · version {text(item.version ?? item.missionVersion, "not supplied")} · {stateOf(item)}</small></span></label>;
         })}{states.acquisitions === "empty" && <EmptyRecord>No acquisition mission is eligible for candidate creation.</EmptyRecord>}</div>}
-        <button className="nx-action" onClick={() => void createPromotionCandidate()} disabled={!selectedAcquisitionRecord || Boolean(busy) || !acquisitionGate.allowed}><BookOpen size={14} />{busy === "candidate" ? "Validating mission…" : "Create promotion candidate"}</button>
-        <p className="boundary-note">Candidate creation gate: {acquisitionGate.reason}</p>
+        <button className="nx-action" onClick={() => void createPromotionCandidate()} disabled={!selectedAcquisitionRecord || Boolean(busy) || !candidateGate.allowed}><BookOpen size={14} />{busy === "candidate" ? "Validating mission…" : "Create promotion candidate"}</button>
+        <p className="boundary-note">Candidate creation gate: {candidateGate.reason}</p>
         <p className="boundary-note">The Runtime validates mission lifecycle, Evidence, confidence, contradiction state, lineage, and policy. The browser supplies only mission identity and an advisory expected version.</p>
       </DataPanel>
       <ArrowRight className="knowledge-flow__arrow" />
@@ -495,8 +513,8 @@ export function KnowledgeWorkspace({
       </DataPanel>
       <DataPanel eyebrow="Runtime Baseline" title="Capture the deployed operational baseline" icon={<FileCheck2 size={18} />}>
         <label className="operation-field"><span>Expected deployed commit (optional)</span><input value={expectedDeployedCommit} onChange={(event) => setExpectedDeployedCommit(event.target.value)} placeholder="Full source commit for compare-and-record" autoComplete="off" spellCheck={false} /></label>
-        <button className="nx-action" onClick={() => void establishBaseline()} disabled={Boolean(busy) || !acquisitionGate.allowed}><FileCheck2 size={14} />{busy === "baseline" ? "Recording Runtime baseline…" : "Record Runtime baseline"}</button>
-        <p className="boundary-note">Baseline gate: {acquisitionGate.reason}</p>
+        <button className="nx-action" onClick={() => void establishBaseline()} disabled={Boolean(busy) || !baselineGate.allowed}><FileCheck2 size={14} />{busy === "baseline" ? "Recording Runtime baseline…" : "Record Runtime baseline"}</button>
+        <p className="boundary-note">Baseline gate: {baselineGate.reason}</p>
         <p className="boundary-note">The Runtime observes its own deployed identity, capability state, routes, missions, Replay, receipts, stores, and Edge posture. The browser may only provide an optional expected commit for mismatch detection.</p>
       </DataPanel>
     </div>

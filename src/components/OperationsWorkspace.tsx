@@ -3,6 +3,8 @@ import { Activity, ClipboardCheck, FileCheck2, Network, RefreshCw, Route, Shield
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 import { localNexusClient, operationalSessionClient, type OperationalSession } from "../lib/local-client";
+import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import type { CapabilityRegistryProjection } from "../lib/types";
 import "./OperationsWorkspace.css";
 
 type RuntimeRecord = Record<string, unknown>;
@@ -35,11 +37,13 @@ export function OperationsWorkspace({
   onSessionChange,
   runtimeCommit,
   programAlphaCommit,
+  capabilityRegistry,
 }: {
   session: OperationalSession;
   onSessionChange: (session: OperationalSession) => void;
   runtimeCommit?: string;
   programAlphaCommit?: string;
+  capabilityRegistry: CapabilityRegistryProjection | null;
 }) {
   const [readiness, setReadiness] = useState<RuntimeRecord | null>(null);
   const [missions, setMissions] = useState<RuntimeRecord[]>([]);
@@ -118,12 +122,35 @@ export function OperationsWorkspace({
   const readinessCapabilities = records(readiness, ["capabilities", "items", "records"]);
   const deployedCommit = text(runtimeCommit, "Not supplied");
   const embeddedProgramAlphaCommit = text(programAlphaCommit, "Not supplied");
-  const conclaveCapability = readinessCapabilities.find((item) => text(item.capabilityId ?? item.capability_id ?? item.id, "") === "conclave");
-  const conclaveAvailable = text(conclaveCapability?.state ?? conclaveCapability?.status, "unavailable").toLowerCase() === "available";
-  const missionCreationAllowed = conclaveAvailable && session.scopes?.includes("operations:write") === true;
-  const missionCreationReason = conclaveAvailable
-    ? session.scopes?.includes("operations:write") ? "Runtime capability and hosted mutation scope are available." : "The hosted session lacks operations:write."
-    : text(conclaveCapability?.reason ?? conclaveCapability?.requiredNextAction, "Conclave capability readiness is unavailable.");
+  const missionCapability = readinessCapabilities.find((item) => (
+    text(item.capabilityId ?? item.capability_id ?? item.id, "") === "mission_executor"
+  ));
+  const missionCapabilityAvailable = (
+    missionCapability?.available === true
+    || text(missionCapability?.state ?? missionCapability?.status, "unavailable").toLowerCase() === "available"
+  );
+  const missionPlanAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "mission_executor",
+      method: "POST",
+      pathTemplate: "/missions/plan",
+    },
+    {
+      hosted: operationalSessionClient.mode() === "hosted",
+      authenticated: session.authenticated,
+      scopes: session.scopes,
+    },
+    "operations:write",
+  );
+  const missionCreationAllowed = missionPlanAction.available;
+  const missionCreationReason = missionPlanAction.reason;
+  const missionCapabilityReadinessNote = missionCapabilityAvailable
+    ? "Aggregate Mission capability readiness is available."
+    : text(
+      missionCapability?.reason ?? missionCapability?.requiredNextAction,
+      "Aggregate Mission capability readiness is unavailable; exact action availability remains authoritative for this control.",
+    );
   const selectedMission = missionDetail ?? missions.find((mission) => missionId(mission) === selectedMissionId) ?? null;
   const tasks = selectedMission && Array.isArray(selectedMission.steps) ? selectedMission.steps as RuntimeRecord[] : [];
   const replayId = missionReplay
@@ -189,10 +216,11 @@ export function OperationsWorkspace({
 
     {errors.length > 0 && <section className="operation-error span-2" role="alert"><ShieldAlert size={18} /><span>{[...new Set(errors)].join(" ")}</span></section>}
 
-    <DataPanel eyebrow="Mission Control" title="Create a canonical Conclave mission" icon={<Route size={18} />}>
+    <DataPanel eyebrow="Mission Control" title="Plan a canonical Mission" icon={<Route size={18} />}>
       <label className="operation-field"><span>Evidence-bound objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the operational question NEXUS should investigate…" /></label>
-      <div className="operation-actions"><button onClick={() => void planMission()} disabled={busy || !objective.trim() || !missionCreationAllowed}><ClipboardCheck size={15} /> Start governed mission</button><button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} /> Refresh</button></div>
-      <p className="boundary-note">Mission creation gate: {missionCreationReason}</p>
+      <div className="operation-actions"><button onClick={() => void planMission()} disabled={busy || !objective.trim() || !missionCreationAllowed}><ClipboardCheck size={15} /> Plan governed Mission</button><button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} /> Refresh</button></div>
+      <p className="boundary-note">Mission planning gate for <code>POST /missions/plan</code>: {missionCreationReason}</p>
+      <p className="boundary-note">Readiness context only: {missionCapabilityReadinessNote}</p>
       {result && <p className="boundary-note">Runtime accepted mission {text(result.missionId ?? object(result.mission).missionId ?? object(result.mission).mission_id, "response recorded")}.</p>}
     </DataPanel>
 

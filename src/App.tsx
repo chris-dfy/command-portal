@@ -41,6 +41,11 @@ import { AppearanceWorkspace } from "./appearance/AppearanceWorkspace";
 import { useAppearanceSettings } from "./appearance/useAppearanceSettings";
 import type { EoxAssessment } from "./lib/eox-client";
 import {
+  capabilityStateView,
+  hostedSessionActionAvailability,
+  MODULE_MOUNT_ACTION_REQUIREMENTS,
+} from "./lib/hosted-capability-gate";
+import {
   OPERATIONAL_SESSION_INVALID_EVENT,
   localNexusClient,
   operationalSessionClient,
@@ -218,45 +223,6 @@ const MODULE_RUNTIME_ROUTES: Readonly<Record<string, readonly RuntimeRoute[]>> =
   "voice.runtime-status": ["health", "providers"],
   "executive-views.operations-center": ["eox"],
 });
-
-function capabilityStateView(
-  projection: CapabilityRegistryProjection | null,
-  required: readonly string[],
-  registryFailure: string,
-) {
-  if (!required.length) return { state: "not_applicable", reason: "This workspace has no hosted capability contract." };
-  if (registryFailure) return { state: "unavailable", reason: registryFailure };
-  if (!projection) return { state: "checking", reason: "The Runtime-owned Capability Registry projection is being verified." };
-  const applicable = projection.capabilities.filter((item) => required.includes(item.capabilityId));
-  if (applicable.length !== required.length) {
-    const present = new Set(applicable.map((item) => item.capabilityId));
-    const missing = required.filter((id) => !present.has(id));
-    return { state: "unavailable", reason: `The canonical registry did not return capabilities: ${missing.join(", ")}.` };
-  }
-  const unavailable = applicable.filter((item) => !["live_verified", "live_degraded"].includes(item.classification));
-  const capabilityActions = projection.actions.filter((item) => required.includes(item.capabilityId));
-  const missingHandlers = required.filter((id) => !capabilityActions.some((action) => action.capabilityId === id));
-  const blockedActions = capabilityActions.filter((action) => (
-    action.invocable !== true || !["live_verified", "live_degraded"].includes(action.classification)
-  ));
-  if (!unavailable.length && !missingHandlers.length && !blockedActions.length) {
-    const degraded = applicable.some((item) => item.classification === "live_degraded")
-      || capabilityActions.some((item) => item.classification === "live_degraded");
-    return {
-      state: degraded ? "degraded" : "live",
-      reason: `${required.length} required canonical capability contract${required.length === 1 ? " is" : "s are"} ${degraded ? "degraded but invocable" : "live verified"}. Authority remains a separate per-action requirement.`,
-    };
-  }
-  const reasons = [
-    ...unavailable.flatMap((item) => [item.requiredNextAction ?? "", ...item.limitations]),
-    missingHandlers.length ? `No typed handler inventory for: ${missingHandlers.join(", ")}.` : "",
-    ...blockedActions.flatMap((item) => [item.requiredNextAction ?? "", ...item.limitations]),
-  ].filter(Boolean);
-  return {
-    state: unavailable[0]?.classification ?? blockedActions[0]?.classification ?? "unavailable",
-    reason: [...new Set(reasons)].join(" ") || "The canonical registry reports this capability unavailable.",
-  };
-}
 
 function surfaceCapabilityStateView(
   projection: CapabilityRegistryProjection | null,
@@ -588,20 +554,37 @@ export function App() {
     snapshot,
     capabilityRegistry,
   );
-  const copilotInteractionAction = canonicalActionAvailability(
-    capabilityRegistry,
-    PORTAL_CANONICAL_ACTIONS.copilotInteractionStart,
-    capabilityRegistryFailure,
+  const hostedActionAccess = {
+    hosted: operationalSessionClient.mode() === "hosted",
+    authenticated: operationalSession.authenticated,
+    scopes: operationalSession.scopes,
+  };
+  const copilotInteractionAction = hostedSessionActionAvailability(
+    canonicalActionAvailability(
+      capabilityRegistry,
+      PORTAL_CANONICAL_ACTIONS.copilotInteractionStart,
+      capabilityRegistryFailure,
+    ),
+    hostedActionAccess,
+    "operations:write",
   );
-  const realtimeVoiceAction = canonicalActionAvailability(
-    capabilityRegistry,
-    PORTAL_CANONICAL_ACTIONS.realtimeVoiceCall,
-    capabilityRegistryFailure,
+  const realtimeVoiceAction = hostedSessionActionAvailability(
+    canonicalActionAvailability(
+      capabilityRegistry,
+      PORTAL_CANONICAL_ACTIONS.realtimeVoiceCall,
+      capabilityRegistryFailure,
+    ),
+    hostedActionAccess,
+    "operations:write",
   );
-  const voiceOperatorTranscriptAction = canonicalActionAvailability(
-    capabilityRegistry,
-    PORTAL_CANONICAL_ACTIONS.voiceOperatorTranscript,
-    capabilityRegistryFailure,
+  const voiceOperatorTranscriptAction = hostedSessionActionAvailability(
+    canonicalActionAvailability(
+      capabilityRegistry,
+      PORTAL_CANONICAL_ACTIONS.voiceOperatorTranscript,
+      capabilityRegistryFailure,
+    ),
+    hostedActionAccess,
+    "operations:write",
   );
   const registryRailGroups = RAIL_GROUPS.map((group) => ({
     ...group,
@@ -666,26 +649,26 @@ export function App() {
   const webModuleComponents: Record<string, ReactNode> = {
     "web.dashboard.executive-status": <ExecutiveStatusBar snapshot={snapshot} connectionState={state} />,
     "web.dashboard.operations-center": <OperationsCenter assessment={eox ?? null} />,
-    "web.missions.dashboard": <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} />,
+    "web.missions.dashboard": <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
     "web.missions.runtime-evidence": <MissionRuntimeEvidence />,
     "web.missions.step-execution": <MissionStepExecutionPosture readiness={operationalReadiness} />,
     "web.replay.timeline": <OperationalReplay requestedMissionId={replayMissionId} />,
-    "web.conclave.workspace": <ConclaveWorkspace readiness={operationalReadiness} session={operationalSession} />,
-    "web.knowledge.workspace": <KnowledgeWorkspace snapshot={snapshot} session={operationalSession} />,
+    "web.conclave.workspace": <ConclaveWorkspace readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
+    "web.knowledge.workspace": <KnowledgeWorkspace snapshot={snapshot} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
     "web.edge.monitoring": <EdgeRuntime snapshot={snapshot} />,
     "web.edge.diagnostics-topology": <RuntimeTopology snapshot={snapshot} />,
-    "web.edge.admission-request": <EdgeAdmissionWorkspace onFleetRefresh={() => refresh(true)} />,
-    "web.mission-control.operations-workspace": <OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />,
-    "web.mission-control.mission-dashboard": <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} />,
+    "web.edge.admission-request": <EdgeAdmissionWorkspace capabilityRegistry={capabilityRegistry} onFleetRefresh={() => refresh(true)} />,
+    "web.mission-control.operations-workspace": <OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} capabilityRegistry={capabilityRegistry} />,
+    "web.mission-control.mission-dashboard": <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
     "web.mission-control.runtime-missions": <RuntimeMissionInventory />,
     "web.mission-control.functional-readiness": <FunctionalReadinessDiagnostics readiness={operationalReadiness} />,
     "web.settings.runtime-information": <RuntimeInformation snapshot={snapshot} connectionState={state} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />,
     "web.settings.runtime-health": <RuntimeHealth snapshot={snapshot} connectionState={state} />,
     "web.settings.appearance": <AppearanceWorkspace appearance={appearance} />,
     "web.settings.registered-executive": <RegisteredExecutiveSession />,
-    "web.settings.canonical-execution": <CanonicalExecutionSpine />,
-    "web.documents.intake": <DocumentIntake />,
-    "web.projects.planning": <ProjectStudio />,
+    "web.settings.canonical-execution": <CanonicalExecutionSpine capabilityRegistry={capabilityRegistry} />,
+    "web.documents.intake": <DocumentIntake capabilityRegistry={capabilityRegistry} session={operationalSession} />,
+    "web.projects.planning": <ProjectStudio capabilityRegistry={capabilityRegistry} session={operationalSession} />,
     "web.providers.registry": <ProviderRegistry snapshot={snapshot} />,
     "web.providers.truth-boundary": <ProviderTruth snapshot={snapshot} />,
     "web.governance.readiness": <GovernanceReadinessDiagnostics />,
@@ -702,7 +685,7 @@ export function App() {
     "web.voice.operator": <VoiceWorkspace realtimeAction={realtimeVoiceAction} textAction={voiceOperatorTranscriptAction} />,
     "web.voice.runtime-status": <VoiceRuntimeStatus />,
     "web.executive-views.operations-center": <OperationsCenter assessment={eox ?? null} />,
-    "web.work-sessions.workspace": <WorkSessionsWorkspace />,
+    "web.work-sessions.workspace": <WorkSessionsWorkspace capabilityRegistry={capabilityRegistry} session={operationalSession} />,
   };
   assertNexusModuleComponentMap("web", webModuleComponents);
 
@@ -722,6 +705,7 @@ export function App() {
             capabilityRegistry,
             module.capabilityIds,
             capabilityRegistryFailure,
+            MODULE_MOUNT_ACTION_REQUIREMENTS[module.moduleId] ?? [],
           )}
         >{component}</HostedCapabilityBoundary>
       : component;

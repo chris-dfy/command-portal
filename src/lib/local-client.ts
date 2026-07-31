@@ -2,6 +2,11 @@ import {
   createSerializedRefresh,
   runBoundedTask,
 } from "./request-coordination.mjs";
+import type {
+  ConclaveEvidenceAdmissionRequest,
+  ConclavePredecessor,
+  ConclaveWorkspaceCreateRequest,
+} from "./conclave-request-identity";
 
 const CLIENT_READ_TIMEOUT_MS = 10_000;
 
@@ -359,6 +364,7 @@ export type ConclaveWorkspaceRecord = {
   workspaceId: string;
   missionId: string;
   proposal: string;
+  predecessor: ConclavePredecessor | null;
   lifecyclePosture: "canonical_operational" | "legacy_read_only";
   availableActions: Array<"run" | "restart_canonical">;
   status: string;
@@ -375,10 +381,11 @@ export type ConclaveWorkspaceRecord = {
   tasks: ConclaveTask[];
   specialistRegistry: ConclaveSpecialist[];
   evidence: ConclaveEvidence[];
+  waitingTaskIds: string[];
   contradictions: Array<Record<string, unknown>>;
   executiveSummary: Record<string, unknown> | null;
   completionReceipt: Record<string, unknown> | null;
-  displayStatus?: string;
+  displayStatus: string;
   reviewCompleted?: boolean;
   reviewIntegrityVerified?: boolean;
   terminalReceiptVerified?: boolean;
@@ -1077,9 +1084,12 @@ export const localNexusClient = Object.freeze({
     `mission-step:${globalThis.crypto.randomUUID()}`,
   ),
   conclaveWorkspaces: () => request<ConclaveWorkspaceList>("/conclave/workspaces"),
-  createConclaveWorkspace: (proposal: string, idempotencyKey: string) => post<ConclaveWorkspaceRecord>(
+  createConclaveWorkspace: (
+    payload: ConclaveWorkspaceCreateRequest,
+    idempotencyKey: string,
+  ) => post<ConclaveWorkspaceRecord, ConclaveWorkspaceCreateRequest>(
     "/conclave/workspaces",
-    { proposal },
+    payload,
     idempotencyKey,
   ),
   conclaveWorkspace: (missionId: string) => request<ConclaveWorkspaceRecord>(
@@ -1092,6 +1102,16 @@ export const localNexusClient = Object.freeze({
   ) => post<ConclaveWorkspaceRecord>(
     `/conclave/workspaces/${encodeURIComponent(missionId)}/run`,
     { expectedWorkspaceVersion },
+    idempotencyKey,
+  ),
+  admitConclaveEvidence: (
+    missionId: string,
+    taskId: string,
+    payload: ConclaveEvidenceAdmissionRequest,
+    idempotencyKey: string,
+  ) => post<ConclaveWorkspaceRecord, ConclaveEvidenceAdmissionRequest>(
+    `/conclave/workspaces/${encodeURIComponent(missionId)}/tasks/${encodeURIComponent(taskId)}/evidence`,
+    payload,
     idempotencyKey,
   ),
   governanceReadiness: () => request<Record<string, unknown>>(

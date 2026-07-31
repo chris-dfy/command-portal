@@ -633,9 +633,28 @@ test("Capability Registry preserves the bounded GitHub metadata, commit, and Act
 });
 
 test("Capability Registry fails closed on invalid identity, Authority, or invocability claims", async () => {
+  const validSourceIdentity = capabilityRegistryProjection().sourceIdentity;
   for (const projection of [
     capabilityRegistryProjection({ recordType: "presentation_only_registry" }),
     capabilityRegistryProjection({ authority: { authorityGranted: true } }),
+    capabilityRegistryProjection({
+      sourceIdentity: {
+        ...validSourceIdentity,
+        runtimeRevision: "short",
+      },
+    }),
+    capabilityRegistryProjection({
+      sourceIdentity: {
+        ...validSourceIdentity,
+        runtimeRevisionVerified: false,
+      },
+    }),
+    capabilityRegistryProjection({
+      sourceIdentity: {
+        ...validSourceIdentity,
+        runtimeRevision: undefined,
+      },
+    }),
     capabilityRegistryProjection({
       actions: [{
         ...capabilityRegistryProjection().actions[0],
@@ -1820,6 +1839,28 @@ test("Conclave workspace routes use the operational gateway and preserve evidenc
   assert.deepEqual(observed.at(-1).body, { proposal: "Investigate an unfamiliar operational asset without control." });
   assert.equal((await created.json()).data.executionAuthorized, false);
 
+  const predecessor = {
+    missionId: "conclave-legacy-001",
+    workspaceId: "workspace-legacy-001",
+    workspaceVersion: `sha256:${"c".repeat(64)}`,
+  };
+  const restarted = await fetch(`${base}/api/local/conclave/workspaces`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": "conclave-restart-0001",
+    },
+    body: JSON.stringify({
+      proposal: "Investigate an unfamiliar operational asset without control.",
+      predecessor,
+    }),
+  });
+  assert.equal(restarted.status, 200);
+  assert.deepEqual(observed.at(-1).body, {
+    proposal: "Investigate an unfamiliar operational asset without control.",
+    predecessor,
+  });
+
   assert.equal((await fetch(`${base}/api/local/conclave/workspaces/conclave-001`)).status, 200);
   assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/conclave/workspaces/conclave-001");
 
@@ -1854,9 +1895,12 @@ test("Conclave workspace routes use the operational gateway and preserve evidenc
 
   const evidence = await fetch(`${base}/api/local/conclave/workspaces/conclave-001/tasks/task-001/evidence`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": "conclave-evidence-0001",
+    },
     body: JSON.stringify({
-      origin: "edge-runtime://node-1/observation-1", sourceClassification: "runtime_evidence",
+      origin: "operator://workspace/observation-1", sourceClassification: "tenant_knowledge",
       confidence: 0.9, claim: "A bounded observation was admitted.",
       supportingArtifacts: ["observation-1"], relationships: ["observed_on"],
       operationalContext: { controlAttempted: false }
@@ -1864,13 +1908,26 @@ test("Conclave workspace routes use the operational gateway and preserve evidenc
   });
   assert.equal(evidence.status, 200);
   assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/conclave/workspaces/conclave-001/tasks/task-001/evidence");
-  assert.equal(observed.at(-1).body.sourceClassification, "runtime_evidence");
+  assert.equal(observed.at(-1).body.sourceClassification, "tenant_knowledge");
   const beforeInvalid = observed.length;
+  assert.equal((await fetch(`${base}/api/local/conclave/workspaces/conclave-001/tasks/task-001/evidence`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      origin: "edge-runtime://node-1/observation-no-key",
+      sourceClassification: "tenant_knowledge",
+      confidence: 0.9,
+      claim: "A stable operation identity is required.",
+      supportingArtifacts: [],
+      relationships: [],
+      operationalContext: {},
+    }),
+  })).status, 400);
   for (const invalidPayload of [
     { origin: "x", sourceClassification: "unclassified", confidence: 2, claim: "x" },
     {
       origin: "edge-runtime://node-1/observation-2",
-      sourceClassification: "runtime_evidence",
+      sourceClassification: "tenant_knowledge",
       collector: "client-selected",
       confidence: 0.9,
       claim: "The browser must not select the collector.",
@@ -1880,7 +1937,7 @@ test("Conclave workspace routes use the operational gateway and preserve evidenc
     },
     {
       origin: "edge-runtime://node-1/observation-3",
-      sourceClassification: "runtime_evidence",
+      sourceClassification: "tenant_knowledge",
       completeTask: true,
       confidence: 0.9,
       claim: "The browser must not select task completion.",
@@ -1890,8 +1947,53 @@ test("Conclave workspace routes use the operational gateway and preserve evidenc
     },
   ]) {
     assert.equal((await fetch(`${base}/api/local/conclave/workspaces/conclave-001/tasks/task-001/evidence`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "conclave-evidence-invalid",
+      },
       body: JSON.stringify(invalidPayload)
+    })).status, 400);
+  }
+  for (const sourceClassification of [
+    "runtime_evidence",
+    "live_external_source",
+    "platform_knowledge",
+    "model_native",
+  ]) {
+    assert.equal((await fetch(`${base}/api/local/conclave/workspaces/conclave-001/tasks/task-001/evidence`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": `conclave-evidence-forbidden-${sourceClassification}`,
+      },
+      body: JSON.stringify({
+        origin: "operator://workspace/forbidden-provenance",
+        sourceClassification,
+        confidence: 0.9,
+        claim: "An operator must not claim producer-owned provenance.",
+        supportingArtifacts: [],
+        relationships: [],
+        operationalContext: {},
+      }),
+    })).status, 400);
+  }
+  assert.equal(observed.length, beforeInvalid);
+
+  for (const invalidPredecessor of [
+    { ...predecessor, workspaceVersion: "sha256:short" },
+    { ...predecessor, workspaceId: "" },
+    { ...predecessor, authorityGranted: true },
+  ]) {
+    assert.equal((await fetch(`${base}/api/local/conclave/workspaces`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "conclave-restart-invalid",
+      },
+      body: JSON.stringify({
+        proposal: "Investigate an unfamiliar operational asset without control.",
+        predecessor: invalidPredecessor,
+      }),
     })).status, 400);
   }
   assert.equal(observed.length, beforeInvalid);
@@ -2178,6 +2280,31 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   assert.equal(body.operational.productionMultiTenantReady, false);
   assert.equal(JSON.stringify(body).includes(config.operationalRuntimeToken), false);
 
+  const hostedPredecessor = {
+    missionId: "MISSION-LEGACY-001",
+    workspaceId: "WORKSPACE-LEGACY-001",
+    workspaceVersion: `sha256:${"d".repeat(64)}`,
+  };
+  const conclaveRestart = await fetch(`${base}/api/operations/conclave/workspaces`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": loginBody.session.csrfToken,
+      "Idempotency-Key": "conclave-restart-12345",
+    },
+    body: JSON.stringify({
+      proposal: "Investigate an unfamiliar asset through an Edge Runtime.",
+      predecessor: hostedPredecessor,
+    }),
+  });
+  assert.equal(conclaveRestart.status, 200);
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "conclave-restart-12345");
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), {
+    proposal: "Investigate an unfamiliar asset through an Edge Runtime.",
+    predecessor: hostedPredecessor,
+  });
+
   const workspaceVersion = `sha256:${"b".repeat(64)}`;
   const conclaveRun = await fetch(`${base}/api/operations/conclave/workspaces/MISSION-001/run`, {
     method: "POST",
@@ -2198,7 +2325,7 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
 
   const evidencePayload = {
     origin: "runtime://edge/node-1/observation-1",
-    sourceClassification: "runtime_evidence",
+    sourceClassification: "retrieved_evidence",
     confidence: 0.91,
     claim: "A bounded observation was admitted through the hosted gateway.",
     supportingArtifacts: ["observation-1"],
@@ -2258,6 +2385,73 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
     },
   );
   assert.equal(invalidEvidence.status, 400);
+  for (const sourceClassification of [
+    "runtime_evidence",
+    "live_external_source",
+    "platform_knowledge",
+    "model_native",
+  ]) {
+    const forbiddenEvidence = await fetch(
+      `${base}/api/operations/conclave/workspaces/MISSION-001/tasks/TASK-001/evidence`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: cookie,
+          "Content-Type": "application/json",
+          "X-CSRF-Token": loginBody.session.csrfToken,
+          "Idempotency-Key": `conclave-evidence-forbidden-${sourceClassification}`,
+        },
+        body: JSON.stringify({ ...evidencePayload, sourceClassification }),
+      },
+    );
+    assert.equal(forbiddenEvidence.status, 400);
+  }
+  assert.equal(observed.length, beforeInvalidConclaveRun);
+
+  for (const invalidPredecessor of [
+    { ...hostedPredecessor, workspaceVersion: "not-a-digest" },
+    { ...hostedPredecessor, missionId: "" },
+    { ...hostedPredecessor, completionClaimed: true },
+    { ...hostedPredecessor, tenantId: "browser-selected-tenant" },
+    { ...hostedPredecessor, authorityGrantId: "browser-selected-authority" },
+    { ...hostedPredecessor, requestingPrincipalId: "browser-selected-principal" },
+  ]) {
+    const invalidRestart = await fetch(`${base}/api/operations/conclave/workspaces`, {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": loginBody.session.csrfToken,
+        "Idempotency-Key": "conclave-restart-invalid",
+      },
+      body: JSON.stringify({
+        proposal: "Investigate an unfamiliar asset through an Edge Runtime.",
+        predecessor: invalidPredecessor,
+      }),
+    });
+    assert.equal(invalidRestart.status, 400);
+  }
+  for (const privilegedTopLevelField of [
+    { workspaceId: "browser-selected-workspace" },
+    { tenantId: "browser-selected-tenant" },
+    { authorityGranted: true },
+  ]) {
+    const invalidRestart = await fetch(`${base}/api/operations/conclave/workspaces`, {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": loginBody.session.csrfToken,
+        "Idempotency-Key": "conclave-restart-privileged",
+      },
+      body: JSON.stringify({
+        proposal: "Investigate an unfamiliar asset through an Edge Runtime.",
+        predecessor: hostedPredecessor,
+        ...privilegedTopLevelField,
+      }),
+    });
+    assert.equal(invalidRestart.status, 400);
+  }
   assert.equal(observed.length, beforeInvalidConclaveRun);
 });
 
@@ -2570,6 +2764,65 @@ test("hosted Document, Project, and Voice workspaces use authenticated Runtime-o
     body: JSON.stringify({ name: "Project Beta", tenantId: "browser-selected" }),
   })).status, 403);
   assert.equal(observed.length, callsBeforeRejectedIdentity);
+});
+
+test("Document query requires operations read without borrowing upload or write scope", async () => {
+  const observed = [];
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "operator",
+    operationalScopes: ["operations:read"],
+    operationalCookieSecure: false,
+  };
+  const base = await start(
+    async () => runtimeResponse({}),
+    config,
+    async () => localResponse({}),
+    async (url, options) => {
+      observed.push({ url, options });
+      return localResponse({
+        status: "completed",
+        answer: "The bounded source answer.",
+        secretValuesExposed: false,
+      });
+    },
+  );
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const headers = {
+    Cookie: cookie,
+    "Content-Type": "application/json",
+    "X-CSRF-Token": session.session.csrfToken,
+    "Idempotency-Key": "intake-query-read-scope-0001",
+  };
+  const query = await fetch(`${base}/api/operations/intake/query`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ question: "What is supported by the source?" }),
+  });
+  assert.equal(query.status, 200);
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].url, "http://127.0.0.1:9876/intake/query");
+  assert.equal(observed[0].options.headers["X-NEXUS-Scopes"], "operations:read");
+  const upload = await fetch(`${base}/api/operations/intake/upload`, {
+    method: "POST",
+    headers: { ...headers, "Idempotency-Key": "intake-upload-read-scope-0001" },
+    body: JSON.stringify({ filename: "requirements.txt", contentBase64: "SGVsbG8=" }),
+  });
+  assert.equal(upload.status, 403);
+  assert.equal(observed.length, 1);
 });
 
 test("hosted Knowledge intake is canonical, scoped, CSRF-protected, idempotent, and server-bound", async () => {

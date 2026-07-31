@@ -116,6 +116,9 @@ export function asCapabilityRegistryProjection(value: unknown): CapabilityRegist
     || typeof sourceIdentity?.rootRevision !== "string"
     || !ROOT_REVISION_PATTERN.test(sourceIdentity.rootRevision)
     || sourceIdentity?.rootRevisionVerified !== true
+    || typeof sourceIdentity?.runtimeRevision !== "string"
+    || !ROOT_REVISION_PATTERN.test(sourceIdentity.runtimeRevision)
+    || sourceIdentity?.runtimeRevisionVerified !== true
     || !["local_git_worktree", "program_alpha_source_attestation"].includes(
       String(sourceIdentity?.verificationMethod ?? ""),
     )

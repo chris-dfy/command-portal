@@ -1,10 +1,30 @@
 import { useEffect, useState } from "react";
 import { Calculator, FileCheck2, FolderKanban, Plus, RefreshCw, Route } from "lucide-react";
 import { DataPanel } from "./DataPanel";
-import { localNexusClient, type ArtifactDefinition, type CompiledArtifact, type PlanningModel, type ProjectEstimate, type ProjectScope } from "../lib/local-client";
+import {
+  localNexusClient,
+  operationalSessionClient,
+  type ArtifactDefinition,
+  type CompiledArtifact,
+  type OperationalSession,
+  type PlanningModel,
+  type ProjectEstimate,
+  type ProjectScope,
+} from "../lib/local-client";
+import {
+  canonicalHostedControlAvailability,
+  PROJECTS_PLANNING_CAPABILITY_ID,
+} from "../lib/hosted-capability-gate";
 import { displayLabel } from "../lib/presentation";
+import type { CapabilityRegistryProjection } from "../lib/types";
 
-export function ProjectStudio() {
+export function ProjectStudio({
+  capabilityRegistry = null,
+  session = { authenticated: false },
+}: {
+  capabilityRegistry?: CapabilityRegistryProjection | null;
+  session?: OperationalSession;
+} = {}) {
   const [definitions, setDefinitions] = useState<ArtifactDefinition[]>([]);
   const [projectName, setProjectName] = useState("");
   const [projectId, setProjectId] = useState("");
@@ -17,10 +37,39 @@ export function ProjectStudio() {
   const [artifact, setArtifact] = useState<CompiledArtifact | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const hostedAccess = {
+    hosted: operationalSessionClient.mode() === "hosted",
+    authenticated: session.authenticated,
+    scopes: session.scopes,
+  };
+  const createAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: PROJECTS_PLANNING_CAPABILITY_ID,
+      method: "POST",
+      pathTemplate: "/projects",
+    },
+    hostedAccess,
+    "operations:write",
+  );
+  const compileAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: PROJECTS_PLANNING_CAPABILITY_ID,
+      method: "POST",
+      pathTemplate: "/projects/{project_id}/compile",
+    },
+    hostedAccess,
+    "operations:write",
+  );
 
   useEffect(() => { void localNexusClient.artifactTypes().then((data) => setDefinitions(data.artifacts)).catch((error) => setMessage(messageFrom(error))); }, []);
 
   async function create() {
+    if (!createAction.available) {
+      setMessage(createAction.reason);
+      return;
+    }
     setBusy(true); setMessage(null);
     try {
       const project = await localNexusClient.projectCreate(projectName.trim() || "New NEXUS Project");
@@ -43,6 +92,10 @@ export function ProjectStudio() {
   }
 
   async function compile() {
+    if (!compileAction.available) {
+      setMessage(compileAction.reason);
+      return;
+    }
     setBusy(true); setMessage(null);
     try {
       const result = await localNexusClient.projectCompile(projectId, artifactType, {
@@ -63,12 +116,12 @@ export function ProjectStudio() {
     <DataPanel eyebrow="NEXUS Projects" title="Project control" icon={<FolderKanban size={18} />} className="span-2">
       <div className="project-control-grid">
         <label className="workspace-field"><span>Project name</span><input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Customer transformation program" /></label>
-        <button onClick={() => void create()} disabled={busy}><Plus size={15} /> Create project</button>
+        <button onClick={() => void create()} disabled={busy || !createAction.available} title={createAction.available ? undefined : createAction.reason}><Plus size={15} /> Create project</button>
         <label className="workspace-field"><span>Active project ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="PROJECT-…" /></label>
         <button onClick={() => void analyze()} disabled={busy || !projectId.trim()}><RefreshCw size={15} /> Build project context</button>
       </div>
       {message && <p className="workspace-message" role="status">{message}</p>}
-      <p className="boundary-note">Scope, plan, and price are assembled by the workspace-scoped Runtime from linked evidence. The browser performs no project calculation.</p>
+      <p className="boundary-note">Create action: {createAction.reason} Scope, plan, and price are assembled by the workspace-scoped Runtime from linked evidence. The browser performs no project calculation.</p>
     </DataPanel>
 
     <DataPanel eyebrow="Evidence-backed scope" title="Scope" icon={<FileCheck2 size={18} />}>
@@ -89,7 +142,8 @@ export function ProjectStudio() {
         <label className="workspace-field"><span>Artifact</span><select value={artifactType} onChange={(event) => setArtifactType(event.target.value)}>{definitions.map((definition) => <option key={definition.artifactType} value={definition.artifactType}>{definition.name} · {definition.status}</option>)}</select></label>
         <label className="workspace-field"><span>Default phase weeks</span><input type="number" min="0.5" max="520" step="0.5" value={weeks} onChange={(event) => setWeeks(event.target.value)} placeholder="Optional" /></label>
         <label className="workspace-field span-input"><span>Explicit operator assumption</span><input value={assumption} onChange={(event) => setAssumption(event.target.value)} placeholder="Clearly labeled; never treated as source evidence" /></label>
-        <button onClick={() => void compile()} disabled={busy || !projectId.trim()}><FileCheck2 size={15} /> Compile</button>
+        <button onClick={() => void compile()} disabled={busy || !projectId.trim() || !compileAction.available} title={compileAction.available ? undefined : compileAction.reason}><FileCheck2 size={15} /> Compile</button>
+        <p className="boundary-note">Compile action: {compileAction.reason}</p>
       </div>
       {artifact && <div className="artifact-result"><strong>{displayLabel(artifact.status ?? "unknown")}</strong><span>{artifact.confidence ?? "Unrated"} confidence · {displayLabel(artifact.estimateStatus ?? "no estimate")}</span><code>{artifact.proofId ?? artifact.reason ?? "Proof unavailable"}</code></div>}
     </DataPanel>

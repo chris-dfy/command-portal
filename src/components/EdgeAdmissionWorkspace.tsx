@@ -37,6 +37,8 @@ import {
   type RuntimeAdmissionIntentRequest,
   type RuntimeAdmissionResponse,
 } from "../lib/local-client";
+import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import type { CapabilityRegistryProjection } from "../lib/types";
 
 const ADMISSION_REFRESH_INTERVAL_MS = 5_000;
 const ADMISSION_REQUEST_SCOPE = "edge:node_admission:request";
@@ -322,9 +324,11 @@ function safeReplayEvents(value: Record<string, unknown>): SafeReplayEvent[] {
 
 export function EdgeAdmissionWorkspace({
   capability: fleetCapability,
+  capabilityRegistry = null,
   onFleetRefresh,
 }: {
   capability?: RuntimeAdmissionCapability;
+  capabilityRegistry?: CapabilityRegistryProjection | null;
   onFleetRefresh: () => void;
 }) {
   const [runtimeCapability, setRuntimeCapability] = useState<RuntimeAdmissionCapability>();
@@ -348,36 +352,59 @@ export function EdgeAdmissionWorkspace({
 
   const capability = runtimeCapability ?? fleetCapability;
   const dependencies = useMemo(() => capabilityDependencies(capability), [capability]);
-  const dependenciesReady = dependencies.length > 0 && dependencies.every(dependencyReady);
   const sessionAuthenticated = session.authenticated === true;
   const permissionGranted = session.scopes?.includes(ADMISSION_REQUEST_SCOPE) === true;
-  const reviewPermissionGranted = session.scopes?.includes(ADMISSION_REVIEW_SCOPE) === true;
+  const hostedAccess = {
+    hosted: operationalSessionClient.mode() === "hosted",
+    authenticated: sessionAuthenticated,
+    scopes: session.scopes,
+  };
+  const createAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "edge_node_admission",
+      method: "POST",
+      pathTemplate: "/runtime-coordination/admissions",
+    },
+    hostedAccess,
+    ADMISSION_REQUEST_SCOPE,
+  );
+  const cancelAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "edge_node_admission",
+      method: "POST",
+      pathTemplate: "/runtime-coordination/admissions/{admission_id}/cancel",
+    },
+    hostedAccess,
+    ADMISSION_REQUEST_SCOPE,
+  );
+  const reissueAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "edge_node_admission",
+      method: "POST",
+      pathTemplate: "/runtime-coordination/admissions/{admission_id}/challenge/reissue",
+    },
+    hostedAccess,
+    ADMISSION_REVIEW_SCOPE,
+  );
   const requestedCapabilities = useMemo(() => [...new Set(form.requestedCapabilities.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))], [form.requestedCapabilities]);
   const evidenceRefs = useMemo(() => [...new Set(form.evidenceRefs.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))], [form.evidenceRefs]);
   const capabilitiesValid = requestedCapabilities.length > 0 && requestedCapabilities.every((item) => item.startsWith("nexus."));
   const canCreate = Boolean(
-    capability?.available === true
-      && dependenciesReady
-      && sessionAuthenticated
-      && permissionGranted
+    createAction.available
       && form.missionId
       && form.displayName.trim()
       && form.nodeClass.trim()
       && form.operationalPurpose.trim()
       && capabilitiesValid,
   );
-  const blockedDependency = dependencies.find((dependency) => !dependencyReady(dependency));
-  const gateReason = capability?.available !== true
-    ? capability?.reason ?? "The Runtime has not reported governed node admission as available."
-    : !dependenciesReady
-      ? blockedDependency?.reason ?? "One or more Runtime admission dependencies are not healthy."
-      : !sessionAuthenticated
-        ? "An authenticated hosted operational session is required."
-        : !permissionGranted
-          ? `The authenticated session lacks required permission: ${ADMISSION_REQUEST_SCOPE}.`
-          : !form.missionId
-            ? "Select the existing Mission that owns this admission request."
-            : "Complete the required descriptive intent fields.";
+  const gateReason = !createAction.available
+    ? createAction.reason
+    : !form.missionId
+      ? "Select the existing Mission that owns this admission request."
+      : "Complete the required descriptive intent fields.";
 
   const loadAdmissions = useCallback(async (quiet = false) => {
     if (quiet) setRefreshing(true); else setLoading(true);
@@ -489,9 +516,9 @@ export function EdgeAdmissionWorkspace({
 
   async function mutateAdmission(operation: "cancel" | "reissue") {
     if (!selectedAdmission) return;
-    const requiredPermission = operation === "reissue" ? ADMISSION_REVIEW_SCOPE : ADMISSION_REQUEST_SCOPE;
-    if (!session.scopes?.includes(requiredPermission)) {
-      setActionError(`The authenticated session lacks required permission: ${requiredPermission}.`);
+    const action = operation === "reissue" ? reissueAction : cancelAction;
+    if (!action.available) {
+      setActionError(action.reason);
       return;
     }
     const idempotencyKey = pendingMutation?.operation === operation && pendingMutation.requestId === selectedAdmission.admissionRequestId
@@ -609,7 +636,7 @@ export function EdgeAdmissionWorkspace({
       </NexusPanel>
     </div>
 
-    <NexusPanel className="edge-admission-inspector" eyebrow="Operational evolution" title={selectedAdmission?.intent.displayName ?? "No admission selected"} description={selectedAdmission ? `${selectedAdmission.admissionRequestId} · Mission ${selectedAdmission.missionId}` : "Select an admission request to inspect policy, Authority, verification, proof, receipt, and Replay lineage."} actions={selectedAdmission && <><NexusStatus tone={statusTone(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}>{readable(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}</NexusStatus><NexusButton size="sm" variant="ghost" title={reviewPermissionGranted ? "Reissue the governed challenge" : `Requires ${ADMISSION_REVIEW_SCOPE}`} disabled={!reviewPermissionGranted || !operationAllowed(selectedAdmission, "challenge.reissue") || mutating !== null} loading={mutating === "reissue"} onClick={() => void mutateAdmission("reissue")}><RotateCcw />Reissue challenge</NexusButton><NexusButton size="sm" variant="danger" title={permissionGranted ? "Cancel the admission request" : `Requires ${ADMISSION_REQUEST_SCOPE}`} disabled={!permissionGranted || !operationAllowed(selectedAdmission, "cancel") || mutating !== null} loading={mutating === "cancel"} onClick={() => void mutateAdmission("cancel")}><Ban />Cancel request</NexusButton></>}>
+    <NexusPanel className="edge-admission-inspector" eyebrow="Operational evolution" title={selectedAdmission?.intent.displayName ?? "No admission selected"} description={selectedAdmission ? `${selectedAdmission.admissionRequestId} · Mission ${selectedAdmission.missionId}` : "Select an admission request to inspect policy, Authority, verification, proof, receipt, and Replay lineage."} actions={selectedAdmission && <><NexusStatus tone={statusTone(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}>{readable(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}</NexusStatus><NexusButton size="sm" variant="ghost" title={reissueAction.available ? "Reissue the governed challenge" : reissueAction.reason} disabled={!reissueAction.available || !operationAllowed(selectedAdmission, "challenge.reissue") || mutating !== null} loading={mutating === "reissue"} onClick={() => void mutateAdmission("reissue")}><RotateCcw />Reissue challenge</NexusButton><NexusButton size="sm" variant="danger" title={cancelAction.available ? "Cancel the admission request" : cancelAction.reason} disabled={!cancelAction.available || !operationAllowed(selectedAdmission, "cancel") || mutating !== null} loading={mutating === "cancel"} onClick={() => void mutateAdmission("cancel")}><Ban />Cancel request</NexusButton></>}>
       {selectedAdmission ? <>
         {selectedAdmission.awaitingNodeProof && <NexusCallout tone="attention" title="Awaiting physical node proof">{selectedAdmission.requiredNextAction ?? "The real node must claim its challenge and submit independently verifiable proof before NEXUS can verify, admit, or activate it."}</NexusCallout>}
         {selectedAdmission.failure && <aside className="edge-admission-failure"><TriangleAlert /><div><strong>{readable(selectedAdmission.failure.category ?? selectedAdmission.failure.code ?? "Admission failed")}</strong><p>{selectedAdmission.failure.message ?? selectedAdmission.failure.reason ?? "The Runtime recorded a failure without a public explanation."}</p><small>{selectedAdmission.failure.remediation ?? selectedAdmission.failure.nextAction ?? (selectedAdmission.failure.retryable ? "A governed retry may be available." : "Review policy and Evidence before taking further action.")}</small></div><NexusStatus tone="critical">{selectedAdmission.failure.retryable ? "retryable" : "action required"}</NexusStatus></aside>}

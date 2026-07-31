@@ -2,6 +2,7 @@ import { localNexusClient, type ConclaveWorkspaceRecord } from "./local-client";
 import {
   recoverableConclaveRun,
   stableConclaveRunIdempotencyKey,
+  type ConclaveWorkspaceCreateRequest,
 } from "./conclave-request-identity";
 
 export type ConclaveRun = {
@@ -85,11 +86,11 @@ async function executeAndRefresh(
 }
 
 export async function startConclaveInvestigation(
-  proposal: string,
+  request: ConclaveWorkspaceCreateRequest,
   createIdempotencyKey: string,
 ): Promise<ConclaveRun> {
   const workspace = await localNexusClient.createConclaveWorkspace(
-    proposal,
+    request,
     createIdempotencyKey,
   );
   const runIdempotencyKey = stableConclaveRunIdempotencyKey(

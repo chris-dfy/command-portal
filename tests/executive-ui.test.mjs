@@ -133,7 +133,7 @@ test("provider sign-out stays within the CSP-closed same-origin request boundary
 });
 
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
-  const [app, registry, intake, projects, voice, realtime, client, hif] = await Promise.all([
+  const [app, registry, intake, projects, voice, realtime, client, hif, documentResult] = await Promise.all([
     read("../src/App.tsx"),
     surfaceRegistry(),
     read("../src/components/DocumentIntake.tsx"),
@@ -142,12 +142,24 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
     read("../src/lib/realtime-voice-client.ts"),
     read("../src/lib/local-client.ts"),
     read("../src/lib/hif-client.ts"),
+    read("../src/lib/document-intake-result.ts"),
   ]);
   for (const label of ["Document Intelligence", "Projects", "Voice Operations"]) {
     assert.equal(registry.surfaces.some((surface) => surface.label === label), true);
   }
+  assert.match(app, /<DocumentIntake capabilityRegistry=\{capabilityRegistry\} session=\{operationalSession\}/);
   for (const contract of ["/intake/upload", "/intake/query", "/projects", "/scope", "/estimate", "/planning-model", "/compile", "/voice-operator/route-transcript"]) assert.match(client, new RegExp(contract));
   assert.match(intake, /FileReader/);
+  assert.match(intake, /canonicalHostedControlAvailability/);
+  assert.match(intake, /pathTemplate: "\/intake\/history"/);
+  assert.match(intake, /pathTemplate: "\/intake\/upload"/);
+  assert.match(intake, /pathTemplate: "\/intake\/query"/);
+  assert.match(intake, /"operations:read"/);
+  assert.doesNotMatch(intake, /pathTemplate: "\/intake\/query"[\s\S]{0,180}"operations:write"/);
+  assert.match(intake, /"evidence:write"/);
+  assert.match(intake, /successfulDocumentUploadMessage/);
+  assert.match(documentResult, /Source inventory remains degraded/);
+  assert.match(documentResult, /Source inventory refresh is degraded/);
   assert.match(intake, /projectId/);
   assert.match(intake, /Ask ingested sources/);
   assert.match(projects, /browser performs no project calculation/i);
@@ -231,12 +243,13 @@ test("direct hosted workspace paths survive a fresh page load", async () => {
 });
 
 test("Conclave is a visible Runtime-owned decision challenge capability", async () => {
-  const [app, registry, conclave, client, styles] = await Promise.all([
+  const [app, registry, conclave, client, localClient, styles] = await Promise.all([
     read("../src/App.tsx"), surfaceRegistry(),
-    read("../src/components/ConclaveWorkspace.tsx"), read("../src/lib/conclave-client.ts"), read("../src/styles.css")
+    read("../src/components/ConclaveWorkspace.tsx"), read("../src/lib/conclave-client.ts"),
+    read("../src/lib/local-client.ts"), read("../src/styles.css")
   ]);
   assert.equal(registry.surfaces.find((surface) => surface.id === "conclave")?.label, "Conclave");
-  assert.match(app, /<ConclaveWorkspace/);
+  assert.match(app, /<ConclaveWorkspace readiness=\{operationalReadiness\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\}/);
   for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
   assert.match(client, /localNexusClient\.createConclaveWorkspace/);
   assert.match(client, /localNexusClient\.runConclaveWorkspace/);
@@ -251,6 +264,36 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(conclave, /does not substitute a static one-shot review/);
   assert.match(conclave, /Run governed review/);
   assert.match(conclave, /created workspace was preserved/i);
+  assert.match(conclave, /workspaceDisplayStatus\(workspace\)/);
+  assert.match(conclave, /workspace\.lifecyclePosture === "legacy_read_only"/);
+  assert.doesNotMatch(conclave, /displayStatus\s*\?\?\s*(?:workspace\??\.)?status/);
+  assert.match(conclave, /const predecessor: ConclavePredecessor/);
+  assert.match(conclave, /workspaceVersion:\s*workspace\.workspaceVersion/);
+  assert.match(conclave, /Unblock an evidence-waiting task/);
+  assert.match(conclave, /localNexusClient\.admitConclaveEvidence/);
+  assert.match(conclave, /evidence:write/);
+  assert.match(conclave, /canonicalHostedControlAvailability/);
+  assert.match(conclave, /pathTemplate: "\/conclave\/workspaces"/);
+  assert.match(conclave, /pathTemplate: "\/conclave\/workspaces\/\{mission_id\}\/run"/);
+  assert.match(conclave, /pathTemplate: "\/conclave\/workspaces\/\{mission_id\}\/tasks\/\{task_id\}\/evidence"/);
+  assert.match(conclave, /const creationAllowed = createAction\.available && runAction\.available/);
+  assert.match(conclave, /const runAllowed = runAction\.available/);
+  assert.match(conclave, /Runtime derives the collector from the authenticated principal/);
+  assert.match(conclave, /"tenant_knowledge"/);
+  assert.match(conclave, /"retrieved_evidence"/);
+  for (const producerOwned of [
+    "runtime_evidence",
+    "live_external_source",
+    "platform_knowledge",
+    "model_native",
+  ]) {
+    assert.doesNotMatch(
+      conclave,
+      new RegExp(`evidenceSourceClassifications[\\s\\S]{0,240}"${producerOwned}"`),
+    );
+  }
+  assert.match(localClient, /admitConclaveEvidence/);
+  assert.match(localClient, /\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/evidence/);
   assert.match(conclave, /useState\(""\)/);
   assert.match(conclave, /placeholder=\{suggestedProposal\}/);
   assert.doesNotMatch(client, /gateway\.data\.data/);
@@ -443,6 +486,14 @@ test("Operational Replay surfaces Runtime-owned stage playback with truthful bou
   assert.match(replay, /supplied\.whatChanged/);
   assert.match(replay, /Runtime supplied no explanation for this stage\./);
   assert.match(replay, /STAGE_INTERVAL_BASE_MS \/ speed/);
+  assert.match(replay, /classifyOperationalReplayLoad/);
+  assert.match(replay, /selectedReplayIdRef/);
+  assert.match(replay, /replayLoadSequenceRef/);
+  assert.match(replay, /stageButtonsRef/);
+  assert.match(replay, /scrollIntoView/);
+  assert.match(replay, /presentHostedReplayStage/);
+  assert.match(replay, /positiveHostedReplayFacts/);
+  assert.match(replay, /Scheduling trace/);
   for (const operation of ["operationalReplays", "operationalReplayEvents", "operationalReplayStage", "explainOperationalReplayStage", "operationalReplayFailures", "operationalReplayForMission", "operationalReplayForReceipt"]) {
     assert.match(client, new RegExp(operation));
   }
@@ -454,8 +505,72 @@ test("Operational Replay surfaces Runtime-owned stage playback with truthful bou
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(replay + client), false);
 });
 
+test("hosted Project, Knowledge, Edge, Voice, Copilot, and canonical execution controls use exact action and scope gates", async () => {
+  const [app, projects, knowledge, edgeAdmission, canonical, hostedGate] = await Promise.all([
+    read("../src/App.tsx"),
+    read("../src/components/ProjectStudio.tsx"),
+    read("../src/components/KnowledgeWorkspace.tsx"),
+    read("../src/components/EdgeAdmissionWorkspace.tsx"),
+    read("../src/components/CanonicalExecutionSpine.tsx"),
+    read("../src/lib/hosted-capability-gate.ts"),
+  ]);
+  assert.match(app, /<ProjectStudio capabilityRegistry=\{capabilityRegistry\} session=\{operationalSession\}/);
+  assert.match(app, /<KnowledgeWorkspace snapshot=\{snapshot\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\}/);
+  assert.match(app, /<EdgeAdmissionWorkspace capabilityRegistry=\{capabilityRegistry\}/);
+  assert.match(app, /<CanonicalExecutionSpine capabilityRegistry=\{capabilityRegistry\}/);
+  assert.match(app, /hostedSessionActionAvailability/);
+  for (const actionName of [
+    "copilotInteractionStart",
+    "realtimeVoiceCall",
+    "voiceOperatorTranscript",
+  ]) {
+    assert.match(app, new RegExp(`PORTAL_CANONICAL_ACTIONS\\.${actionName}`));
+  }
+  assert.ok((app.match(/"operations:write"/g) ?? []).length >= 3);
+
+  assert.match(projects, /capabilityId: PROJECTS_PLANNING_CAPABILITY_ID/);
+  assert.match(hostedGate, /PROJECTS_PLANNING_CAPABILITY_ID = "projects\.nexicron_planning"/);
+  assert.match(projects, /pathTemplate: "\/projects"/);
+  assert.match(projects, /pathTemplate: "\/projects\/\{project_id\}\/compile"/);
+  assert.match(projects, /disabled=\{busy \|\| !createAction\.available\}/);
+  assert.match(projects, /!compileAction\.available/);
+
+  for (const [capabilityId, pathTemplate, scope] of [
+    ["knowledge_intake", "/knowledge/intake", "evidence:write"],
+    ["knowledge_acquisition", "/runtime/baselines", "operations:write"],
+    ["knowledge_promotion", "/knowledge/acquisitions/{mission_id}/promotion-candidates", "operations:write"],
+    ["knowledge_promotion", "/knowledge/promotions", "knowledge:promote"],
+  ]) {
+    assert.match(knowledge, new RegExp(capabilityId.replace(".", "\\.")));
+    assert.match(knowledge, new RegExp(pathTemplate.replaceAll("/", "\\/").replaceAll("{", "\\{").replaceAll("}", "\\}")));
+    assert.match(knowledge, new RegExp(scope.replace(":", "\\:")));
+  }
+  assert.match(knowledge, /candidateGate\.allowed/);
+  assert.match(knowledge, /baselineGate\.allowed/);
+  assert.doesNotMatch(knowledge, /const acquisitionGate = actionGate/);
+
+  for (const pathTemplate of [
+    "/runtime-coordination/admissions",
+    "/runtime-coordination/admissions/{admission_id}/cancel",
+    "/runtime-coordination/admissions/{admission_id}/challenge/reissue",
+  ]) {
+    assert.match(edgeAdmission, new RegExp(pathTemplate.replaceAll("/", "\\/").replaceAll("{", "\\{").replaceAll("}", "\\}")));
+  }
+  assert.match(edgeAdmission, /ADMISSION_REQUEST_SCOPE/);
+  assert.match(edgeAdmission, /ADMISSION_REVIEW_SCOPE/);
+  assert.match(edgeAdmission, /!cancelAction\.available/);
+  assert.match(edgeAdmission, /!reissueAction\.available/);
+
+  assert.match(canonical, /capabilityId: "canonical_execution_spine"/);
+  assert.match(canonical, /\/executive-authority\/canonical-execution\/missions"/);
+  assert.match(canonical, /\/executive-authority\/canonical-execution\/missions\/\{mission_id\}\/actions"/);
+  assert.match(canonical, /!createAction\.available/);
+  assert.match(canonical, /!executeAction\.available/);
+  assert.match(hostedGate, /hostedSessionActionAvailability/);
+});
+
 test("new portal destinations render Runtime-backed dashboards without client-side cognition", async () => {
-  const [app, registry, client, missions, knowledge, edge, fleet, admission, styles] = await Promise.all([
+  const [app, registry, client, missions, knowledge, edge, fleet, admission, styles, hostedGate] = await Promise.all([
     read("../src/App.tsx"),
     surfaceRegistry(),
     read("../src/lib/local-client.ts"),
@@ -464,7 +579,8 @@ test("new portal destinations render Runtime-backed dashboards without client-si
     read("../src/components/EdgeRuntime.tsx"),
     read("../src/components/EdgeNodeFleet.tsx"),
     read("../src/components/EdgeAdmissionWorkspace.tsx"),
-    read("../src/styles.css")
+    read("../src/styles.css"),
+    read("../src/lib/hosted-capability-gate.ts")
   ]);
   const labels = new Set(registry.surfaces.map((surface) => surface.label));
   for (const label of ["Missions", "Knowledge", "Edge Runtime"]) assert.equal(labels.has(label), true, label);
@@ -489,20 +605,25 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(knowledge, /Knowledge Store/);
   for (const operation of ["knowledgeIntake", "knowledgeAcquisition", "knowledgePromotionCandidate", "knowledgeVersions", "knowledgeReceipt", "knowledgePromotions"]) assert.match(client, new RegExp(operation));
   assert.match(knowledge, /policyEligible/);
-  for (const gate of ["intakeGate", "acquisitionGate", "promotionGate"]) assert.match(knowledge, new RegExp(gate));
+  for (const gate of ["intakeGate", "baselineGate", "candidateGate", "promotionGate"]) assert.match(knowledge, new RegExp(gate));
   assert.match(knowledge, /Mission completion never writes to Knowledge Store automatically/);
   for (const field of ["operationalState", "awaitingNodeProof", "requiredNextAction", "replayId"]) assert.match(admission, new RegExp(field));
   assert.match(admission, /Awaiting physical node proof/);
   assert.match(admission, /ADMISSION_REVIEW_SCOPE/);
-  assert.match(admission, /reviewPermissionGranted/);
+  assert.match(admission, /reissueAction\.available/);
   assert.match(missions, /\["active", "in_progress", "running", "executing"\]/);
   assert.match(missions, /step\.reversible === true/);
   assert.doesNotMatch(missions, /step\.reversible !== false/);
+  assert.match(missions, /missionPlanAction\.available/);
+  assert.match(missions, /missionStepAction\.available/);
+  assert.doesNotMatch(missions, /missionCapabilityBlocked/);
   assert.match(app, /HostedCapabilityBoundary/);
   assert.match(app, /if \(configured && \["live", "degraded"\]\.includes\(capability\.state\)\) return children/);
   assert.match(app, /asCapabilityRegistryProjection/);
-  assert.match(app, /action\.invocable !== true/);
-  assert.match(app, /No typed handler inventory for/);
+  assert.match(hostedGate, /action\.invocable !== true/);
+  assert.match(hostedGate, /required hosted read\/base action set is unavailable/);
+  assert.match(hostedGate, /must stay disabled at its control/);
+  assert.match(app, /MODULE_MOUNT_ACTION_REQUIREMENTS/);
   assert.match(app, /groups=\{registryRailGroups\}/);
   assert.doesNotMatch(app, /live: area\.id ===/);
   assert.match(app, /Hosted operational mode is not configured for this deployment/);
@@ -525,8 +646,13 @@ test("new portal destinations render Runtime-backed dashboards without client-si
     "Verification", "Asset contract", "First heartbeat", "Receipt", "Operational Replay",
   ]) assert.match(admission, new RegExp(label));
   assert.match(admission, /edge:node_admission:request/);
-  assert.match(admission, /capability\?\.available === true/);
-  assert.match(admission, /dependenciesReady/);
+  assert.match(admission, /canonicalHostedControlAvailability/);
+  assert.match(admission, /createAction\.available/);
+  assert.match(admission, /dependencies\.map/);
+  assert.doesNotMatch(
+    admission,
+    /const canCreate = Boolean\([\s\S]{0,220}capability\?\.available/,
+  );
   assert.match(admission, /operationAllowed/);
   assert.doesNotMatch(client + fleet + admission, /credentialRef|challengeId|createRuntimeNode|enrollment-challenge/);
   assert.doesNotMatch(
@@ -620,23 +746,25 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
   assert.match(voice, /disabled=\{!textAction\.available/);
 });
 
-test("canonical execution retains verified capability readiness across mission responses", async () => {
+test("canonical execution gates each mutation on registered session proof and its exact action", async () => {
   const component = await read("../src/components/CanonicalExecutionSpine.tsx");
 
   assert.match(
     component,
-    /const \[capabilityReady, setCapabilityReady\] = useState\(false\)/,
+    /const \[registeredExecutiveSessionVerified, setRegisteredExecutiveSessionVerified\] = useState\(false\)/,
   );
-  assert.match(component, /if \(Array\.isArray\(capabilities\)\)/);
   assert.match(
     component,
-    /capabilities\.length > 0\s+&& capabilities\.every\(\(item\) => item\.operationalAvailability\)/,
+    /next\.registeredExecutiveSessionVerified === true/,
   );
-  assert.match(component, /const ready = capabilityReady/);
-  assert.doesNotMatch(
-    component,
-    /view\?\.data\?\.capabilities\?\.every/,
+  assert.match(component, /const ready = registeredExecutiveSessionVerified/);
+  assert.match(component, /busy \|\| !ready \|\| !createAction\.available/);
+  assert.equal(
+    component.match(/disabled=\{busy \|\| !ready \|\| !executeAction\.available\}/g)?.length,
+    2,
   );
+  assert.doesNotMatch(component, /capabilities\.every/);
+  assert.doesNotMatch(component, /operationalAvailability/);
 });
 
 test("active assistant and Experience presentation copy carries no legacy product identity", async () => {

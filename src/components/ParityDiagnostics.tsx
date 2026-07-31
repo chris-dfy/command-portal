@@ -60,12 +60,13 @@ function DiagnosticBoundary({ error }: { error: string }) {
 export function MissionRuntimeEvidence() {
   const { value, error } = useRuntimeDiagnostic(localNexusClient.missions);
   const missions = recordsFrom(value ?? {}, ["missions", "items", "history"]);
-  return <DataPanel eyebrow="Runtime Mission evidence" title="Recorded Mission identities and lineage" icon={<Waypoints size={18} />}>
+  return <DataPanel eyebrow="Runtime Mission state" title="Recorded Mission identities, objectives, and status" icon={<Waypoints size={18} />}>
     <DiagnosticBoundary error={error} />
     {missions.length ? <div className="evidence-list">{missions.map((mission, index) => {
       const missionId = String(mission.missionId ?? mission.id ?? `mission-${index + 1}`);
       return <article key={missionId}><div><strong>{displayLabel(missionId)}</strong><small>{String(mission.objective ?? mission.name ?? "Runtime-owned Mission record")}</small></div><StatusPill value={recordState(mission)} /></article>;
     })}</div> : <EmptyRecord />}
+    <p className="boundary-note">This projection does not load or claim Mission receipt and proof lineage; those remain separate Runtime records.</p>
   </DataPanel>;
 }
 
@@ -76,6 +77,7 @@ export function RuntimeMissionInventory() {
     <DiagnosticBoundary error={error} />
     <div className="metric-row"><span>Recorded Missions</span><strong>{missions.length}</strong></div>
     {missions.slice(0, 6).map((mission, index) => <div className="metric-row" key={String(mission.missionId ?? mission.id ?? index)}><span>{String(mission.missionId ?? mission.id ?? "Runtime Mission")}</span><StatusPill value={recordState(mission)} /></div>)}
+    <p className="boundary-note">Inventory state is read independently from receipt and proof lineage and makes no completion claim.</p>
   </DataPanel>;
 }
 

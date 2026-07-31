@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pause, Play, ReceiptText, Route, StepForward, XCircle } from "lucide-react";
-import { localNexusClient } from "../lib/local-client";
+import {
+  localNexusClient,
+  operationalSessionClient,
+  type OperationalSession,
+} from "../lib/local-client";
+import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import type { CapabilityRegistryProjection } from "../lib/types";
 import { nexusModuleById } from "../platform/surfaceRegistry";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
@@ -48,7 +54,14 @@ function workSessionList(value: unknown): WorkSessionRecord[] {
     : [];
 }
 
-export function WorkSessionsWorkspace() {
+export function WorkSessionsWorkspace({
+  capabilityRegistry = null,
+  session = { authenticated: false },
+}: {
+  capabilityRegistry?: CapabilityRegistryProjection | null;
+  session?: OperationalSession;
+} = {}) {
+  const hosted = operationalSessionClient.mode() === "hosted";
   const [objective, setObjective] = useState("");
   const [sessions, setSessions] = useState<WorkSessionRecord[]>([]);
   const [selected, setSelected] = useState<WorkSessionRecord | null>(null);
@@ -122,17 +135,53 @@ export function WorkSessionsWorkspace() {
     }
   }
 
+  const actionGate = (method: string, pathTemplate: string, requiredScope: string) => (
+    canonicalHostedControlAvailability(
+      capabilityRegistry,
+      {
+        capabilityId: "operational.work_sessions",
+        method,
+        pathTemplate,
+      },
+      {
+        hosted,
+        authenticated: session.authenticated,
+        scopes: session.scopes,
+      },
+      requiredScope,
+    )
+  );
+  const planAction = actionGate("POST", "/work-sessions/plan", "operations:write");
+  const startAction = actionGate("POST", "/work-sessions/start", "operations:write");
+  const stepAction = actionGate("POST", "/work-sessions/{session_id}/step", "operations:write");
+  const continueAction = actionGate("POST", "/work-sessions/{session_id}/continue", "operations:write");
+  const pauseAction = actionGate("POST", "/work-sessions/{session_id}/pause", "operations:write");
+  const cancelAction = actionGate("POST", "/work-sessions/{session_id}/cancel", "operations:write");
+  const receiptAction = actionGate("GET", "/work-sessions/{session_id}/receipt", "operations:read");
+  const planAvailable = planAction.available;
+  const startAvailable = startAction.available;
+  const pauseAvailable = pauseAction.available;
+  const cancelAvailable = cancelAction.available;
+  const receiptAvailable = receiptAction.available;
   const canSubmit = objective.trim().length > 0 && !busy;
   const selectedStatus = (selected?.status ?? "").toLowerCase();
   const terminal = new Set(["cancelled", "completed", "failed", "blocked", "budget_exceeded"]);
   const stepModule = nexusModuleById("work-sessions.step-execution");
   const continueModule = nexusModuleById("work-sessions.continuation");
-  const stepAvailable = stepModule?.clients.web.state === "functional";
-  const continueAvailable = continueModule?.clients.web.state === "functional";
+  const stepAvailable = stepModule?.clients.web.state === "functional"
+    && stepAction.available;
+  const continueAvailable = continueModule?.clients.web.state === "functional"
+    && continueAction.available;
   const canStep = stepAvailable && !busy && ["planned", "running"].includes(selectedStatus);
   const canContinue = continueAvailable && !busy && ["paused", "waiting_for_approval"].includes(selectedStatus);
-  const canPause = !busy && ["planned", "running"].includes(selectedStatus);
-  const canCancel = !busy && !terminal.has(selectedStatus);
+  const canPause = pauseAvailable && !busy && ["planned", "running"].includes(selectedStatus);
+  const canCancel = cancelAvailable && !busy && !terminal.has(selectedStatus);
+  const unavailableActionReasons = [
+    !planAvailable ? `Plan: ${planAction.reason}` : "",
+    !startAvailable ? `Start: ${startAction.reason}` : "",
+    !stepAvailable ? `Step: ${stepAction.available ? stepModule?.clients.web.reason : stepAction.reason}` : "",
+    !continueAvailable ? `Continue: ${continueAction.available ? continueModule?.clients.web.reason : continueAction.reason}` : "",
+  ].filter(Boolean);
   return <div className="experience-grid work-sessions-workspace">
     <DataPanel eyebrow="Governed autonomy" title="Bounded Work Session" icon={<Route size={18} />} className="span-2">
       <p className="boundary-note">
@@ -151,13 +200,14 @@ export function WorkSessionsWorkspace() {
         />
       </label>
       <div className="work-sessions-workspace__actions">
-        <button type="button" disabled={!canSubmit} onClick={() => void run(() => localNexusClient.planWorkSession(objective.trim()))}>
+        <button type="button" disabled={!canSubmit || !planAvailable} title={planAvailable ? undefined : planAction.reason} onClick={() => void run(() => localNexusClient.planWorkSession(objective.trim()))}>
           <Route size={15} aria-hidden="true" /> Plan
         </button>
-        <button type="button" disabled={!canSubmit} onClick={() => void run(() => localNexusClient.startWorkSession(objective.trim()))}>
+        <button type="button" disabled={!canSubmit || !startAvailable} title={startAvailable ? undefined : startAction.reason} onClick={() => void run(() => localNexusClient.startWorkSession(objective.trim()))}>
           <Play size={15} aria-hidden="true" /> Start
         </button>
       </div>
+      {unavailableActionReasons.length > 0 && <p className="boundary-note">{unavailableActionReasons.join(" ")}</p>}
       {error && <p className="work-sessions-workspace__error" role="alert">{error}</p>}
     </DataPanel>
 
@@ -175,19 +225,19 @@ export function WorkSessionsWorkspace() {
         </dl>
         {selected.honestNarration && <p>{selected.honestNarration}</p>}
         <div className="work-sessions-workspace__actions">
-          <button type="button" disabled={!canStep} title={stepAvailable ? undefined : stepModule?.clients.web.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "step"))}>
+          <button type="button" disabled={!canStep} title={stepAvailable ? undefined : stepAction.available ? stepModule?.clients.web.reason : stepAction.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "step"))}>
             <StepForward size={15} aria-hidden="true" /> step
           </button>
-          <button type="button" disabled={!canContinue} title={continueAvailable ? undefined : continueModule?.clients.web.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "continue"))}>
+          <button type="button" disabled={!canContinue} title={continueAvailable ? undefined : continueAction.available ? continueModule?.clients.web.reason : continueAction.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "continue"))}>
             <StepForward size={15} aria-hidden="true" /> continue
           </button>
-          <button type="button" disabled={!canPause} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "pause"))}>
+          <button type="button" disabled={!canPause} title={pauseAvailable ? undefined : pauseAction.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "pause"))}>
             <Pause size={15} aria-hidden="true" /> pause
           </button>
-          <button type="button" disabled={!canCancel} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "cancel"))}>
+          <button type="button" disabled={!canCancel} title={cancelAvailable ? undefined : cancelAction.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "cancel"))}>
             <XCircle size={15} aria-hidden="true" /> cancel
           </button>
-          <button type="button" disabled={busy} onClick={() => void showReceipt()}>
+          <button type="button" disabled={busy || !receiptAvailable} title={receiptAvailable ? undefined : receiptAction.reason} onClick={() => void showReceipt()}>
             <ReceiptText size={15} aria-hidden="true" /> Receipt
           </button>
         </div>

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { portalClient } from "../src/lib/portal-client.ts";
+import {
+  asCapabilityRegistryProjection,
+  portalClient,
+} from "../src/lib/portal-client.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -64,6 +67,60 @@ const rejectsWithEnvelope = (code, connectionState) => (error) => {
   assert.equal(error?.envelope?.gateway?.connectionState, connectionState);
   return true;
 };
+
+const validCapabilityRegistryProjection = () => ({
+  recordType: "nexus_live_capability_registry_projection",
+  schemaVersion: "nexus.live-capability-registry@1.0.0",
+  owner: "context_runtime",
+  generatedAt: "2026-07-31T00:00:00.000Z",
+  constitutionalBasis: {},
+  verificationPolicy: {},
+  capabilityRegistryContract: {
+    recordType: "nexus_capability_registry_contract_identity",
+    schemaVersion: "nexus.live-capability-registry@1.0.0",
+    schemaDigest: `sha256:${"a".repeat(64)}`,
+    validatorVersion: "nexus.capability-registry-validator@1.0.0",
+  },
+  sourceIdentity: {
+    rootRevision: "b".repeat(40),
+    runtimeRevision: "c".repeat(40),
+    rootRevisionVerified: true,
+    runtimeRevisionVerified: true,
+    verificationMethod: "program_alpha_source_attestation",
+    sourceTreeDigest: `sha256:${"d".repeat(64)}`,
+    sourceTreeClean: true,
+    environmentRevisionMatched: true,
+  },
+  summary: {},
+  verificationReceipts: [],
+  limitations: [],
+  secretValuesExposed: false,
+  authority: {
+    authorityGranted: false,
+    executionAuthorityIntroduced: false,
+  },
+  capabilities: [],
+  connectors: [],
+  actions: [],
+  executiveContinuity: {
+    impediments: [],
+  },
+});
+
+test("portal registry validation requires an exact verified Runtime revision identity", () => {
+  const valid = validCapabilityRegistryProjection();
+  assert.equal(asCapabilityRegistryProjection(valid), valid);
+  for (const sourceIdentity of [
+    { ...valid.sourceIdentity, runtimeRevision: "short" },
+    { ...valid.sourceIdentity, runtimeRevisionVerified: false },
+    { ...valid.sourceIdentity, runtimeRevision: undefined },
+  ]) {
+    assert.equal(asCapabilityRegistryProjection({
+      ...valid,
+      sourceIdentity,
+    }), null);
+  }
+});
 
 test("portal client preserves a structurally valid degraded readiness response in one attempt", async () => {
   let calls = 0;

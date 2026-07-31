@@ -16,6 +16,8 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { localNexusClient, operationalSessionClient, type OperationalSession } from "../lib/local-client";
+import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import type { CapabilityRegistryProjection } from "../lib/types";
 import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { nexusModuleById } from "../platform/surfaceRegistry";
 import { DataPanel, EmptyRecord } from "./DataPanel";
@@ -111,10 +113,12 @@ export function MissionDashboard({
   onReplay,
   readiness = null,
   session = { authenticated: false },
+  capabilityRegistry = null,
 }: {
   onReplay?: (missionId?: string) => void;
   readiness?: RuntimeRecord | null;
   session?: OperationalSession;
+  capabilityRegistry?: CapabilityRegistryProjection | null;
 } = {}) {
   const hosted = operationalSessionClient.mode() === "hosted";
   const [missions, setMissions] = useState<RuntimeRecord[]>([]);
@@ -258,21 +262,43 @@ export function MissionDashboard({
   const missionCapabilityState = statusValue(missionCapability?.state ?? missionCapability?.status);
   const missionCapabilityAvailable = missionCapability?.available === true
     || missionCapabilityState === "available";
-  const missionCapabilityBlocked = hosted && !missionCapabilityAvailable;
+  const missionReadinessNote = missionCapabilityAvailable
+    ? "Aggregate Mission readiness reports available."
+    : `Aggregate Mission readiness is ${missionCapabilityState || "unknown"}; each control still follows its exact canonical action record.`;
   const hostedMissionScope = session.authenticated && session.scopes?.includes("operations:write") === true;
-  const missionCreationAllowed = !hosted || (hostedMissionScope && !missionCapabilityBlocked);
+  const hostedActionAccess = {
+    hosted,
+    authenticated: session.authenticated,
+    scopes: session.scopes,
+  };
+  const missionPlanAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "mission_executor",
+      method: "POST",
+      pathTemplate: "/missions/plan",
+    },
+    hostedActionAccess,
+    "operations:write",
+  );
+  const missionStepAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "mission_executor",
+      method: "POST",
+      pathTemplate: "/missions/{mission_id}/execute-step",
+    },
+    hostedActionAccess,
+    "operations:write",
+  );
+  const missionCreationAllowed = missionPlanAction.available;
   const missionStepAllowed = missionStepExecutionAvailable
-    && (!hosted || (hostedMissionScope && !missionCapabilityBlocked));
+    && missionStepAction.available;
   const missionStepExecutionBlockedReason = !missionStepExecutionAvailable
     ? missionStepExecutionReason
-    : missionCapabilityBlocked
-      ? text(
-        missionCapability?.reason ?? missionCapability?.requiredNextAction,
-        "The Runtime reports Mission step execution unavailable.",
-      )
-      : hosted && !hostedMissionScope
-        ? "The hosted session lacks operations:write."
-        : "The exact Runtime Mission step contract is available subject to per-action policy and Authority.";
+    : !missionStepAction.available
+      ? missionStepAction.reason
+      : "The exact Runtime Mission step contract is available subject to per-action policy and Authority.";
   const executableCount = useMemo(
     () => missionStepAllowed
       ? missions.flatMap((mission) => Array.isArray(mission.steps) ? mission.steps as RuntimeRecord[] : []).filter((step) => stepState(step) === "ready").length
@@ -281,14 +307,9 @@ export function MissionDashboard({
   );
   const missionCreationReason = !hosted
     ? "Local mission planning remains bounded by the local Runtime contract."
-    : missionCapabilityBlocked
-      ? text(
-        missionCapability?.reason ?? missionCapability?.requiredNextAction,
-        "The Runtime reports Mission planning unavailable.",
-      )
-      : hostedMissionScope
-        ? "The exact Runtime Mission contract remains subject to capability admission, policy, Authority, proof, receipt, and postcondition controls."
-        : "The hosted session lacks operations:write.";
+    : !missionPlanAction.available
+      ? missionPlanAction.reason
+      : "The exact Runtime Mission contract remains subject to capability admission, policy, Authority, proof, receipt, and postcondition controls.";
 
   return <div className="mission-dashboard">
     <section className="nx-workspace-hero"><div><span className="nx-eyebrow">Mission Dashboard</span><h2>Coordinate governed work across independent mission streams.</h2><p>Each mission retains its own objective, task graph, specialist context, replay stream, receipts, and verification boundary.</p></div><NexusButton className="nx-action" size="sm" onClick={() => void refresh()} loading={busy}><RefreshCw size={15} />Refresh</NexusButton></section>
@@ -299,7 +320,7 @@ export function MissionDashboard({
       <NexusMetric label="Mission Health" value={health} detail={selectedMission ? `${progress}% selected progress` : "No selected Runtime mission"} tone={health === "operational" || health === "stable" ? "success" : health === "attention" ? "attention" : "neutral"} />
     </section>
     {error && <section className="operation-error" role="alert"><ShieldAlert size={18} /><span>{error}</span></section>}
-    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the governed outcome NEXUS should coordinate…" /></label><button onClick={() => void plan()} disabled={busy || !objective.trim() || !missionCreationAllowed}><Network size={15} />Plan governed mission</button><small>{missionCreationReason}</small></div>
+    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the governed outcome NEXUS should coordinate…" /></label><button onClick={() => void plan()} disabled={busy || !objective.trim() || !missionCreationAllowed}><Network size={15} />Plan governed mission</button><small>{missionCreationReason} {missionReadinessNote}</small></div>
     <div className="mission-dashboard__grid">
       <DataPanel eyebrow="Mission portfolio" title="Active, blocked, and completed missions" icon={<CircleGauge size={18} />}>
         <div className="mission-list">{missionState === "loading" ? <p className="replay-loading">Loading mission history from Runtime…</p> : missionState === "unavailable" ? <EmptyRecord>Runtime did not supply mission history. Mission status is unavailable.</EmptyRecord> : missions.length ? missions.map((mission) => { const id = missionId(mission); return <button key={id} data-active={id === selected} onClick={() => setSelected(id)}><div><strong>{text(mission.userObjective ?? mission.objective ?? mission.title, "Mission")}</strong><small>{id}</small></div><StatusPill value={statusOf(mission)} /></button>; }) : <EmptyRecord>No missions have been recorded by Runtime.</EmptyRecord>}</div>

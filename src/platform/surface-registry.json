@@ -159,18 +159,17 @@
           "label": "Runtime Mission evidence",
           "portability": "portable",
           "capabilityIds": [
-            "mission_executor",
-            "receipts"
+            "mission_executor"
           ],
           "clients": {
             "desktop": {
               "state": "read_only",
-              "reason": "Local NEXUS reads Runtime Mission records, proof references, receipts, and status without inferring completion.",
+              "reason": "Local NEXUS reads Runtime Mission identities, objectives, and status without inferring receipt, proof, or completion lineage.",
               "componentKey": "desktop.missions.runtime-evidence"
             },
         "web": {
           "state": "read_only",
-          "reason": "Hosted NEXUS exposes the Mission Dashboard's existing Runtime record, proof, receipt, and status evidence as a distinct read-only module.",
+          "reason": "Hosted NEXUS exposes Runtime Mission identities, objectives, and status as a distinct read-only module without claiming receipt or proof lineage.",
           "componentKey": "web.missions.runtime-evidence"
             }
           }
@@ -465,7 +464,6 @@
       "executive": true,
       "capabilityIds": [
         "mission_executor",
-        "conclave",
         "receipts",
         "operational_replay"
       ],
@@ -480,7 +478,7 @@
         "web": {
           "route": "/mission-control",
           "state": "functional",
-          "reason": "The hosted surface establishes an authenticated scoped session, creates canonical Conclave Missions, and reads their receipts and Replay."
+          "reason": "The hosted surface establishes an authenticated scoped session, plans canonical Missions through the exact Mission action, and reads their receipts and Replay."
         }
       },
       "modules": [
@@ -490,7 +488,6 @@
           "portability": "portable",
           "capabilityIds": [
             "mission_executor",
-            "conclave",
             "receipts",
             "operational_replay"
           ],
@@ -533,18 +530,17 @@
           "label": "Runtime Mission records",
           "portability": "portable",
           "capabilityIds": [
-            "mission_executor",
-            "receipts"
+            "mission_executor"
           ],
           "clients": {
             "desktop": {
               "state": "read_only",
-              "reason": "Local NEXUS reads Runtime Mission identities, state, receipts, and proof lineage.",
+              "reason": "Local NEXUS reads Runtime Mission identities and state; receipt and proof lineage remain separate modules.",
               "componentKey": "desktop.mission-control.runtime-missions"
             },
         "web": {
           "state": "read_only",
-          "reason": "Hosted Mission Control reads the canonical Runtime Mission inventory and its receipt and proof lineage.",
+          "reason": "Hosted Mission Control reads the canonical Runtime Mission inventory and state without claiming receipt or proof lineage.",
           "componentKey": "web.mission-control.runtime-missions"
             }
           }
@@ -1994,7 +1990,7 @@
         "web": {
           "route": "/work-sessions",
           "state": "functional",
-          "reason": "The hosted surface uses only exact Work Session plan, start, read, step, continue, pause, cancel, and receipt contracts through canonical action admission."
+          "reason": "The hosted surface uses exact Work Session plan, start, read, pause, cancel, and receipt contracts; step and continue remain explicitly unavailable at their controls."
         }
       },
       "modules": [
