@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+const surfaceRegistry = async () => JSON.parse(await read("../src/platform/surface-registry.json"));
 
 test("status bar displays the independent Phase 5X-D health model", async () => {
   const source = await read("../src/components/ExecutiveStatusBar.tsx");
@@ -127,8 +128,9 @@ test("provider sign-out stays within the CSP-closed same-origin request boundary
 });
 
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
-  const [app, intake, projects, voice, realtime, client, hif] = await Promise.all([
+  const [app, registry, intake, projects, voice, realtime, client, hif] = await Promise.all([
     read("../src/App.tsx"),
+    surfaceRegistry(),
     read("../src/components/DocumentIntake.tsx"),
     read("../src/components/ProjectStudio.tsx"),
     read("../src/components/VoiceWorkspace.tsx"),
@@ -136,7 +138,9 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
     read("../src/lib/local-client.ts"),
     read("../src/lib/hif-client.ts"),
   ]);
-  for (const label of ["Document Intelligence", "Projects", "Voice Operations"]) assert.match(app, new RegExp(label));
+  for (const label of ["Document Intelligence", "Projects", "Voice Operations"]) {
+    assert.equal(registry.surfaces.some((surface) => surface.label === label), true);
+  }
   for (const contract of ["/intake/upload", "/intake/query", "/projects", "/scope", "/estimate", "/planning-model", "/compile", "/voice-operator/route-transcript"]) assert.match(client, new RegExp(contract));
   assert.match(intake, /FileReader/);
   assert.match(intake, /projectId/);
@@ -193,7 +197,8 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
     read("../src/App.tsx"), read("../src/components/OperationsCenter.tsx"), read("../src/lib/eox-client.ts"), read("../src/lib/portal-client.ts")
   ]);
   assert.match(app, /areaFromPath\(window\.location\.pathname\)/);
-  assert.match(app, /active === "dashboard"/);
+  assert.match(app, /"web\.dashboard\.operations-center": <OperationsCenter/);
+  assert.match(app, /current\.modules\.map\(renderWebModule\)/);
   for (const label of ["Operations Center", "Executive Brief", "Operational Health", "Attention Queue", "Recommended Actions", "Operational Understanding", "Mission Timeline", "Executive state"]) assert.match(center, new RegExp(label));
   assert.match(center, /assessment\.loop\.map/);
   assert.match(center, /Executive Operating Loop/);
@@ -206,11 +211,12 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
 });
 
 test("direct hosted workspace paths survive a fresh page load", async () => {
-  const [app, navigation] = await Promise.all([read("../src/App.tsx"), read("../src/platform/navigation.ts")]);
+  const [app, registry] = await Promise.all([read("../src/App.tsx"), surfaceRegistry()]);
   assert.match(app, /window\.location\.pathname/);
   assert.match(app, /window\.location\.hash/);
+  const routes = new Set(registry.surfaces.map((surface) => surface.clients.web.route));
   for (const path of ["/missions", "/mission-control", "/conclave", "/operational-replay", "/knowledge", "/edge-runtime"]) {
-    assert.match(navigation, new RegExp(`"${path.replaceAll("/", "\\/")}"`));
+    assert.equal(routes.has(path), true, path);
   }
   assert.match(app, /const \[active, setActive\] = useState<AreaId>\(routeFromLocation\)/);
   assert.match(app, /setActive\(routeFromLocation\(\)\)/);
@@ -220,18 +226,26 @@ test("direct hosted workspace paths survive a fresh page load", async () => {
 });
 
 test("Conclave is a visible Runtime-owned decision challenge capability", async () => {
-  const [app, navigation, conclave, client, styles] = await Promise.all([
-    read("../src/App.tsx"), read("../src/platform/navigation.ts"),
+  const [app, registry, conclave, client, styles] = await Promise.all([
+    read("../src/App.tsx"), surfaceRegistry(),
     read("../src/components/ConclaveWorkspace.tsx"), read("../src/lib/conclave-client.ts"), read("../src/styles.css")
   ]);
-  assert.match(navigation, /label: "Conclave"/);
+  assert.equal(registry.surfaces.find((surface) => surface.id === "conclave")?.label, "Conclave");
   assert.match(app, /<ConclaveWorkspace/);
   for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
   assert.match(client, /localNexusClient\.createConclaveWorkspace/);
+  assert.match(client, /localNexusClient\.runConclaveWorkspace/);
+  assert.match(client, /localNexusClient\.conclaveWorkspace/);
+  assert.match(client, /reviewIntegrityVerified === true/);
+  assert.match(client, /terminalReceiptVerified === true/);
+  assert.match(client, /runPending: true/);
+  assert.match(client, /expectedWorkspaceVersion/);
   assert.doesNotMatch(client, /\/api\/runtime\/conclave\/reviews|runConclaveReview/);
   assert.match(conclave, /localNexusClient\.conclaveWorkspaces\(\)/);
   assert.match(conclave, /Durable Runtime workspace/);
   assert.match(conclave, /does not substitute a static one-shot review/);
+  assert.match(conclave, /Run governed review/);
+  assert.match(conclave, /created workspace was preserved/i);
   assert.match(conclave, /useState\(""\)/);
   assert.match(conclave, /placeholder=\{suggestedProposal\}/);
   assert.doesNotMatch(client, /gateway\.data\.data/);
@@ -382,13 +396,14 @@ test("canonical shell bootstraps the hosted operational session before mounting 
 });
 
 test("canonical consolidation exposes every permanent platform workspace", async () => {
-  const [app, navigation, missions, replay, knowledge, conclave, platformStyles, workspaceFrame, appearance] = await Promise.all([
-    read("../src/App.tsx"), read("../src/platform/navigation.ts"), read("../src/components/MissionDashboard.tsx"),
+  const [app, registry, missions, replay, knowledge, conclave, platformStyles, workspaceFrame, appearance] = await Promise.all([
+    read("../src/App.tsx"), surfaceRegistry(), read("../src/components/MissionDashboard.tsx"),
     read("../src/components/OperationalReplay.tsx"), read("../src/components/KnowledgeWorkspace.tsx"),
     read("../src/components/ConclaveWorkspace.tsx"), read("../src/platform/nexus-platform.css"),
     read("../src/platform/NexusWorkspaceFrame.tsx"), read("../src/appearance/AppearanceWorkspace.tsx")
   ]);
-  for (const label of ["Dashboard", "Missions", "Operational Replay", "Conclave", "Knowledge", "Edge Runtime", "Mission Control", "Settings"]) assert.match(navigation, new RegExp(`label: "${label}"`));
+  const labels = new Set(registry.surfaces.filter((surface) => surface.executive).map((surface) => surface.label));
+  for (const label of ["Dashboard", "Missions", "Operational Replay", "Conclave", "Knowledge", "Edge Runtime", "Mission Control", "Settings"]) assert.equal(labels.has(label), true, label);
   for (const label of ["Active Missions", "Blocked Missions", "Completed Missions", "Mission Health", "Mission Executor", "Mission receipts"]) assert.match(missions, new RegExp(label, "i"));
   for (const label of ["Replay pipeline visualization", "Stage Inspector", "Explain This Step", "Executive Mode", "Engineering Mode", "Failure Replay", "Export"]) assert.match(replay, new RegExp(label, "i"));
   for (const label of ["Mission Store", "Knowledge Store", "Knowledge Promotion", "Knowledge Receipts"]) assert.match(knowledge, new RegExp(label, "i"));
@@ -408,13 +423,13 @@ test("canonical consolidation exposes every permanent platform workspace", async
 });
 
 test("Operational Replay surfaces Runtime-owned stage playback with truthful boundaries", async () => {
-  const [app, navigation, replay, client] = await Promise.all([
+  const [app, registry, replay, client] = await Promise.all([
     read("../src/App.tsx"),
-    read("../src/platform/navigation.ts"),
+    surfaceRegistry(),
     read("../src/components/OperationalReplay.tsx"),
     read("../src/lib/local-client.ts")
   ]);
-  assert.match(navigation, /label: "Operational Replay"/);
+  assert.equal(registry.surfaces.find((surface) => surface.id === "replay")?.label, "Operational Replay");
   assert.match(app, /<OperationalReplay/);
   for (const control of ["Restart", "Previous", "Play", "Pause", "Next"]) {
     assert.match(replay, new RegExp(control));
@@ -435,9 +450,9 @@ test("Operational Replay surfaces Runtime-owned stage playback with truthful bou
 });
 
 test("new portal destinations render Runtime-backed dashboards without client-side cognition", async () => {
-  const [app, navigation, client, missions, knowledge, edge, fleet, admission, styles] = await Promise.all([
+  const [app, registry, client, missions, knowledge, edge, fleet, admission, styles] = await Promise.all([
     read("../src/App.tsx"),
-    read("../src/platform/navigation.ts"),
+    surfaceRegistry(),
     read("../src/lib/local-client.ts"),
     read("../src/components/MissionDashboard.tsx"),
     read("../src/components/KnowledgeWorkspace.tsx"),
@@ -446,7 +461,8 @@ test("new portal destinations render Runtime-backed dashboards without client-si
     read("../src/components/EdgeAdmissionWorkspace.tsx"),
     read("../src/styles.css")
   ]);
-  for (const label of ["Missions", "Knowledge", "Edge Runtime"]) assert.match(navigation, new RegExp(`label: "${label}"`));
+  const labels = new Set(registry.surfaces.map((surface) => surface.label));
+  for (const label of ["Missions", "Knowledge", "Edge Runtime"]) assert.equal(labels.has(label), true, label);
   assert.match(app, /<MissionDashboard/);
   assert.match(app, /<KnowledgeWorkspace/);
   assert.match(app, /<EdgeRuntime/);
@@ -485,9 +501,10 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(app, /groups=\{registryRailGroups\}/);
   assert.doesNotMatch(app, /live: area\.id ===/);
   assert.match(app, /Hosted operational mode is not configured for this deployment/);
-  assert.match(app, /knowledge\.document_intake/);
-  assert.match(app, /projects\.nexicron_planning/);
-  assert.match(app, /interaction\.human/);
+  const capabilityIds = new Set(registry.surfaces.flatMap((surface) => surface.capabilityIds));
+  for (const capabilityId of ["knowledge.document_intake", "projects.nexicron_planning", "interaction.human"]) {
+    assert.equal(capabilityIds.has(capabilityId), true, capabilityId);
+  }
   assert.match(app, /NEXUS will not substitute local state or infer readiness/);
   assert.doesNotMatch(app, /HostedContractUnavailable/);
   assert.match(edge, /Edge status is unavailable/);

@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { afterEach, test } from "node:test";
 import {
+  CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE,
   CAPABILITY_REGISTRY_RECORD_TYPE,
+  CAPABILITY_REGISTRY_SCHEMA_DIGEST,
   CAPABILITY_REGISTRY_SCHEMA_VERSION,
+  CAPABILITY_REGISTRY_VALIDATOR_VERSION,
   CANONICAL_OPERATIONAL_ROUTES,
   createPortalServer,
   FIXED_RUNTIME_ACTION_ALIASES,
@@ -101,6 +104,22 @@ function capabilityRegistryProjection(overrides = {}) {
   const projection = {
     recordType: CAPABILITY_REGISTRY_RECORD_TYPE,
     schemaVersion: CAPABILITY_REGISTRY_SCHEMA_VERSION,
+    capabilityRegistryContract: {
+      recordType: CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE,
+      schemaVersion: CAPABILITY_REGISTRY_SCHEMA_VERSION,
+      schemaDigest: CAPABILITY_REGISTRY_SCHEMA_DIGEST,
+      validatorVersion: CAPABILITY_REGISTRY_VALIDATOR_VERSION,
+    },
+    sourceIdentity: {
+      rootRevision: "a".repeat(40),
+      runtimeRevision: "b".repeat(40),
+      rootRevisionVerified: true,
+      runtimeRevisionVerified: true,
+      verificationMethod: "program_alpha_source_attestation",
+      sourceTreeDigest: `sha256:${"c".repeat(64)}`,
+      sourceTreeClean: true,
+      environmentRevisionMatched: true,
+    },
     owner: "context_runtime",
     projectionOwner: "runtime.state.RuntimeState.capability_registry_projection",
     generatedAt,
@@ -1441,6 +1460,69 @@ test("proofs, receipts, health, readiness, and diagnostics bypass cache", async 
   }
 });
 
+test("process-ready Runtime 503 maps to one-attempt Degraded readiness without degrading healthy modules", async () => {
+  let readinessCalls = 0;
+  let healthCalls = 0;
+  const base = await start(async (url) => {
+    if (url.endsWith("/ready")) {
+      readinessCalls += 1;
+      return runtimeResponse({
+        processReady: true,
+        platformContractReady: false,
+        canonicalCapabilitySetComplete: true,
+        allCapabilitiesAvailable: false,
+        productionReady: false,
+        enterpriseReady: false,
+      }, {
+        status: 503,
+        body: { status: "not_ready" },
+      });
+    }
+    healthCalls += 1;
+    return runtimeResponse({ processLivenessOnly: true });
+  });
+
+  const readyResponse = await fetch(`${base}/api/runtime/ready`);
+  const ready = await readyResponse.json();
+  assert.equal(readyResponse.status, 200);
+  assert.equal(ready.ok, true);
+  assert.equal(ready.runtime.status, "not_ready");
+  assert.equal(ready.data.processReady, true);
+  assert.equal(ready.data.platformContractReady, false);
+  assert.equal(ready.gateway.connectionState, "Degraded");
+  assert.equal(ready.gateway.attempts, 1);
+  assert.match(ready.gateway.warning, /process is reachable/i);
+  assert.equal(readinessCalls, 1);
+
+  const health = await (await fetch(`${base}/api/runtime/health`)).json();
+  assert.equal(health.ok, true);
+  assert.equal(health.gateway.connectionState, "Healthy");
+  assert.equal(health.data.processLivenessOnly, true);
+  assert.equal(healthCalls, 1);
+});
+
+test("malformed Runtime readiness 503 fails closed once without deterministic retries", async () => {
+  let calls = 0;
+  const base = await start(async () => {
+    calls += 1;
+    return runtimeResponse({
+      processReady: true,
+      platformContractReady: true,
+    }, {
+      status: 503,
+      body: { status: "not_ready" },
+    });
+  });
+  const response = await fetch(`${base}/api/runtime/ready`);
+  const body = await response.json();
+  assert.equal(response.status, 502);
+  assert.equal(body.ok, false);
+  assert.equal(body.data, null);
+  assert.equal(body.gateway.connectionState, "Unknown");
+  assert.equal(body.error.code, "runtime_readiness_response_invalid");
+  assert.equal(calls, 1);
+});
+
 test("expired validated cache degrades visibly when runtime becomes unavailable", async () => {
   let available = true;
   const base = await start(async () => {
@@ -1671,24 +1753,77 @@ test("Conclave workspace routes use the operational gateway and preserve evidenc
   assert.equal((await fetch(`${base}/api/local/conclave/workspaces/conclave-001`)).status, 200);
   assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/conclave/workspaces/conclave-001");
 
+  const workspaceVersion = `sha256:${"a".repeat(64)}`;
+  const run = await fetch(`${base}/api/local/conclave/workspaces/conclave-001/run`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": "conclave-run-0001",
+    },
+    body: JSON.stringify({ expectedWorkspaceVersion: workspaceVersion }),
+  });
+  assert.equal(run.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/conclave/workspaces/conclave-001/run");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "conclave-run-0001");
+  assert.deepEqual(observed.at(-1).body, { expectedWorkspaceVersion: workspaceVersion });
+
+  const beforeInvalidRun = observed.length;
+  for (const [body, headers = { "Idempotency-Key": "conclave-run-invalid" }] of [
+    [{ expectedWorkspaceVersion: "not-a-version" }],
+    [{ expectedWorkspaceVersion: workspaceVersion, authorityGranted: true }],
+    [{ expectedWorkspaceVersion: workspaceVersion }, {}],
+  ]) {
+    const invalid = await fetch(`${base}/api/local/conclave/workspaces/conclave-001/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+    assert.equal(invalid.status, 400);
+  }
+  assert.equal(observed.length, beforeInvalidRun);
+
   const evidence = await fetch(`${base}/api/local/conclave/workspaces/conclave-001/tasks/task-001/evidence`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       origin: "edge-runtime://node-1/observation-1", sourceClassification: "runtime_evidence",
-      collector: "node-1", confidence: 0.9, claim: "A bounded observation was admitted.",
+      confidence: 0.9, claim: "A bounded observation was admitted.",
       supportingArtifacts: ["observation-1"], relationships: ["observed_on"],
-      operationalContext: { controlAttempted: false }, completeTask: true
+      operationalContext: { controlAttempted: false }
     })
   });
   assert.equal(evidence.status, 200);
   assert.equal(observed.at(-1).url, "http://127.0.0.1:8765/conclave/workspaces/conclave-001/tasks/task-001/evidence");
   assert.equal(observed.at(-1).body.sourceClassification, "runtime_evidence");
   const beforeInvalid = observed.length;
-  assert.equal((await fetch(`${base}/api/local/conclave/workspaces/conclave-001/tasks/task-001/evidence`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ origin: "x", sourceClassification: "unclassified", confidence: 2, claim: "x" })
-  })).status, 400);
+  for (const invalidPayload of [
+    { origin: "x", sourceClassification: "unclassified", confidence: 2, claim: "x" },
+    {
+      origin: "edge-runtime://node-1/observation-2",
+      sourceClassification: "runtime_evidence",
+      collector: "client-selected",
+      confidence: 0.9,
+      claim: "The browser must not select the collector.",
+      supportingArtifacts: [],
+      relationships: [],
+      operationalContext: {},
+    },
+    {
+      origin: "edge-runtime://node-1/observation-3",
+      sourceClassification: "runtime_evidence",
+      completeTask: true,
+      confidence: 0.9,
+      claim: "The browser must not select task completion.",
+      supportingArtifacts: [],
+      relationships: [],
+      operationalContext: {},
+    },
+  ]) {
+    assert.equal((await fetch(`${base}/api/local/conclave/workspaces/conclave-001/tasks/task-001/evidence`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(invalidPayload)
+    })).status, 400);
+  }
   assert.equal(observed.length, beforeInvalid);
 });
 
@@ -1898,7 +2033,7 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
     operationalWorkspaceId: "workspace-alpha",
     operationalUserId: "operator-1",
     operationalRole: "admin",
-    operationalScopes: ["operations:read", "operations:write", "actions:simulate"],
+    operationalScopes: ["operations:read", "operations:write", "actions:simulate", "evidence:write"],
     operationalCookieSecure: false,
     localCapabilitiesEnabled: false
   };
@@ -1924,15 +2059,33 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Role"], "admin");
-  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,actions:simulate");
-  const callsBeforeLegacyPlan = observed.length;
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,actions:simulate,evidence:write");
+  const callsBeforeMissionPlan = observed.length;
   assert.equal((await fetch(`${base}/api/operations/missions/plan`, {
     method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ objective: "Plan alpha" })
-  })).status, 404);
-  assert.equal((await fetch(`${base}/api/operations/missions/plan`, {
+  })).status, 403);
+  const missionPlan = await fetch(`${base}/api/operations/missions/plan`, {
     method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken, "Idempotency-Key": "legacy-plan-12345" }, body: JSON.stringify({ objective: "Plan alpha" })
-  })).status, 404);
-  assert.equal(observed.length, callsBeforeLegacyPlan);
+  });
+  assert.equal(missionPlan.status, 200);
+  assert.equal(observed.length, callsBeforeMissionPlan + 1);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/missions/plan");
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { objective: "Plan alpha" });
+
+  const missionStep = await fetch(`${base}/api/operations/missions/MISSION-001/execute-step`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": loginBody.session.csrfToken,
+      "Idempotency-Key": "mission-step-12345",
+    },
+    body: JSON.stringify({ stepId: "STEP-001" }),
+  });
+  assert.equal(missionStep.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/missions/MISSION-001/execute-step");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "mission-step-12345");
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { stepId: "STEP-001" });
 
   assert.equal((await fetch(`${base}/api/operations/conclave/workspaces`, {
     method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ proposal: "Investigate an unfamiliar asset through an Edge Runtime." })
@@ -1954,6 +2107,88 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   const body = await conclaveMutation.json();
   assert.equal(body.operational.productionMultiTenantReady, false);
   assert.equal(JSON.stringify(body).includes(config.operationalRuntimeToken), false);
+
+  const workspaceVersion = `sha256:${"b".repeat(64)}`;
+  const conclaveRun = await fetch(`${base}/api/operations/conclave/workspaces/MISSION-001/run`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": loginBody.session.csrfToken,
+      "Idempotency-Key": "conclave-run-12345",
+    },
+    body: JSON.stringify({ expectedWorkspaceVersion: workspaceVersion }),
+  });
+  assert.equal(conclaveRun.status, 200);
+  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/conclave/workspaces/MISSION-001/run");
+  assert.equal(observed.at(-1).options.headers["Idempotency-Key"], "conclave-run-12345");
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), {
+    expectedWorkspaceVersion: workspaceVersion,
+  });
+
+  const evidencePayload = {
+    origin: "runtime://edge/node-1/observation-1",
+    sourceClassification: "runtime_evidence",
+    confidence: 0.91,
+    claim: "A bounded observation was admitted through the hosted gateway.",
+    supportingArtifacts: ["observation-1"],
+    relationships: ["observed_on"],
+    operationalContext: { controlAttempted: false },
+  };
+  const conclaveEvidence = await fetch(
+    `${base}/api/operations/conclave/workspaces/MISSION-001/tasks/TASK-001/evidence`,
+    {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": loginBody.session.csrfToken,
+        "Idempotency-Key": "conclave-evidence-12345",
+      },
+      body: JSON.stringify(evidencePayload),
+    },
+  );
+  assert.equal(conclaveEvidence.status, 200);
+  assert.equal(
+    observed.at(-1).url,
+    "http://127.0.0.1:9876/conclave/workspaces/MISSION-001/tasks/TASK-001/evidence",
+  );
+  assert.deepEqual(JSON.parse(observed.at(-1).options.body), evidencePayload);
+
+  const beforeInvalidConclaveRun = observed.length;
+  for (const invalidPayload of [
+    { expectedWorkspaceVersion: "sha256:short" },
+    { expectedWorkspaceVersion: workspaceVersion, executionAuthorized: true },
+  ]) {
+    const invalidRun = await fetch(`${base}/api/operations/conclave/workspaces/MISSION-001/run`, {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": loginBody.session.csrfToken,
+        "Idempotency-Key": "conclave-run-invalid",
+      },
+      body: JSON.stringify(invalidPayload),
+    });
+    assert.equal(invalidRun.status, 400);
+  }
+  assert.equal(observed.length, beforeInvalidConclaveRun);
+
+  const invalidEvidence = await fetch(
+    `${base}/api/operations/conclave/workspaces/MISSION-001/tasks/TASK-001/evidence`,
+    {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": loginBody.session.csrfToken,
+        "Idempotency-Key": "conclave-evidence-invalid",
+      },
+      body: JSON.stringify({ ...evidencePayload, collector: "client-selected" }),
+    },
+  );
+  assert.equal(invalidEvidence.status, 400);
+  assert.equal(observed.length, beforeInvalidConclaveRun);
 });
 
 test("authenticated hosted reads use the canonical Runtime contracts without Replay fallback", async () => {
@@ -1970,7 +2205,14 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
     operationalWorkspaceId: "workspace-alpha",
     operationalUserId: "operator-1",
     operationalRole: "admin",
-    operationalScopes: ["operations:read", "operations:write", "knowledge:promote"],
+    operationalScopes: [
+      "operations:read",
+      "operations:write",
+      "knowledge:promote",
+      "approvals:decide",
+      "actions:simulate",
+      "actions:execute",
+    ],
     operationalCookieSecure: false,
     replayEnabled: false,
   };
@@ -2006,6 +2248,11 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
     ["/voice-operator/history", "/voice-operator/history"],
     ["/missions", "/missions"],
     ["/missions/MISSION-001", "/missions/MISSION-001"],
+    ["/work-sessions", "/work-sessions"],
+    ["/work-sessions/WORK-001", "/work-sessions/WORK-001"],
+    ["/work-sessions/WORK-001/receipt", "/work-sessions/WORK-001/receipt"],
+    ["/approvals", "/approvals"],
+    ["/proofs", "/proof/recent"],
     ["/conclave/workspaces", "/conclave/workspaces"],
     ["/conclave/workspaces/MISSION-001", "/conclave/workspaces/MISSION-001"],
     ["/operational-replay", "/operational-replay"],
@@ -2051,19 +2298,48 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
   }
   assert.equal(replayFallbackCalls, 0);
   assert.equal(localFallbackCalls, 0);
-  const callsBeforeStaleRoutes = observed.length;
-  for (const stale of ["work-sessions", "approvals", "connectors", "actions/dry-run"]) {
-    assert.equal((await fetch(`${base}/api/operations/${stale}`, { headers: { Cookie: cookie } })).status, 404, stale);
-  }
-  assert.equal(observed.length, callsBeforeStaleRoutes);
-  assert.equal(localFallbackCalls, 0);
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/missions"].GET, "/missions");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/missions/plan"].POST, "/missions/plan");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/work-sessions"].GET, "/work-sessions");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/approvals"].GET, "/approvals");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/actions/dry-run"].POST, "/actions/dry-run");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/proofs"].GET, "/proof/recent");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/client-capabilities"].GET, "/client-capabilities");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/intake/upload"].POST, "/intake/upload");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/projects"].POST, "/projects");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/voice-operator/status"].GET, "/voice-operator/status");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/runtime/baselines"].POST, "/runtime/baselines");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/knowledge/promotions"].POST, "/knowledge/promotions");
+
+  const portableMutations = [
+    ["/work-sessions/plan", "/work-sessions/plan", { objective: "Plan a bounded verification." }],
+    ["/work-sessions/start", "/work-sessions/start", { objective: "Start a bounded verification." }],
+    ["/work-sessions/WORK-001/step", "/work-sessions/WORK-001/step", {}],
+    ["/work-sessions/WORK-001/continue", "/work-sessions/WORK-001/continue", {}],
+    ["/work-sessions/WORK-001/pause", "/work-sessions/WORK-001/pause", {}],
+    ["/work-sessions/WORK-001/cancel", "/work-sessions/WORK-001/cancel", {}],
+    ["/approvals/APPROVAL-001/approve", "/approvals/APPROVAL-001/approve", {}],
+    ["/approvals/APPROVAL-002/deny", "/approvals/APPROVAL-002/deny", { reason: "Required Evidence is absent." }],
+    ["/actions/dry-run", "/actions/dry-run", { action: "Inspect the bounded target." }],
+    ["/actions/execute", "/actions/execute", { action: "Execute the bounded target.", explicitRequest: true }],
+  ];
+  for (const [index, [portalPath, runtimePath, payload]] of portableMutations.entries()) {
+    const key = `portable-operation-${String(index + 1).padStart(4, "0")}`;
+    const response = await fetch(`${base}/api/operations${portalPath}`, {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": session.session.csrfToken,
+        "Idempotency-Key": key,
+      },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(response.status, 200, portalPath);
+    assert.equal(observed.at(-1).url, `http://127.0.0.1:9876${runtimePath}`, portalPath);
+    assert.equal(observed.at(-1).options.headers["Idempotency-Key"], key, portalPath);
+    assert.deepEqual(JSON.parse(observed.at(-1).options.body), payload, portalPath);
+  }
 
   const baselineKey = "runtime-baseline-0001";
   const baseline = await fetch(`${base}/api/operations/runtime/baselines`, {
@@ -2097,7 +2373,7 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
   assert.equal(promotion.status, 200);
   assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/knowledge/promotions");
   assert.equal(observed.at(-1).options.headers["Idempotency-Key"], promotionKey);
-  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,knowledge:promote");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], config.operationalScopes.join(","));
   assert.deepEqual(JSON.parse(observed.at(-1).options.body), { candidateId: "candidate-runtime-baseline-001" });
 
   const candidateKey = "promotion-candidate-0001";

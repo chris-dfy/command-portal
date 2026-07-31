@@ -194,6 +194,24 @@ export type ExecutiveContinuityImpediment = {
 export type CapabilityRegistryProjection = {
   recordType: "nexus_live_capability_registry_projection";
   schemaVersion: "nexus.live-capability-registry@1.0.0";
+  capabilityRegistryContract: {
+    recordType: "nexus_capability_registry_contract_identity";
+    schemaVersion: "nexus.live-capability-registry@1.0.0";
+    schemaDigest: string;
+    validatorVersion: "nexus.capability-registry-validator@1.0.0";
+  };
+  sourceIdentity: {
+    rootRevision: string;
+    runtimeRevision: string;
+    rootRevisionVerified: boolean;
+    runtimeRevisionVerified: boolean;
+    verificationMethod:
+      | "local_git_worktree"
+      | "program_alpha_source_attestation";
+    sourceTreeDigest: string;
+    sourceTreeClean: true;
+    environmentRevisionMatched: true;
+  };
   owner: string;
   generatedAt: string;
   constitutionalBasis: Record<string, unknown>;

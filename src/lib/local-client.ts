@@ -118,9 +118,10 @@ export type VoiceRouteResult = {
 };
 
 export type ClientCapabilityContract = {
-  contractVersion: string;
-  inventoryScope: "operational_core_v1";
+  contractVersion: "1.1.0";
+  inventoryScope: "registered_runtime_operations_v1";
   completeNativeInventory: false;
+  surfaceInventoryOwnedByExperienceRegistry: true;
   runtimeOwner: "NEXUS Runtime";
   operationalBehaviorInClients: false;
   capabilities: Array<{
@@ -133,9 +134,29 @@ export type ClientCapabilityContract = {
     operations: Array<{ operationId: string; method: string; runtimePath: string; risk: string; approvalRequired: boolean; proofRequired: boolean; receiptRequired: boolean }>;
     limitations: string[];
   }>;
-  parity: { portableCapabilityCount: number; nexusCommandImplemented: number; nexusWebImplemented: number; driftCount: number; driftCapabilityIds: string[] };
-  capabilityStates?: Record<string, "available" | "unavailable">;
-  truth: { source: string; localRuntimeRequired: boolean; hostedExecutionAvailable: boolean; allHostedCapabilitiesAvailable: boolean; hostedExecutionMode: "single_workspace_alpha" | "disabled"; productionMultiTenantReady: false; remainingNativeSurfaces: string[]; secretValuesExposed: false };
+  parity: {
+    scope: "listed_portable_runtime_operations";
+    surfaceParityClaimed: false;
+    portableCapabilityCount: number;
+    nexusCommandImplemented: number;
+    nexusWebImplemented: number;
+    driftCount: number;
+    driftCapabilityIds: string[];
+  };
+  truth: {
+    source: string;
+    localRuntimeRequired: boolean;
+    hostedExecutionAvailable: boolean;
+    hostedExecutionMode: "single_workspace_alpha" | "disabled";
+    productionMultiTenantReady: false;
+    surfaceRegistry: {
+      registryId: "nexus.experience.surface-registry";
+      contractVersion: "1.0.0";
+      scope: "all_known_top_level_surfaces";
+      clientStateVocabulary: Array<"functional" | "read_only" | "local_only" | "unavailable">;
+    };
+    secretValuesExposed: false;
+  };
 };
 
 export type RuntimeCoordinationNode = {
@@ -325,11 +346,14 @@ export type ConclaveEvidence = {
 
 export type ConclaveWorkspaceRecord = {
   recordType: "nexus_conclave_workspace";
-  schemaVersion: string;
+  schemaVersion: "nexus.conclave-workspace@2.0.0";
   created: boolean;
+  workspaceVersion: string;
   workspaceId: string;
   missionId: string;
   proposal: string;
+  lifecyclePosture: "canonical_operational" | "legacy_read_only";
+  availableActions: Array<"run" | "restart_canonical">;
   status: string;
   operationalStatus: string;
   executionAuthorized: false;
@@ -347,6 +371,13 @@ export type ConclaveWorkspaceRecord = {
   contradictions: Array<Record<string, unknown>>;
   executiveSummary: Record<string, unknown> | null;
   completionReceipt: Record<string, unknown> | null;
+  displayStatus?: string;
+  reviewCompleted?: boolean;
+  reviewIntegrityVerified?: boolean;
+  terminalReceiptVerified?: boolean;
+  runRepeated?: boolean;
+  runReceipt?: Record<string, unknown> | null;
+  canonicalReview?: Record<string, unknown> | null;
   lifecycleReceipt: {
     receiptId: string;
     missionId: string;
@@ -380,7 +411,7 @@ export type ConclaveWorkspaceRecord = {
 
 export type ConclaveWorkspaceList = {
   recordType: "nexus_conclave_workspace_list";
-  schemaVersion: string;
+  schemaVersion: "nexus.conclave-workspace@2.0.0";
   workspaceCount: number;
   workspaces: ConclaveWorkspaceRecord[];
   scope: { tenantId: string; workspaceId: string };
@@ -866,16 +897,16 @@ export const localNexusClient = Object.freeze({
   mission: (missionId: string) => request<Record<string, unknown>>(
     `/missions/${encodeURIComponent(missionId)}`,
   ),
-  planMission: (objective: string) => capabilityTransport.mode === "hosted"
-    ? post<Record<string, unknown>>(
-      "/conclave/workspaces",
-      { proposal: objective },
-      `conclave-mission:${globalThis.crypto.randomUUID()}`,
-    )
-    : post<Record<string, unknown>>("/missions/plan", { objective }),
-  executeMissionStep: (missionId: string, stepId: string) => capabilityTransport.mode === "hosted"
-    ? Promise.reject(new Error("Hosted Mission execution is unavailable until a canonical governed execution route is registered."))
-    : post<Record<string, unknown>>(`/missions/${encodeURIComponent(missionId)}/execute-step`, { stepId }),
+  planMission: (objective: string) => post<Record<string, unknown>>(
+    "/missions/plan",
+    { objective },
+    `mission-plan:${globalThis.crypto.randomUUID()}`,
+  ),
+  executeMissionStep: (missionId: string, stepId: string) => post<Record<string, unknown>>(
+    `/missions/${encodeURIComponent(missionId)}/execute-step`,
+    { stepId },
+    `mission-step:${globalThis.crypto.randomUUID()}`,
+  ),
   conclaveWorkspaces: () => request<ConclaveWorkspaceList>("/conclave/workspaces"),
   createConclaveWorkspace: (proposal: string, idempotencyKey: string) => post<ConclaveWorkspaceRecord>(
     "/conclave/workspaces",
@@ -884,6 +915,21 @@ export const localNexusClient = Object.freeze({
   ),
   conclaveWorkspace: (missionId: string) => request<ConclaveWorkspaceRecord>(
     `/conclave/workspaces/${encodeURIComponent(missionId)}`,
+  ),
+  runConclaveWorkspace: (
+    missionId: string,
+    expectedWorkspaceVersion: string,
+    idempotencyKey: string,
+  ) => post<ConclaveWorkspaceRecord>(
+    `/conclave/workspaces/${encodeURIComponent(missionId)}/run`,
+    { expectedWorkspaceVersion },
+    idempotencyKey,
+  ),
+  governanceReadiness: () => request<Record<string, unknown>>(
+    "/governance/readiness",
+  ),
+  authorityReadiness: () => request<Record<string, unknown>>(
+    "/authority/readiness",
   ),
   operationalReplays: () => request<Record<string, unknown>>("/operational-replay"),
   operationalReplay: (replayId: string) => request<Record<string, unknown>>(
@@ -916,8 +962,6 @@ export const localNexusClient = Object.freeze({
   deny: (approvalId: string, reason: string) => post<Record<string, unknown>>(`/approvals/${encodeURIComponent(approvalId)}/deny`, { reason }),
   dryRunAction: (action: string) => post<Record<string, unknown>>("/actions/dry-run", { action }),
   executeAction: (action: string) => post<Record<string, unknown>>("/actions/execute", { action, explicitRequest: true }),
-  connectors: () => request<Record<string, unknown>>("/connectors"),
-  connectorHealth: () => request<Record<string, unknown>>("/connectors/health"),
   runtimeNodes: () => request<RuntimeNodeFleet>("/runtime-coordination/nodes"),
   runtimeAdmissions: () => request<RuntimeAdmissionList>("/runtime-coordination/admissions"),
   createRuntimeAdmission: (intent: RuntimeAdmissionIntentRequest, idempotencyKey: string) => post<RuntimeAdmissionResponse>(

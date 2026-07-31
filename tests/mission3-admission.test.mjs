@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { afterEach, test } from "node:test";
 import {
+  CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE,
   CAPABILITY_REGISTRY_RECORD_TYPE,
+  CAPABILITY_REGISTRY_SCHEMA_DIGEST,
   CAPABILITY_REGISTRY_SCHEMA_VERSION,
+  CAPABILITY_REGISTRY_VALIDATOR_VERSION,
   createPortalServer,
   deriveMission3Admission,
   MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID,
@@ -46,6 +49,22 @@ function baseLiveProjection(generatedAt = new Date().toISOString()) {
   const projection = {
     recordType: CAPABILITY_REGISTRY_RECORD_TYPE,
     schemaVersion: CAPABILITY_REGISTRY_SCHEMA_VERSION,
+    capabilityRegistryContract: {
+      recordType: CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE,
+      schemaVersion: CAPABILITY_REGISTRY_SCHEMA_VERSION,
+      schemaDigest: CAPABILITY_REGISTRY_SCHEMA_DIGEST,
+      validatorVersion: CAPABILITY_REGISTRY_VALIDATOR_VERSION,
+    },
+    sourceIdentity: {
+      rootRevision: "a".repeat(40),
+      runtimeRevision: "b".repeat(40),
+      rootRevisionVerified: true,
+      runtimeRevisionVerified: true,
+      verificationMethod: "program_alpha_source_attestation",
+      sourceTreeDigest: `sha256:${"c".repeat(64)}`,
+      sourceTreeClean: true,
+      environmentRevisionMatched: true,
+    },
     owner: "context_runtime",
     projectionOwner: "runtime.state.RuntimeState.capability_registry_projection",
     generatedAt,

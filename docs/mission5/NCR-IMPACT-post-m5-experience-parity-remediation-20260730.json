@@ -1,0 +1,48 @@
+{
+  "impact_id": "NCR-IMPACT-post-m5-experience-parity-remediation-20260730",
+  "artifact_id": "nexus.experience.post-m5-parity-readiness-and-governed-routing",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0006@1",
+      "NCR-CON-0019@1",
+      "NCR-CON-0020@1",
+      "NCR-CON-0021@1",
+      "NCR-CON-0022@1",
+      "NCR-CON-0029@1",
+      "NCR-CON-0033@1",
+      "NCR-ARC-0008@1",
+      "NCR-ARC-0017@1",
+      "NCR-OPS-0028@1",
+      "NCR-EXE-0008@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:4262aca2c3cdeaaf3ef098bbc2c3b25c9a0c0b19ff4c9978ac76c023b790155e"
+  },
+  "disposition": "no_constitutional_change",
+  "rationale": "This additive Experience remediation implements existing constitutional truth and Authority boundaries without changing constitutional meaning. One canonical, pinned registry records the desktop and hosted web surface union and a reason-bearing functional, read_only, local_only, or unavailable state for each client. Every web destination is navigable, while local-only and unavailable destinations render explicit non-capability boundaries. A structurally valid Runtime /ready 503 with status not_ready, processReady true, and platformContractReady false is parsed once and projected as Degraded without retrying a deterministic response or degrading independent healthy modules; malformed, unauthorized, and transport failures remain fail closed. Mission planning, Mission step execution, Work Sessions, Approvals, Actions, Connectors, proof reads, and receipt reads cross only exact canonical Runtime routes through the existing authenticated operational resolver, capability admission, scope, CSRF, idempotency, payload validation, and server-derived tenant/workspace pipeline. No generic proxy, new Authority, production mutation, Runtime change, root change, completion claim, or capability promotion is introduced.",
+  "evidence_references": [
+    "command:constitution Registry validate (valid=true; release NCR-1.0.0; digest sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa)",
+    "command:constitution basis validation for 11 direct principles (resolution digest sha256:4262aca2c3cdeaaf3ef098bbc2c3b25c9a0c0b19ff4c9978ac76c023b790155e)",
+    "command:npm test (180 passed; 0 failed)",
+    "command:npm run build (TypeScript noEmit passed; Vite production build passed; 1621 modules transformed)",
+    "path:src/platform/surface-registry.json",
+    "path:src/platform/surfaceRegistry.ts",
+    "path:src/platform/navigation.ts",
+    "path:src/components/SurfaceAvailabilityBoundary.tsx",
+    "path:src/components/WorkSessionsWorkspace.tsx",
+    "path:src/components/ConnectorDiagnosticsWorkspace.tsx",
+    "path:src/App.tsx",
+    "path:src/lib/local-client.ts",
+    "path:server/portal-server.mjs",
+    "path:tests/surface-registry.test.mjs",
+    "path:tests/experience-gateway.test.mjs",
+    "path:tests/executive-ui.test.mjs",
+    "rollback:deploy the previously recorded Experience release and revert only the scoped Experience remediation commit; no root or Runtime rollback is required; retain superseded releases and receipts as historical evidence"
+  ],
+  "conflicts": [],
+  "recorded_by": "NEXUS Engineering",
+  "recorded_at": "2026-07-31T04:30:00Z"
+}

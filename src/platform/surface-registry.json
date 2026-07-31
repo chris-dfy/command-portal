@@ -1,0 +1,2107 @@
+{
+  "recordType": "nexus_experience_surface_registry",
+  "schemaVersion": "nexus.experience-surface-registry@1.0.0",
+  "constitutionalBasis": {
+    "registryId": "NCR",
+    "releaseId": "NCR-1.0.0",
+    "releaseDigest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "resolverVersion": "1.0.0",
+    "principleEntryIds": [
+      "NCR-CON-0006@1",
+      "NCR-CON-0019@1",
+      "NCR-CON-0020@1",
+      "NCR-CON-0021@1",
+      "NCR-CON-0022@1",
+      "NCR-CON-0029@1",
+      "NCR-CON-0033@1",
+      "NCR-ARC-0008@1",
+      "NCR-ARC-0017@1",
+      "NCR-OPS-0028@1",
+      "NCR-EXE-0008@1"
+    ]
+  },
+  "principleImpact": "no_constitutional_change",
+  "clients": [
+    "desktop",
+    "web"
+  ],
+  "surfaces": [
+    {
+      "id": "dashboard",
+      "label": "Dashboard",
+      "detail": "Executive operating posture",
+      "group": "Platform",
+      "icon": "dashboard",
+      "executive": true,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/",
+          "state": "functional",
+          "reason": "Local NEXUS Command presents independent Runtime-backed workspaces; every mutable control remains gated by its own registered capability, Authority, proof, and receipt contract."
+        },
+        "web": {
+          "route": "/",
+          "state": "read_only",
+          "reason": "The hosted Dashboard presents the Runtime-owned Executive Operating Loop snapshot and never fabricates mutable operational state."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "dashboard.command-center",
+          "label": "Command Center",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS provides the interactive executive command workspace, query lane, Mission intake, and bounded action controls.",
+              "componentKey": "desktop.dashboard.command-center"
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "The hosted dashboard uses separate evidence-backed executive status modules; the local Command Center is not copied into the browser.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+      "moduleId": "dashboard.executive-status",
+          "label": "Executive status",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+        "desktop": {
+          "state": "read_only",
+          "reason": "Local NEXUS renders the existing executive status rail as a distinct read-only module without inferring capability from process health.",
+          "componentKey": "desktop.dashboard.executive-status"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads current gateway, Runtime, provider, environment, version, connection, and diagnostic posture.",
+              "componentKey": "web.dashboard.executive-status"
+            }
+          }
+        },
+        {
+          "moduleId": "dashboard.operations-center",
+          "label": "Operations Center",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS renders the executive operating assessment without granting execution Authority.",
+              "componentKey": "desktop.dashboard.operations-center"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS renders the current executive operating assessment without mutating Runtime state.",
+              "componentKey": "web.dashboard.operations-center"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "missions",
+      "label": "Missions",
+      "detail": "Portfolio and executor",
+      "group": "Platform",
+      "icon": "missions",
+      "executive": true,
+      "capabilityIds": [
+        "mission_executor",
+        "receipts",
+        "operational_replay"
+      ],
+      "webOperationalSessionRequired": true,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/missions",
+          "state": "functional",
+          "reason": "Local NEXUS Command plans, executes, pauses, and resumes bounded Missions through registered Runtime handlers."
+        },
+        "web": {
+          "route": "/missions",
+          "state": "functional",
+          "reason": "The hosted surface reads Mission, receipt, and Replay state and submits one exact governed Mission-step contract through the authenticated operational gateway."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "missions.dashboard",
+          "label": "Mission Dashboard",
+          "portability": "portable",
+          "capabilityIds": [
+            "mission_executor",
+            "receipts",
+            "operational_replay"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS plans, reads, pauses, resumes, and replays tenant-scoped Missions through canonical contracts.",
+              "componentKey": "desktop.missions.dashboard"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS plans and reads tenant-scoped Missions through exact canonical Runtime routes.",
+              "componentKey": "web.missions.dashboard"
+            }
+          }
+        },
+        {
+      "moduleId": "missions.runtime-evidence",
+          "label": "Runtime Mission evidence",
+          "portability": "portable",
+          "capabilityIds": [
+            "mission_executor",
+            "receipts"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads Runtime Mission records, proof references, receipts, and status without inferring completion.",
+              "componentKey": "desktop.missions.runtime-evidence"
+            },
+        "web": {
+          "state": "read_only",
+          "reason": "Hosted NEXUS exposes the Mission Dashboard's existing Runtime record, proof, receipt, and status evidence as a distinct read-only module.",
+          "componentKey": "web.missions.runtime-evidence"
+            }
+          }
+        },
+        {
+          "moduleId": "missions.step-execution",
+          "label": "Mission step execution",
+          "portability": "portable",
+          "capabilityIds": [
+            "mission_executor"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Exact supported Mission steps use policy and Decision controls, a one-use capability-bound Authority Grant, receipt, and verified postcondition lineage. When policy requires Approval, the adapter consumes a real recorded Approval; it never fabricates one. Readiness fails closed without the purpose-bound integrity key.",
+              "componentKey": "desktop.missions.step-execution"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted supported Mission steps use the exact canonical Authority adapter. When policy requires Approval, the adapter consumes a real recorded Approval; it never fabricates one. Capability readiness fails closed when its purpose-bound integrity key or any governed dependency is unavailable.",
+              "componentKey": "web.missions.step-execution"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "replay",
+      "label": "Operational Replay",
+      "detail": "Timeline and stage inspection",
+      "group": "Platform",
+      "icon": "replay",
+      "executive": true,
+      "capabilityIds": [
+        "operational_replay"
+      ],
+      "webOperationalSessionRequired": true,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/operational-replay",
+          "state": "read_only",
+          "reason": "Operational Replay is a passive projection of recorded Runtime events and never re-executes work."
+        },
+        "web": {
+          "route": "/operational-replay",
+          "state": "read_only",
+          "reason": "The hosted Replay workspace reads canonical events, stages, failures, and explanations without dispatching Actions."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "replay.timeline",
+          "label": "Operational Replay",
+          "portability": "portable",
+          "capabilityIds": [
+            "operational_replay"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads immutable stage, Evidence, Decision, Action, Outcome, and receipt lineage.",
+              "componentKey": "desktop.replay.timeline"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads scoped Runtime-owned Replay records without synthesizing missing stages.",
+              "componentKey": "web.replay.timeline"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "conclave",
+      "label": "Conclave",
+      "detail": "Challenge and synthesis",
+      "group": "Platform",
+      "icon": "conclave",
+      "executive": true,
+      "capabilityIds": [
+        "conclave",
+        "evidence",
+        "operational_replay"
+      ],
+      "webOperationalSessionRequired": true,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/conclave",
+          "state": "functional",
+          "reason": "Local NEXUS Command creates and inspects durable Runtime-owned Conclave workspaces."
+        },
+        "web": {
+          "route": "/conclave",
+          "state": "functional",
+          "reason": "The hosted surface creates scoped Conclave workspaces only when the canonical capability and operations:write scope are available."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "conclave.workspace",
+          "label": "Conclave workspace",
+          "portability": "portable",
+          "capabilityIds": [
+            "conclave",
+            "evidence",
+            "operational_replay"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS records specialist challenge, Evidence, and governed Conclave state.",
+              "componentKey": "desktop.conclave.workspace"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS uses exact Conclave workspace and Evidence contracts under authenticated scope.",
+              "componentKey": "web.conclave.workspace"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "knowledge",
+      "label": "Knowledge",
+      "detail": "Acquisition and promotion",
+      "group": "Platform",
+      "icon": "knowledge",
+      "executive": true,
+      "capabilityIds": [
+        "knowledge_intake",
+        "mission_store",
+        "knowledge_acquisition",
+        "knowledge_promotion",
+        "knowledge_store"
+      ],
+      "webOperationalSessionRequired": true,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/knowledge",
+          "state": "functional",
+          "reason": "Local NEXUS Command reads Mission and Knowledge stores and requests explicit Runtime-owned promotion."
+        },
+        "web": {
+          "route": "/knowledge",
+          "state": "functional",
+          "reason": "The hosted surface binds intake, baseline, candidate, promotion, store, version, and receipt operations to canonical Runtime contracts."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "knowledge.workspace",
+          "label": "Knowledge workspace",
+          "portability": "portable",
+          "capabilityIds": [
+            "knowledge_intake",
+            "mission_store",
+            "knowledge_acquisition",
+            "knowledge_promotion",
+            "knowledge_store"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS separates Mission and Knowledge stores and governs candidate promotion.",
+              "componentKey": "desktop.knowledge.workspace"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS binds intake, acquisition, promotion, version, and receipt operations to canonical contracts.",
+              "componentKey": "web.knowledge.workspace"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "edge",
+      "label": "Edge Runtime",
+      "detail": "Topology and boundaries",
+      "group": "Platform",
+      "icon": "edge",
+      "executive": true,
+      "capabilityIds": [
+        "edge_monitoring",
+        "edge_node_admission"
+      ],
+      "webOperationalSessionRequired": true,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/edge-runtime",
+          "state": "functional",
+          "reason": "Local NEXUS Command reads bounded node-monitoring evidence and exposes exact admission controls that fail closed while physical-node admission dependencies are unavailable."
+        },
+        "web": {
+          "route": "/edge-runtime",
+          "state": "functional",
+          "reason": "The hosted surface reads scoped node-monitoring evidence and submits only exact governed admission contracts; it does not promote unavailable physical Edge capability."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "edge.monitoring",
+          "label": "Edge monitoring",
+          "portability": "portable",
+          "capabilityIds": [
+            "edge_monitoring"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS reads tenant-scoped node, exchange, trust, health, readiness, and Replay evidence.",
+              "componentKey": "desktop.edge.monitoring"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS reads scoped node monitoring independently from physical node admission.",
+              "componentKey": "web.edge.monitoring"
+            }
+          }
+        },
+        {
+      "moduleId": "edge.diagnostics-topology",
+          "label": "Edge diagnostics topology",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+        "desktop": {
+          "state": "read_only",
+          "reason": "Local NEXUS exposes the Edge monitor's existing exchange and diagnostics topology as a distinct read-only module without treating reachability as readiness.",
+          "componentKey": "desktop.edge.diagnostics-topology"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS renders the fixed read-only diagnostics lane without treating reachability as readiness.",
+              "componentKey": "web.edge.diagnostics-topology"
+            }
+          }
+        },
+        {
+          "moduleId": "edge.admission-request",
+          "label": "Governed admission request",
+          "portability": "portable",
+          "capabilityIds": [
+            "edge_node_admission"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS exposes only exact Mission-bound admission request and review contracts that fail closed on dependency loss.",
+              "componentKey": "desktop.edge.admission-request"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS exposes only exact governed admission request and review operations under Runtime capability gating.",
+              "componentKey": "web.edge.admission-request"
+            }
+          }
+        },
+        {
+          "moduleId": "edge.physical-node-admission",
+          "label": "Physical node admission",
+          "portability": "portable",
+          "capabilityIds": [
+            "edge_node_admission"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Physical node enrollment is unavailable until identity, transport, challenge, verification, first signed state, and postcondition evidence all pass.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Hosted physical node enrollment is unavailable until identity, transport, challenge, verification, first signed state, and postcondition evidence all pass.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "mission-control",
+      "label": "Mission Control",
+      "detail": "Governed operational execution",
+      "group": "Platform",
+      "icon": "mission-control",
+      "executive": true,
+      "capabilityIds": [
+        "mission_executor",
+        "conclave",
+        "receipts",
+        "operational_replay"
+      ],
+      "webOperationalSessionRequired": true,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/mission-control",
+          "state": "functional",
+          "reason": "Local NEXUS Command coordinates Mission planning and registered execution with proof and receipt state."
+        },
+        "web": {
+          "route": "/mission-control",
+          "state": "functional",
+          "reason": "The hosted surface establishes an authenticated scoped session, creates canonical Conclave Missions, and reads their receipts and Replay."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "mission-control.operations-center",
+          "label": "Operations Center",
+          "portability": "portable",
+          "capabilityIds": [
+            "mission_executor",
+            "conclave",
+            "receipts",
+            "operational_replay"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS renders executive operational posture while action controls remain separately capability-gated.",
+              "componentKey": "desktop.mission-control.operations-center"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS creates and inspects canonical governed operational workspaces through exact routes.",
+              "componentKey": "web.mission-control.operations-workspace"
+            }
+          }
+        },
+        {
+      "moduleId": "mission-control.mission-dashboard",
+          "label": "Mission execution dashboard",
+          "portability": "portable",
+          "capabilityIds": [
+            "mission_executor",
+            "receipts"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS exposes Mission planning and lifecycle controls inside Mission Control.",
+              "componentKey": "desktop.mission-control.mission-dashboard"
+            },
+        "web": {
+          "state": "functional",
+          "reason": "Hosted Mission Control mounts the existing canonical Mission Dashboard through its exact planning, read, and governed step routes.",
+          "componentKey": "web.mission-control.mission-dashboard"
+            }
+          }
+        },
+        {
+      "moduleId": "mission-control.runtime-missions",
+          "label": "Runtime Mission records",
+          "portability": "portable",
+          "capabilityIds": [
+            "mission_executor",
+            "receipts"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads Runtime Mission identities, state, receipts, and proof lineage.",
+              "componentKey": "desktop.mission-control.runtime-missions"
+            },
+        "web": {
+          "state": "read_only",
+          "reason": "Hosted Mission Control reads the canonical Runtime Mission inventory and its receipt and proof lineage.",
+          "componentKey": "web.mission-control.runtime-missions"
+            }
+          }
+        },
+        {
+      "moduleId": "mission-control.functional-readiness",
+          "label": "Functional readiness",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads functional readiness evidence without promoting deployment or external capability.",
+              "componentKey": "desktop.mission-control.functional-readiness"
+            },
+        "web": {
+          "state": "read_only",
+          "reason": "Hosted Mission Control renders the existing Runtime capability readiness evidence without promoting deployment or external capability.",
+          "componentKey": "web.mission-control.functional-readiness"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "settings",
+      "label": "Settings",
+      "detail": "Runtime and experience posture",
+      "group": "Platform",
+      "icon": "settings",
+      "executive": true,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/settings",
+          "state": "functional",
+          "reason": "Local NEXUS exposes editable appearance preferences alongside read-only Runtime diagnostics; operational settings remain capability-gated."
+        },
+        "web": {
+          "route": "/settings",
+          "state": "functional",
+          "reason": "The hosted surface manages the bounded Registered Executive session and the exact non-production canonical execution proof, while appearance remains client-local."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "settings.runtime-verification",
+          "label": "Runtime verification",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads canonical Runtime verification and release identity.",
+              "componentKey": "desktop.settings.runtime-verification"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads Runtime identity, release, environment, and source revisions.",
+              "componentKey": "web.settings.runtime-information"
+            }
+          }
+        },
+        {
+          "moduleId": "settings.runtime-health",
+          "label": "Runtime health",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads the API gateway and Runtime health posture without mutation.",
+              "componentKey": "desktop.settings.runtime-api-gateway"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads independent health and readiness diagnostics.",
+              "componentKey": "web.settings.runtime-health"
+            }
+          }
+        },
+        {
+          "moduleId": "settings.appearance",
+          "label": "Appearance",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local appearance preferences are editable and do not claim Runtime capability.",
+              "componentKey": "desktop.settings.appearance"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Browser-local appearance preferences are editable and do not mutate Runtime state.",
+              "componentKey": "web.settings.appearance"
+            }
+          }
+        },
+        {
+          "moduleId": "settings.registered-executive",
+          "label": "Registered Executive session",
+          "portability": "hosted_only",
+          "capabilityIds": [
+            "canonical_execution_spine"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "The local desktop does not use the hosted Registered Executive identity/session contract.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "functional",
+              "reason": "The hosted surface establishes a revocable Registered Executive session without granting execution Authority.",
+              "componentKey": "web.settings.registered-executive"
+            }
+          }
+        },
+        {
+          "moduleId": "settings.canonical-execution",
+          "label": "Canonical execution fixture",
+          "portability": "hosted_only",
+          "capabilityIds": [
+            "canonical_execution_spine"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "The accepted desktop build has no registered UI adapter for the hosted non-production fixture.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "functional",
+              "reason": "The hosted surface admits only the exact registered non-production Action and separately governed compensation.",
+              "componentKey": "web.settings.canonical-execution"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "documents",
+      "label": "Document Intelligence",
+      "detail": "Governed evidence ingestion",
+      "group": "Intelligence",
+      "icon": "documents",
+      "executive": false,
+      "capabilityIds": [
+        "knowledge.document_intake"
+      ],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": true,
+      "clients": {
+        "desktop": {
+          "route": "/documents",
+          "state": "functional",
+          "reason": "NEXUS Command routes Document Intelligence to the existing Runtime-backed NexusProjectIntakePanel."
+        },
+        "web": {
+          "route": "/documents",
+          "state": "functional",
+          "reason": "The hosted surface uploads browser-selected evidence and queries admitted sources through authenticated canonical intake contracts."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "documents.intake",
+          "label": "Document intelligence",
+          "portability": "portable",
+          "capabilityIds": [
+            "knowledge.document_intake"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS ingests bounded local documents through the canonical intake boundary.",
+              "componentKey": "desktop.documents.intake"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS uses exact upload and query contracts with source classification and proof boundaries.",
+              "componentKey": "web.documents.intake"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "projects",
+      "label": "Projects",
+      "detail": "Plan, scope, estimate, and compile",
+      "group": "Intelligence",
+      "icon": "projects",
+      "executive": false,
+      "capabilityIds": [
+        "projects.nexicron_planning"
+      ],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": true,
+      "clients": {
+        "desktop": {
+          "route": "/projects",
+          "state": "functional",
+          "reason": "Local NEXUS Command creates projects and compiles registered artifact types through the Runtime."
+        },
+        "web": {
+          "route": "/projects",
+          "state": "functional",
+          "reason": "The hosted surface creates projects and reads scope, estimate, and planning models before canonical compilation."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "projects.planning",
+          "label": "Project planning",
+          "portability": "portable",
+          "capabilityIds": [
+            "projects.nexicron_planning"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS creates evidence-qualified project scopes and bounded planning artifacts.",
+              "componentKey": "desktop.projects.planning"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS uses canonical project creation, scope, estimate, planning-model, and compile contracts.",
+              "componentKey": "web.projects.planning"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "data-platform",
+      "label": "Data Platform",
+      "detail": "Trusted sources, entities, quality, and lineage",
+      "group": "Intelligence",
+      "icon": "data-platform",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/data-platform",
+          "state": "unavailable",
+          "reason": "Legacy CDP handlers are not admitted by the canonical Runtime registry, so the desktop surface fails closed instead of presenting configured source code as operational capability."
+        },
+        "web": {
+          "route": "/data-platform",
+          "state": "unavailable",
+          "reason": "No canonical CDP contract is allowlisted for either client; source presence does not establish an operational data-platform capability."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "data-platform.workspace",
+          "label": "Data Platform",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "No canonical Data Platform contract or verified operational adapter is registered for either client.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "No canonical Data Platform contract or verified operational adapter is registered for either client.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "label": "Model Gateway",
+      "detail": "Verified provider registry",
+      "group": "Intelligence",
+      "icon": "providers",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/providers",
+          "state": "read_only",
+          "reason": "Local NEXUS Command reads only the Runtime-verified provider inventory; legacy specialist routing and promotion handlers are not presented as canonical capability."
+        },
+        "web": {
+          "route": "/providers",
+          "state": "read_only",
+          "reason": "The hosted surface displays only the Runtime-verified provider inventory and never treats configuration as connectivity."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "providers.registry",
+          "label": "Provider registry",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads configured provider posture without treating configuration as verified connectivity.",
+              "componentKey": "desktop.providers.registry"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads the Runtime provider registry and live verification evidence without mutation.",
+              "componentKey": "web.providers.registry"
+            }
+          }
+        },
+        {
+      "moduleId": "providers.truth-boundary",
+          "label": "Provider truth boundary",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+        "desktop": {
+          "state": "read_only",
+          "reason": "Local NEXUS exposes the provider registry's existing truth boundary as a distinct read-only module, separating configuration from verified connectivity.",
+          "componentKey": "desktop.providers.truth-boundary"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS explicitly separates provider configuration from reachable and verified live inference.",
+              "componentKey": "web.providers.truth-boundary"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "label": "Runtime Control",
+      "detail": "Local Runtime lifecycle and recovery",
+      "group": "Infrastructure",
+      "icon": "runtime",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/runtime",
+          "state": "read_only",
+          "reason": "The dedicated desktop surface currently exposes persisted verification and API posture without a route-specific lifecycle mutation."
+        },
+        "web": {
+          "route": "/runtime",
+          "state": "local_only",
+          "reason": "Hosted browser Runtime lifecycle control is not authorized; diagnostic Runtime information remains available in Settings."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "runtime.verification-center",
+          "label": "Runtime verification center",
+          "portability": "local_only",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads managed process, contract, source, and release verification.",
+              "componentKey": "desktop.runtime.verification-center"
+            },
+            "web": {
+              "state": "local_only",
+              "reason": "The browser cannot host or verify the device-local NEXUS Runtime process.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "runtime.api-gateway",
+          "label": "Runtime API gateway",
+          "portability": "local_only",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads the device-local Runtime API and managed-process diagnostic boundary.",
+              "componentKey": "desktop.runtime.api-gateway"
+            },
+            "web": {
+              "state": "local_only",
+              "reason": "The browser cannot control or substitute the device-local Runtime API gateway.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "connectors",
+      "label": "Connectors",
+      "detail": "Integration registration, health, and proof",
+      "group": "Infrastructure",
+      "icon": "connectors",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/connectors",
+          "state": "read_only",
+          "reason": "Local NEXUS Command reads the Runtime-owned connector registry, freshness, receipts, and limitations without exposing connector mutation controls."
+        },
+        "web": {
+          "route": "/connectors",
+          "state": "read_only",
+          "reason": "The hosted surface reads the signed Runtime connector projection already used by the dashboard and exposes no connector mutation control."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "connectors.registry",
+          "label": "Connector diagnostics",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads connector registration and health without activating external effects.",
+              "componentKey": "desktop.connectors.registry"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads the canonical connector projection without generic forwarding.",
+              "componentKey": "web.connectors.registry"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "storage",
+      "label": "Storage",
+      "detail": "Mission and Knowledge persistence boundaries",
+      "group": "Infrastructure",
+      "icon": "storage",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/storage",
+          "state": "unavailable",
+          "reason": "The current desktop route presents a local-only placeholder and no route-specific live storage contract."
+        },
+        "web": {
+          "route": "/storage",
+          "state": "unavailable",
+          "reason": "No hosted storage administration contract is registered; Mission and Knowledge stores remain Runtime-owned."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "storage.provider-summary",
+          "label": "Storage provider summary",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "No verified standalone storage capability is admitted; storage remains an implementation dependency.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "No verified standalone storage capability is admitted; storage remains an implementation dependency.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cloud",
+      "label": "Hosted Readiness",
+      "detail": "Private hosted boundary readiness",
+      "group": "Infrastructure",
+      "icon": "cloud",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/cloud",
+          "state": "unavailable",
+          "reason": "The current desktop route receives no verified hosted-readiness projection."
+        },
+        "web": {
+          "route": "/cloud",
+          "state": "unavailable",
+          "reason": "Production, enterprise, and cloud-primary readiness remain false; no hosted readiness administration is exposed."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "cloud.team-alpha",
+          "label": "Hosted team alpha",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Hosted team alpha remains unverified and unavailable in both accepted clients.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Hosted team alpha remains unverified and unavailable in both accepted clients.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "cloud.postgres-readiness",
+          "label": "Hosted Postgres readiness",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Hosted Postgres readiness lacks verified non-production provider evidence.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Hosted Postgres readiness lacks verified non-production provider evidence.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "cloud.tenant-isolation",
+          "label": "Tenant isolation",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Production tenant-isolation postconditions are not verified for either client.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Production tenant-isolation postconditions are not verified for either client.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "cloud.workspace-isolation",
+          "label": "Workspace isolation",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Production workspace-isolation postconditions are not verified for either client.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Production workspace-isolation postconditions are not verified for either client.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "cloud.observability-readiness",
+          "label": "Observability readiness",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Hosted observability readiness has no verified operational adapter or receipt.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Hosted observability readiness has no verified operational adapter or receipt.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "cloud.observability-components",
+          "label": "Observability components",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Hosted observability component deployment is not admitted by either client.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Hosted observability component deployment is not admitted by either client.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "cloud.hosted-alpha-blockers",
+          "label": "Hosted alpha blockers",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Hosted alpha blocker evidence remains an unavailable diagnostic module.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Hosted alpha blocker evidence remains an unavailable diagnostic module.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "cloud.production-boundary",
+          "label": "Production boundary",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Production deployment and mutation remain outside the admitted non-production scope.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Production deployment and mutation remain outside the admitted non-production scope.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "team",
+      "label": "Team Workspace",
+      "detail": "People, roles, policy, and handoff",
+      "group": "Infrastructure",
+      "icon": "team",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/team",
+          "state": "unavailable",
+          "reason": "The current desktop route has no verified team-readiness projection or route-specific Runtime workflow."
+        },
+        "web": {
+          "route": "/team",
+          "state": "unavailable",
+          "reason": "The hosted deployment is single-workspace non-production and does not claim team or enterprise collaboration readiness."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "team.readiness",
+          "label": "Team readiness",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Production multi-user team readiness is not verified.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Production multi-user team readiness is not verified.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "team.operator-alpha-readiness",
+          "label": "Operator alpha readiness",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Operator alpha readiness is not verified for either client.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Operator alpha readiness is not verified for either client.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "team.operator-trial",
+          "label": "Operator trial",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "No live operator trial capability is admitted.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "No live operator trial capability is admitted.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "team.operator-runbook",
+          "label": "Operator runbook",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "The operator runbook has no verified interactive client module.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "The operator runbook has no verified interactive client module.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "team.first-run-checklist",
+          "label": "First-run checklist",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "The first-run checklist remains a non-operational source artifact.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "The first-run checklist remains a non-operational source artifact.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "team.approval-hygiene",
+          "label": "Approval hygiene",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "No standalone approval administration module is admitted.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "No standalone approval administration module is admitted.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "team.operator-handoff",
+          "label": "Operator handoff receipt",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "No verified operator handoff workflow is admitted.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "No verified operator handoff workflow is admitted.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "governance",
+      "label": "Governance",
+      "detail": "Policy, Authority, and operational boundaries",
+      "group": "Governance",
+      "icon": "governance",
+      "executive": false,
+      "capabilityIds": [
+        "governance",
+        "authority"
+      ],
+      "webOperationalSessionRequired": true,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/governance",
+          "state": "read_only",
+          "reason": "Local NEXUS reads exact Governance and Authority readiness diagnostics; no generic policy or Authority mutation is exposed."
+        },
+        "web": {
+          "route": "/governance",
+          "state": "read_only",
+          "reason": "Hosted NEXUS reads exact Governance and Authority readiness diagnostics through scoped Runtime routes; no generic mutation is exposed."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "governance.readiness-diagnostics",
+          "label": "Governance readiness diagnostics",
+          "portability": "portable",
+          "capabilityIds": [
+            "governance"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads /governance/readiness and preserves degraded diagnostic state without granting Authority.",
+              "componentKey": "desktop.governance.readiness"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads /governance/readiness through the scoped operational gateway and preserves degraded state.",
+              "componentKey": "web.governance.readiness"
+            }
+          }
+        },
+        {
+          "moduleId": "governance.authority-diagnostics",
+          "label": "Authority readiness diagnostics",
+          "portability": "portable",
+          "capabilityIds": [
+            "authority"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads /authority/readiness as diagnostics only; availability never grants Authority.",
+              "componentKey": "desktop.governance.authority"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads /authority/readiness through the scoped operational gateway; no Authority mutation is accepted.",
+              "componentKey": "web.governance.authority"
+            }
+          }
+        },
+        {
+          "moduleId": "governance.acceptance-checklist",
+          "label": "Acceptance checklist",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Acceptance checklist source presence is not an admitted governance capability.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Acceptance checklist source presence is not an admitted governance capability.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "governance.boundary-acknowledgement",
+          "label": "Boundary acknowledgement",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "No standalone boundary-acknowledgement mutation workflow is admitted.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "No standalone boundary-acknowledgement mutation workflow is admitted.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "governance.first-workflow",
+          "label": "First governed workflow",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "No generic first-workflow launcher is admitted outside exact capability routes.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "No generic first-workflow launcher is admitted outside exact capability routes.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "capability-ledger",
+      "label": "Capability Ledger",
+      "detail": "Canonical capability, connector, and Action truth",
+      "group": "Governance",
+      "icon": "capability-ledger",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/capability-ledger",
+          "state": "read_only",
+          "reason": "The desktop surface reads the Runtime-owned live Capability Registry projection."
+        },
+        "web": {
+          "route": "/capability-ledger",
+          "state": "read_only",
+          "reason": "The hosted surface renders the validated Runtime-owned Capability Registry and never exposes an execution control."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "capability-ledger.registry",
+          "label": "Capability ledger",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads canonical capability classifications, handlers, receipts, and limitations.",
+              "componentKey": "desktop.capability-ledger.registry"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads the Runtime-owned capability projection and current limitations.",
+              "componentKey": "web.capability-ledger.registry"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "evidence",
+      "label": "Evidence Center",
+      "detail": "Proofs, receipts, and release provenance",
+      "group": "Governance",
+      "icon": "evidence",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/evidence",
+          "state": "read_only",
+          "reason": "The desktop surface reads Reality, proof, receipt, and package evidence without dispatching Actions."
+        },
+        "web": {
+          "route": "/evidence",
+          "state": "read_only",
+          "reason": "The hosted surface reads proof and receipt references plus the verified deployment revisions."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "evidence.proof-references",
+          "label": "Proof references",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads canonical reality Evidence and proof lineage.",
+              "componentKey": "desktop.evidence.reality"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads Decision Flight Recorder proof references without mutation.",
+              "componentKey": "web.evidence.proofs"
+            }
+          }
+        },
+        {
+          "moduleId": "evidence.acceptance-receipt",
+          "label": "Acceptance receipt",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads the recorded acceptance receipt without rewriting it.",
+              "componentKey": "desktop.evidence.acceptance-receipt"
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "The hosted Evidence surface has no separately verified acceptance-receipt projection.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "evidence.distribution-receipt",
+          "label": "Distribution receipt",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads recorded distribution lineage without publication.",
+              "componentKey": "desktop.evidence.distribution-receipt"
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "The hosted Evidence surface has no separately verified distribution-receipt projection.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "evidence.package-manifest",
+          "label": "Package manifest",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads the package manifest and recorded source identities.",
+              "componentKey": "desktop.evidence.package-manifest"
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "The hosted Evidence surface has no package-manifest contract.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "evidence.execution-receipts",
+          "label": "Execution receipt references",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS exposes the existing Runtime receipt workspace as a distinct read-only execution-receipt evidence module.",
+              "componentKey": "desktop.evidence.execution-receipts"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads scoped Outcome Ledger receipt references without mutation.",
+              "componentKey": "web.evidence.execution-receipts"
+            }
+          }
+        },
+        {
+          "moduleId": "evidence.release-provenance",
+          "label": "Release provenance",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS exposes existing build and Runtime source identity evidence as a distinct release-provenance module.",
+              "componentKey": "desktop.evidence.release-provenance"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads verified Runtime and Experience source revisions.",
+              "componentKey": "web.evidence.release-provenance"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "label": "Security",
+      "detail": "Trust, secret, and isolation boundaries",
+      "group": "Governance",
+      "icon": "security",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/security",
+          "state": "unavailable",
+          "reason": "The current desktop route is a static boundary description and does not claim a live Security administration capability."
+        },
+        "web": {
+          "route": "/security",
+          "state": "unavailable",
+          "reason": "Secret values and security administration are intentionally excluded from the browser Experience."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "security.secret-boundary",
+          "label": "Secret boundary",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Secret-manager and redaction boundaries remain enforced internally; no administration module is admitted.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Secret-manager and redaction boundaries remain enforced internally; no administration module is admitted.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "security.install-checklist",
+          "label": "Install checklist",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "The install checklist is not a verified operational security capability.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "The install checklist is not a verified operational security capability.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "security.launch-verification",
+          "label": "Launch verification",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Production launch verification remains outside admitted non-production client capability.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Production launch verification remains outside admitted non-production client capability.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "receipts",
+      "label": "Outcome Ledger",
+      "detail": "Recorded execution outcomes",
+      "group": "Governance",
+      "icon": "receipts",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/receipts",
+          "state": "read_only",
+          "reason": "The desktop Outcome Ledger is a read-only Runtime receipt and accountability projection."
+        },
+        "web": {
+          "route": "/receipts",
+          "state": "read_only",
+          "reason": "The hosted Outcome Ledger reuses the canonical proof and receipt projection and cannot create an outcome claim."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "receipts.runtime-workspace",
+          "label": "Runtime receipt workspace",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads the Runtime-owned receipt, accountability, proof, and source-lineage projection.",
+              "componentKey": "desktop.receipts.runtime-workspace"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS exposes the canonical Runtime receipt collection as a dedicated read-only workspace.",
+              "componentKey": "web.receipts.runtime-workspace"
+            }
+          }
+        },
+        {
+          "moduleId": "receipts.acceptance-trial",
+          "label": "Operator acceptance trial",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads operator acceptance trial evidence without rerunning or mutating it.",
+              "componentKey": "desktop.receipts.acceptance-trial"
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "The hosted Receipts surface has no separate operator acceptance-trial projection.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "receipts.execution-receipts",
+          "label": "Execution receipts",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads recorded acceptance and execution receipt lineage.",
+              "componentKey": "desktop.receipts.acceptance"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads scoped Outcome Ledger execution receipts without mutation.",
+              "componentKey": "web.receipts.execution-receipts"
+            }
+          }
+        },
+        {
+          "moduleId": "receipts.distribution-receipt",
+          "label": "Distribution receipt",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads recorded distribution receipt lineage without publication.",
+              "componentKey": "desktop.receipts.distribution"
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "The hosted Receipts surface has no separately verified distribution receipt projection.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "receipts.proof-references",
+          "label": "Receipt proof references",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS exposes the existing proof references as a distinct read-only Outcome Ledger module.",
+              "componentKey": "desktop.receipts.proof-references"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads proof references related to receipt evidence.",
+              "componentKey": "web.receipts.proofs"
+            }
+          }
+        },
+        {
+          "moduleId": "receipts.release-provenance",
+          "label": "Receipt release provenance",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS exposes existing distribution and source identity evidence as a distinct read-only provenance module.",
+              "componentKey": "desktop.receipts.release-provenance"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS reads source revisions associated with the deployed receipt-producing pair.",
+              "componentKey": "web.receipts.release-provenance"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "voice",
+      "label": "Voice Operations",
+      "detail": "Governed voice interface",
+      "group": "Experience",
+      "icon": "voice",
+      "executive": false,
+      "capabilityIds": [
+        "interaction.human"
+      ],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": true,
+      "clients": {
+        "desktop": {
+          "route": "/voice",
+          "state": "functional",
+          "reason": "NEXUS Command binds bounded transcript status, history, routing, proof, and receipt evidence to canonical Runtime handlers; hardware wake controls remain separately unavailable when not admitted."
+        },
+        "web": {
+          "route": "/voice",
+          "state": "functional",
+          "reason": "The hosted Voice workspace binds governed transcript routing and live Realtime voice to canonical capability and session gates."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "voice.operator",
+          "label": "Voice operator",
+          "portability": "portable",
+          "capabilityIds": [
+            "interaction.human"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS exposes typed voice status, history, and transcript routing.",
+              "componentKey": "desktop.voice.operator"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS exposes exact text and realtime voice adapters; voice never grants Approval or Authority.",
+              "componentKey": "web.voice.operator"
+            }
+          }
+        },
+        {
+          "moduleId": "voice.runtime-status",
+          "label": "Voice Runtime status",
+          "portability": "portable",
+          "capabilityIds": [
+            "interaction.human"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS reads provider, transport, and Runtime voice posture without inferring live capability.",
+              "componentKey": "desktop.voice.runtime-status"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS exposes the Voice workspace's exact Runtime, provider, and transport posture as a distinct read-only status module.",
+              "componentKey": "web.voice.runtime-status"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "executive-views",
+      "label": "Executive Views",
+      "detail": "Evidence-backed decision support",
+      "group": "Experience",
+      "icon": "executive-views",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/executive-views",
+          "state": "read_only",
+          "reason": "Local NEXUS Command presents the Runtime-owned executive assessment; briefing mutation contracts remain staged and are not claimed as operational."
+        },
+        "web": {
+          "route": "/executive-views",
+          "state": "read_only",
+          "reason": "The hosted surface presents the Runtime-owned Executive Operating Loop assessment without claiming a briefing mutation."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "executive-views.operations-center",
+          "label": "Executive views",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS renders the executive operating assessment without mutating operational state.",
+              "componentKey": "desktop.executive-views.operations-center"
+            },
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS renders the current executive assessment without mutating operational state.",
+              "componentKey": "web.executive-views.operations-center"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "work-sessions",
+      "label": "Work Sessions",
+      "detail": "Bounded autonomous work continuity",
+      "group": "Experience",
+      "icon": "work-sessions",
+      "executive": false,
+      "capabilityIds": [
+        "operational.work_sessions"
+      ],
+      "webOperationalSessionRequired": true,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/work-sessions",
+          "state": "functional",
+          "reason": "NEXUS Command routes Work Sessions to the existing bounded NexusWorkSessionsPanel with planning, controls, proof, receipt, and continuity state."
+        },
+        "web": {
+          "route": "/work-sessions",
+          "state": "functional",
+          "reason": "The hosted surface uses only exact Work Session plan, start, read, step, continue, pause, cancel, and receipt contracts through canonical action admission."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "work-sessions.workspace",
+          "label": "Work Session planning and continuity",
+          "portability": "portable",
+          "capabilityIds": [
+            "operational.work_sessions"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "functional",
+              "reason": "Local NEXUS plans, starts, reads, pauses, cancels, and retrieves receipts through exact Work Session contracts.",
+              "componentKey": "desktop.work-sessions.workspace"
+            },
+            "web": {
+              "state": "functional",
+              "reason": "Hosted NEXUS plans, starts, reads, pauses, cancels, and retrieves receipts through exact scoped contracts.",
+              "componentKey": "web.work-sessions.workspace"
+            }
+          }
+        },
+        {
+          "moduleId": "work-sessions.step-execution",
+          "label": "Work Session step execution",
+          "portability": "portable",
+          "capabilityIds": [
+            "operational.work_sessions"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Step execution is unavailable until an exact per-step action adapter proves canonical Authority and postcondition lineage.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Hosted step execution is unavailable until an exact per-step action adapter proves canonical Authority and postcondition lineage.",
+              "componentKey": null
+            }
+          }
+        },
+        {
+          "moduleId": "work-sessions.continuation",
+          "label": "Work Session continuation",
+          "portability": "portable",
+          "capabilityIds": [
+            "operational.work_sessions"
+          ],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "Continuation is unavailable while the recorded canonical per-action Authority limitation remains unresolved.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "Hosted continuation is unavailable while the recorded canonical per-action Authority limitation remains unresolved.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "government",
+      "label": "Government",
+      "detail": "Domain operations with explicit Authority",
+      "group": "Operations",
+      "icon": "government",
+      "executive": false,
+      "capabilityIds": [],
+      "webOperationalSessionRequired": false,
+      "webHostedContract": false,
+      "clients": {
+        "desktop": {
+          "route": "/government",
+          "state": "unavailable",
+          "reason": "The current desktop route reuses generic verification state and does not establish a Government operations capability."
+        },
+        "web": {
+          "route": "/government",
+          "state": "unavailable",
+          "reason": "No domain-specific Government Runtime contract or hosted capability is registered."
+        }
+      },
+      "modules": [
+        {
+          "moduleId": "government.workspace",
+          "label": "Government",
+          "portability": "portable",
+          "capabilityIds": [],
+          "clients": {
+            "desktop": {
+              "state": "unavailable",
+              "reason": "No government-specific product capability is admitted; NEXUS remains a general executive operating system.",
+              "componentKey": null
+            },
+            "web": {
+              "state": "unavailable",
+              "reason": "No government-specific product capability is admitted; NEXUS remains a general executive operating system.",
+              "componentKey": null
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

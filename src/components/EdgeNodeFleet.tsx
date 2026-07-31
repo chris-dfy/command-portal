@@ -12,7 +12,6 @@ import {
   type RuntimeCoordinationNode,
   type RuntimeNodeFleet,
 } from "../lib/local-client";
-import { EdgeAdmissionWorkspace } from "./EdgeAdmissionWorkspace";
 import { StatusPill } from "./StatusPill";
 
 type FleetState = "loading" | "ready" | "empty" | "unavailable";
@@ -204,6 +203,5 @@ export function EdgeNodeFleet() {
       </div>
       {strings(fleet?.limitations).length > 0 && <footer className="edge-fleet-limitations"><strong>Fleet limitations</strong><ul>{strings(fleet?.limitations).map((item) => <li key={item}>{item}</li>)}</ul></footer>}
     </NexusPanel>
-    <EdgeAdmissionWorkspace capability={fleet?.admissionCapability} onFleetRefresh={() => void refresh(true)} />
   </>;
 }

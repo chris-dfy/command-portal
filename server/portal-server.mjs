@@ -41,6 +41,9 @@ export const SUPPORTED_SCHEMA_VERSION = "1.0.0";
 export const SUPPORTED_RUNTIME_VERSION = "0.1.0";
 export const CAPABILITY_REGISTRY_SCHEMA_VERSION = "nexus.live-capability-registry@1.0.0";
 export const CAPABILITY_REGISTRY_RECORD_TYPE = "nexus_live_capability_registry_projection";
+export const CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE = "nexus_capability_registry_contract_identity";
+export const CAPABILITY_REGISTRY_SCHEMA_DIGEST = "sha256:52f825444f39d285afd1d3bac82ebdab4125f85feb381339314a39faa05fa166";
+export const CAPABILITY_REGISTRY_VALIDATOR_VERSION = "nexus.capability-registry-validator@1.0.0";
 const CAPABILITY_REGISTRY_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const CAPABILITY_REGISTRY_OWNER = "context_runtime";
 const CAPABILITY_REGISTRY_PROJECTION_OWNER = "runtime.state.RuntimeState.capability_registry_projection";
@@ -135,6 +138,8 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/projects": { method: "POST", runtimePath: "/projects" },
   "/api/local/projects/artifact-types": { method: "GET", runtimePath: "/projects/artifact-types" },
   "/api/local/client-capabilities": { method: "GET", runtimePath: "/client-capabilities" },
+  "/api/local/governance/readiness": { method: "GET", runtimePath: "/governance/readiness" },
+  "/api/local/authority/readiness": { method: "GET", runtimePath: "/authority/readiness" },
   "/api/local/missions": { method: "GET", runtimePath: "/missions/history?limit=8" },
   "/api/local/missions/plan": { method: "POST", runtimePath: "/missions/plan" },
   "/api/local/conclave/workspaces": { method: "GET", runtimePath: "/conclave/workspaces" },
@@ -144,8 +149,6 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/approvals": { method: "GET", runtimePath: "/approvals?limit=12" },
   "/api/local/actions/dry-run": { method: "POST", runtimePath: "/actions/dry-run" },
   "/api/local/actions/execute": { method: "POST", runtimePath: "/actions/execute" },
-  "/api/local/connectors": { method: "GET", runtimePath: "/connectors" },
-  "/api/local/connectors/health": { method: "GET", runtimePath: "/connectors/health" },
   "/api/local/proofs": { method: "GET", runtimePath: "/proof/recent?limit=8" },
   "/api/local/receipts": { method: "GET", runtimePath: "/receipts?limit=12" },
   "/api/local/voice/status": { method: "GET", runtimePath: "/voice/status" },
@@ -1469,11 +1472,12 @@ function resolveLocalCapability(pathname, method) {
   if (direct) return direct.method === method ? direct : { methodMismatch: true, allowed: direct.method };
   const match = pathname.match(/^\/api\/local\/projects\/([A-Za-z0-9_.:-]{1,160})\/(sources|evidence|scope|estimate|planning-model|artifacts|compile)$/);
   if (!match) {
-    const conclaveWorkspace = pathname.match(/^\/api\/local\/conclave\/workspaces\/([A-Za-z0-9_.:-]{1,160})$/);
+    const conclaveWorkspace = pathname.match(/^\/api\/local\/conclave\/workspaces\/([A-Za-z0-9_.:-]{1,160})(?:\/(run))?$/);
     if (conclaveWorkspace) {
-      return method === "GET"
-        ? { method, runtimePath: `/conclave/workspaces/${conclaveWorkspace[1]}` }
-        : { methodMismatch: true, allowed: "GET" };
+      const expectedMethod = conclaveWorkspace[2] === "run" ? "POST" : "GET";
+      return method === expectedMethod
+        ? { method, runtimePath: `/conclave/workspaces/${conclaveWorkspace[1]}${conclaveWorkspace[2] ? "/run" : ""}` }
+        : { methodMismatch: true, allowed: expectedMethod };
     }
     const conclaveEvidence = pathname.match(/^\/api\/local\/conclave\/workspaces\/([A-Za-z0-9_.:-]{1,160})\/tasks\/([A-Za-z0-9_.:-]{1,160})\/evidence$/);
     if (conclaveEvidence) {
@@ -1520,6 +1524,14 @@ export const CANONICAL_OPERATIONAL_ROUTES = Object.freeze({
   "/api/operations/voice-operator/history": Object.freeze({ GET: "/voice-operator/history" }),
   "/api/operations/voice-operator/route-transcript": Object.freeze({ POST: "/voice-operator/route-transcript" }),
   "/api/operations/missions": Object.freeze({ GET: "/missions" }),
+  "/api/operations/missions/plan": Object.freeze({ POST: "/missions/plan" }),
+  "/api/operations/work-sessions": Object.freeze({ GET: "/work-sessions" }),
+  "/api/operations/work-sessions/plan": Object.freeze({ POST: "/work-sessions/plan" }),
+  "/api/operations/work-sessions/start": Object.freeze({ POST: "/work-sessions/start" }),
+  "/api/operations/approvals": Object.freeze({ GET: "/approvals" }),
+  "/api/operations/actions/dry-run": Object.freeze({ POST: "/actions/dry-run" }),
+  "/api/operations/actions/execute": Object.freeze({ POST: "/actions/execute" }),
+  "/api/operations/proofs": Object.freeze({ GET: "/proof/recent" }),
   "/api/operations/conclave/workspaces": Object.freeze({ GET: "/conclave/workspaces", POST: "/conclave/workspaces" }),
   "/api/operations/operational-replay": Object.freeze({ GET: "/operational-replay" }),
   "/api/operations/operational-replay/failures": Object.freeze({ GET: "/operational-replay/failures" }),
@@ -1548,6 +1560,7 @@ const DYNAMIC_CANONICAL_RUNTIME_TEMPLATES = Object.freeze([
   ["GET", "/projects/{project_id}/artifacts"],
   ["POST", "/projects/{project_id}/compile"],
   ["GET", "/conclave/workspaces/{mission_id}"],
+  ["POST", "/conclave/workspaces/{mission_id}/run"],
   ["POST", "/conclave/workspaces/{mission_id}/tasks/{task_id}/evidence"],
   ["POST", "/missions/{mission_id}/execute-step"],
   ["POST", "/approvals/{approval_id}/approve"],
@@ -1749,6 +1762,12 @@ export function resolveOperationalCapability(pathname, method) {
     if (!missionId || !taskId) return null;
     return operationalMethod({ POST: `/conclave/workspaces/${missionId}/tasks/${taskId}/evidence` }, method);
   }
+  const conclaveRun = pathname.match(/^\/api\/operations\/conclave\/workspaces\/([^/]+)\/run$/);
+  if (conclaveRun) {
+    const missionId = operationalIdentifier(conclaveRun[1]);
+    if (!missionId) return null;
+    return operationalMethod({ POST: `/conclave/workspaces/${missionId}/run` }, method);
+  }
   const conclaveWorkspace = pathname.match(/^\/api\/operations\/conclave\/workspaces\/([^/]+)$/);
   if (conclaveWorkspace) {
     const missionId = operationalIdentifier(conclaveWorkspace[1]);
@@ -1797,11 +1816,33 @@ export function resolveOperationalCapability(pathname, method) {
     if (!missionId) return null;
     return operationalMethod({ GET: `/mission-store/${missionId}` }, method);
   }
+  const missionStep = pathname.match(/^\/api\/operations\/missions\/([^/]+)\/execute-step$/);
+  if (missionStep) {
+    const missionId = operationalIdentifier(missionStep[1]);
+    if (!missionId) return null;
+    return operationalMethod({ POST: `/missions/${missionId}/execute-step` }, method);
+  }
   const missionDetail = pathname.match(/^\/api\/operations\/missions\/([^/]+)$/);
   if (missionDetail && missionDetail[1] !== "plan") {
     const missionId = operationalIdentifier(missionDetail[1]);
     if (!missionId) return null;
     return operationalMethod({ GET: `/missions/${missionId}` }, method);
+  }
+  const workSession = pathname.match(/^\/api\/operations\/work-sessions\/([^/]+)(?:\/(step|continue|pause|cancel|receipt))?$/);
+  if (workSession) {
+    const sessionId = operationalIdentifier(workSession[1]);
+    if (!sessionId) return null;
+    const action = workSession[2] ?? "read";
+    const expectedMethod = ["read", "receipt"].includes(action) ? "GET" : "POST";
+    return operationalMethod({
+      [expectedMethod]: `/work-sessions/${sessionId}${action === "read" ? "" : `/${action}`}`,
+    }, method);
+  }
+  const approval = pathname.match(/^\/api\/operations\/approvals\/([^/]+)\/(approve|deny)$/);
+  if (approval) {
+    const approvalId = operationalIdentifier(approval[1]);
+    if (!approvalId) return null;
+    return operationalMethod({ POST: `/approvals/${approvalId}/${approval[2]}` }, method);
   }
   const baseline = pathname.match(/^\/api\/operations\/runtime\/baselines\/([^/]+)$/);
   if (baseline) {
@@ -2027,10 +2068,27 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
     strictKeys(payload, new Set(["proposal"]));
     return { proposal: boundedText(payload.proposal, "proposal", 8_000) };
   }
+  if (/^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/run$/.test(runtimePath)) {
+    strictKeys(payload, new Set(["expectedWorkspaceVersion"]));
+    const expectedWorkspaceVersion = boundedText(
+      payload.expectedWorkspaceVersion,
+      "expectedWorkspaceVersion",
+      71,
+    );
+    if (!/^sha256:[a-f0-9]{64}$/.test(expectedWorkspaceVersion)) {
+      throw new GatewayFailure(
+        "request_invalid",
+        "expectedWorkspaceVersion must be an exact sha256 workspace version.",
+        "Unknown",
+        400,
+      );
+    }
+    return { expectedWorkspaceVersion };
+  }
   if (/^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/tasks\/[A-Za-z0-9_.:-]+\/evidence$/.test(runtimePath)) {
     strictKeys(payload, new Set([
-      "origin", "sourceClassification", "collector", "confidence", "claim",
-      "supportingArtifacts", "relationships", "operationalContext", "completeTask",
+      "origin", "sourceClassification", "confidence", "claim",
+      "supportingArtifacts", "relationships", "operationalContext",
     ]));
     const sourceClassification = boundedText(payload.sourceClassification, "sourceClassification", 80);
     if (!["model_native", "platform_knowledge", "tenant_knowledge", "retrieved_evidence", "live_external_source", "runtime_evidence"].includes(sourceClassification)) {
@@ -2055,13 +2113,11 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
     return {
       origin: boundedText(payload.origin, "origin", 2_000),
       sourceClassification,
-      collector: boundedText(payload.collector, "collector", 240, false),
       confidence,
       claim: boundedText(payload.claim, "claim", 8_000),
       supportingArtifacts,
       relationships,
       operationalContext,
-      completeTask: payload.completeTask === true,
     };
   }
   if (runtimePath === "/runtime-coordination/admissions") {
@@ -3170,9 +3226,15 @@ async function handleLocalApi(
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
     const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
-    if (resolved.method === "POST" && /^\/runtime-coordination\/admissions(?:\/[^/]+\/(?:cancel|challenge\/reissue))?$/.test(resolved.runtimePath)) {
+    if (
+      resolved.method === "POST"
+      && (
+        /^\/runtime-coordination\/admissions(?:\/[^/]+\/(?:cancel|challenge\/reissue))?$/.test(resolved.runtimePath)
+        || /^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/run$/.test(resolved.runtimePath)
+      )
+    ) {
       const requestKey = String(request.headers["idempotency-key"] ?? "");
-      if (!IDEMPOTENCY_KEY_PATTERN.test(requestKey)) throw new GatewayFailure("idempotency_key_required", "A valid Idempotency-Key is required for admission mutations.", "Unknown", 400);
+      if (!IDEMPOTENCY_KEY_PATTERN.test(requestKey)) throw new GatewayFailure("idempotency_key_required", "A valid Idempotency-Key is required for this governed mutation.", "Unknown", 400);
       if (payload?.idempotencyKey && payload.idempotencyKey !== requestKey) throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match the request body.", "Unknown", 400);
     }
     const data = await fetchLocalCapability(resolved, payload, request, config, localFetch);
@@ -3242,6 +3304,7 @@ const NON_OPERATIONAL_CLASSIFICATIONS = new Set([
   "unavailable",
 ]);
 const SHA256_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const ROOT_REVISION_PATTERN = /^[0-9a-f]{40}$/;
 const PRINCIPLE_ENTRY_PATTERN = /^NCR-[A-Z]+-[0-9]{4}@[0-9]+$/;
 
 const objectRecord = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -3292,6 +3355,30 @@ function validateCapabilityRegistryProjection(
   if (!projection) invalid("Capability Registry projection was not a JSON object.");
   if (projection.recordType !== CAPABILITY_REGISTRY_RECORD_TYPE) invalid("Capability Registry record type is invalid.");
   if (projection.schemaVersion !== CAPABILITY_REGISTRY_SCHEMA_VERSION) invalid("Capability Registry schema version is incompatible.");
+  const contractIdentity = objectRecord(projection.capabilityRegistryContract);
+  const sourceIdentity = objectRecord(projection.sourceIdentity);
+  if (
+    !contractIdentity
+    || contractIdentity.recordType !== CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE
+    || contractIdentity.schemaVersion !== CAPABILITY_REGISTRY_SCHEMA_VERSION
+    || contractIdentity.schemaDigest !== CAPABILITY_REGISTRY_SCHEMA_DIGEST
+    || contractIdentity.validatorVersion !== CAPABILITY_REGISTRY_VALIDATOR_VERSION
+  ) {
+    invalid("Capability Registry contract fingerprint is incompatible.");
+  }
+  if (
+    !sourceIdentity
+    || typeof sourceIdentity.rootRevision !== "string"
+    || !ROOT_REVISION_PATTERN.test(sourceIdentity.rootRevision)
+    || sourceIdentity.rootRevisionVerified !== true
+    || !["local_git_worktree", "program_alpha_source_attestation"].includes(sourceIdentity.verificationMethod)
+    || typeof sourceIdentity.sourceTreeDigest !== "string"
+    || !/^sha256:[0-9a-f]{64}$/.test(sourceIdentity.sourceTreeDigest)
+    || sourceIdentity.sourceTreeClean !== true
+    || sourceIdentity.environmentRevisionMatched !== true
+  ) {
+    invalid("Capability Registry root source identity is unverified.");
+  }
   if (projection.owner !== CAPABILITY_REGISTRY_OWNER || projection.projectionOwner !== CAPABILITY_REGISTRY_PROJECTION_OWNER) {
     invalid("Capability Registry is not the Runtime-owned canonical projection.");
   }
@@ -3993,6 +4080,26 @@ function validateRuntimeReadResponse(
   return envelope;
 }
 
+function validateDegradedReadinessEnvelope(body) {
+  const data = body?.data;
+  if (
+    body?.status !== "not_ready"
+    || !data
+    || typeof data !== "object"
+    || Array.isArray(data)
+    || data.processReady !== true
+    || data.platformContractReady !== false
+  ) {
+    throw new GatewayFailure(
+      "runtime_readiness_response_invalid",
+      "Runtime returned an invalid process-ready degraded readiness response.",
+      "Unknown",
+      502,
+    );
+  }
+  return body;
+}
+
 async function fetchRuntime(
   runtimePath,
   config,
@@ -4022,7 +4129,8 @@ async function fetchRuntime(
     if (response.status === 401 || response.status === 403) {
       throw new GatewayFailure("runtime_unauthorized", "Runtime rejected the server credential.", "Unauthorized", 502);
     }
-    if (!response.ok) {
+    const processReadyDegraded = runtimePath === "/ready" && response.status === 503;
+    if (!response.ok && !processReadyDegraded) {
       throw new GatewayFailure("runtime_unavailable", `Runtime returned status ${response.status}.`, "Unavailable", 503, response.status >= 500 || response.status === 429);
     }
     const declaredLength = Number(response.headers.get("content-length") ?? 0);
@@ -4036,7 +4144,10 @@ async function fetchRuntime(
     let body;
     try { body = JSON.parse(raw.toString("utf8")); }
     catch { throw new GatewayFailure("runtime_response_invalid", "Runtime returned invalid JSON.", "Unknown", 502); }
-    return validateRuntimeReadResponse(body, runtimePath, clock);
+    const validated = validateRuntimeReadResponse(body, runtimePath, clock);
+    return processReadyDegraded
+      ? validateDegradedReadinessEnvelope(validated)
+      : validated;
   } finally {
     clearTimeout(timer);
   }
@@ -4308,6 +4419,12 @@ async function fetchWithRetry(
 }
 
 function successfulEnvelope(config, tracker, route, body, entry, cached, stale, attempts) {
+  const processReadyDegraded = (
+    route === "/api/runtime/ready"
+    && body.status === "not_ready"
+    && body?.data?.processReady === true
+  );
+  const degraded = stale || processReadyDegraded;
   return {
     ok: true,
     data: body.data,
@@ -4319,10 +4436,14 @@ function successfulEnvelope(config, tracker, route, body, entry, cached, stale, 
       proofIds: body.proofIds,
       limitations: body.limitations
     },
-    gateway: gatewayMetadata(config, tracker, route, stale ? "Degraded" : "Healthy", entry, {
+    gateway: gatewayMetadata(config, tracker, route, degraded ? "Degraded" : "Healthy", entry, {
       attempts,
       cache: cacheMetadata(entry, cached, stale),
-      warning: stale ? "Runtime refresh failed; displaying the last validated response." : null
+      warning: stale
+        ? "Runtime refresh failed; displaying the last validated response."
+        : processReadyDegraded
+          ? "The Runtime process is reachable, but its readiness contract reports not_ready."
+          : null
     }),
     truth: TRUTH
   };

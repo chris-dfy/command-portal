@@ -2,7 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import { BrainCircuit, CheckCircle2, RefreshCw, Scale, ShieldAlert, TriangleAlert } from "lucide-react";
 import { DataPanel } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
-import { startConclaveInvestigation, type ConclaveRun } from "../lib/conclave-client";
+import {
+  conclaveRunFromWorkspace,
+  retryConclaveInvestigation,
+  startConclaveInvestigation,
+  type ConclaveRun,
+} from "../lib/conclave-client";
+import {
+  resolvePendingConclaveCreate,
+  type PendingConclaveCreate,
+} from "../lib/conclave-request-identity";
 import { localNexusClient, type ConclaveWorkspaceRecord, type OperationalSession } from "../lib/local-client";
 import { displayLabel } from "../lib/presentation";
 
@@ -15,6 +24,17 @@ const presentationText = (record: Record<string, unknown> | null, keys: string[]
   }
   return "";
 };
+const reconcileRefreshedRun = (
+  current: ConclaveRun,
+  refreshed: ConclaveWorkspaceRecord,
+): ConclaveRun => {
+  const recovered = conclaveRunFromWorkspace(refreshed);
+  return current.runPending
+    && recovered.runPending
+    && current.expectedWorkspaceVersion === refreshed.workspaceVersion
+    ? { ...current, workspace: refreshed }
+    : recovered;
+};
 
 export function ConclaveWorkspace({
   readiness = null,
@@ -24,6 +44,7 @@ export function ConclaveWorkspace({
   session?: OperationalSession;
 } = {}) {
   const [proposal, setProposal] = useState("");
+  const [pendingCreate, setPendingCreate] = useState<PendingConclaveCreate | null>(null);
   const [run, setRun] = useState<ConclaveRun | null>(null);
   const [workspaces, setWorkspaces] = useState<ConclaveWorkspaceRecord[]>([]);
   const [sourceState, setSourceState] = useState<"loading" | "available" | "empty" | "unavailable" | "stale">("loading");
@@ -52,8 +73,8 @@ export function ConclaveWorkspace({
       setSourceState(next.length ? "available" : "empty");
       setRun((current) => {
         const refreshed = current && next.find((item) => item.missionId === current.workspace.missionId);
-        if (refreshed) return { workspace: refreshed };
-        return current ?? (next[0] ? { workspace: next[0] } : null);
+        if (refreshed) return reconcileRefreshedRun(current, refreshed);
+        return current ?? (next[0] ? conclaveRunFromWorkspace(next[0]) : null);
       });
     } catch (caught) {
       setSourceState((current) => current === "available" || current === "stale" ? "stale" : "unavailable");
@@ -64,7 +85,9 @@ export function ConclaveWorkspace({
   useEffect(() => { void refreshDirectory(); }, [refreshDirectory]);
 
   async function startInvestigation() {
-    const value = proposal.trim();
+    const restartCanonical = workspace?.lifecyclePosture === "legacy_read_only"
+      && workspace.availableActions.includes("restart_canonical");
+    const value = (restartCanonical ? workspace.proposal : proposal).trim();
     if (!value || busy) return;
     if (!creationAllowed) {
       setError(creationReason);
@@ -72,14 +95,44 @@ export function ConclaveWorkspace({
     }
     setBusy(true); setError(null);
     try {
-      const next = await startConclaveInvestigation(value);
+      const createIdentity = resolvePendingConclaveCreate(
+        pendingCreate,
+        value,
+        () => globalThis.crypto.randomUUID(),
+      );
+      setPendingCreate(createIdentity);
+      const next = await startConclaveInvestigation(
+        value,
+        createIdentity.idempotencyKey,
+      );
+      setPendingCreate(null);
       setRun(next);
       setWorkspaces((current) => [next.workspace, ...current.filter((item) => item.missionId !== next.workspace.missionId)]);
       setSourceState("available");
       setProposal("");
+      if (next.runPending) {
+        setError(`${next.runError ?? "The governed run did not complete."} The created workspace was preserved; retry the exact idempotent run below.`);
+      }
     }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
+  }
+
+  async function retryInvestigation() {
+    if (!run?.runPending || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const next = await retryConclaveInvestigation(run);
+      setRun(next);
+      setWorkspaces((current) => [next.workspace, ...current.filter((item) => item.missionId !== next.workspace.missionId)]);
+      if (next.runPending) {
+        setError(`${next.runError ?? "The governed run did not complete."} The workspace remains preserved for another exact retry.`);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function refreshWorkspace() {
@@ -87,7 +140,7 @@ export function ConclaveWorkspace({
     setBusy(true); setError(null);
     try {
       const refreshed = await localNexusClient.conclaveWorkspace(workspace.missionId);
-      setRun((current) => current ? { ...current, workspace: refreshed } : current);
+      setRun((current) => current ? reconcileRefreshedRun(current, refreshed) : current);
       setWorkspaces((current) => current.map((item) => item.missionId === refreshed.missionId ? refreshed : item));
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
@@ -100,7 +153,7 @@ export function ConclaveWorkspace({
     </section>
 
     <DataPanel eyebrow="Investigation mission" title="Frame the operational question" icon={<Scale size={18} />}>
-      <div className="conclave-composer"><label htmlFor="conclave-workspace">Durable Runtime workspace</label><select id="conclave-workspace" value={workspace?.missionId ?? ""} onChange={(event) => { const selected = workspaces.find((item) => item.missionId === event.target.value); if (selected) setRun({ workspace: selected }); }} disabled={!workspaces.length}><option value="">{sourceState === "loading" ? "Loading Runtime workspaces…" : "No Runtime workspace available"}</option>{workspaces.map((item) => <option key={item.missionId} value={item.missionId}>{item.proposal} · {item.status}</option>)}</select><label htmlFor="conclave-proposal">What should Conclave investigate?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><span className="conclave-composer__actions">{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={!proposal.trim() || busy || !creationAllowed}><BrainCircuit size={16} />{busy ? "Coordinating…" : "Start governed investigation"}</button></span></div></div>
+      <div className="conclave-composer"><label htmlFor="conclave-workspace">Durable Runtime workspace</label><select id="conclave-workspace" value={workspace?.missionId ?? ""} onChange={(event) => { const selected = workspaces.find((item) => item.missionId === event.target.value); if (selected) setRun(conclaveRunFromWorkspace(selected)); }} disabled={!workspaces.length}><option value="">{sourceState === "loading" ? "Loading Runtime workspaces…" : "No Runtime workspace available"}</option>{workspaces.map((item) => <option key={item.missionId} value={item.missionId}>{item.proposal} · {item.displayStatus ?? item.status}</option>)}</select><label htmlFor="conclave-proposal">What should Conclave investigate?</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} /><div><small>{proposal.length.toLocaleString()} / 8,000</small><span className="conclave-composer__actions">{run?.runPending && <button className="conclave-secondary-action" onClick={() => void retryInvestigation()} disabled={busy}><RefreshCw size={16} />Run governed review</button>}{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={busy || !creationAllowed || (workspace ? !(workspace.lifecyclePosture === "legacy_read_only" && workspace.availableActions.includes("restart_canonical")) : !proposal.trim())}><BrainCircuit size={16} />{busy ? "Coordinating…" : workspace?.lifecyclePosture === "legacy_read_only" ? "Restart as canonical Review" : pendingCreate ? "Retry workspace creation" : "Start governed investigation"}</button></span></div></div>
       {error && <p className="conclave-error" role="alert">{error}</p>}
       <p className="boundary-note">Workspace directory: <strong>{sourceState}</strong>. The portal does not substitute a static one-shot review when durable Conclave is unavailable.</p>
       <p className="boundary-note">Investigation creation gate: <strong>{creationReason}</strong></p>

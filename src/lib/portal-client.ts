@@ -28,6 +28,7 @@ const EXECUTIVE_CONTINUITY_CLASSIFICATIONS = new Set([
   "non_blocking_degraded",
   "operator_action_required",
 ]);
+const ROOT_REVISION_PATTERN = /^[0-9a-f]{40}$/;
 
 const objectRecord = (value: unknown): Record<string, unknown> | null => (
   value && typeof value === "object" && !Array.isArray(value)
@@ -55,10 +56,31 @@ export function asCapabilityRegistryProjection(value: unknown): CapabilityRegist
     || Number.isNaN(Date.parse(projection.generatedAt))
     || !objectRecord(projection.constitutionalBasis)
     || !objectRecord(projection.verificationPolicy)
+    || !objectRecord(projection.capabilityRegistryContract)
+    || !objectRecord(projection.sourceIdentity)
     || !objectRecord(projection.summary)
     || !Array.isArray(projection.verificationReceipts)
     || !stringArray(projection.limitations)
     || projection.secretValuesExposed !== false
+  ) return null;
+  const contract = objectRecord(projection.capabilityRegistryContract);
+  const sourceIdentity = objectRecord(projection.sourceIdentity);
+  if (
+    contract?.recordType !== "nexus_capability_registry_contract_identity"
+    || contract.schemaVersion !== CAPABILITY_REGISTRY_SCHEMA_VERSION
+    || typeof contract.schemaDigest !== "string"
+    || !/^sha256:[a-f0-9]{64}$/.test(contract.schemaDigest)
+    || contract.validatorVersion !== "nexus.capability-registry-validator@1.0.0"
+    || typeof sourceIdentity?.rootRevision !== "string"
+    || !ROOT_REVISION_PATTERN.test(sourceIdentity.rootRevision)
+    || sourceIdentity?.rootRevisionVerified !== true
+    || !["local_git_worktree", "program_alpha_source_attestation"].includes(
+      String(sourceIdentity?.verificationMethod ?? ""),
+    )
+    || typeof sourceIdentity?.sourceTreeDigest !== "string"
+    || !/^sha256:[a-f0-9]{64}$/.test(sourceIdentity.sourceTreeDigest)
+    || sourceIdentity?.sourceTreeClean !== true
+    || sourceIdentity?.environmentRevisionMatched !== true
   ) return null;
   const authority = objectRecord(projection.authority);
   if (!authority || authority.authorityGranted !== false || authority.executionAuthorityIntroduced === true) return null;
