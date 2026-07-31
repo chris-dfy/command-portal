@@ -14,6 +14,7 @@ import {
   type NexusThemeColors,
   type NexusThemeId,
 } from "./themes";
+import { resolveAccessibleAccent } from "./accentContrast.js";
 
 export type AppearanceSettings = {
   theme: NexusThemeId;
@@ -196,12 +197,20 @@ export function resolveAppearance(
     : highContrast
       ? NEXUS_HIGH_CONTRAST_COLORS[colorScheme]
       : theme.colors;
+  const accentColor = forcedColors
+    ? colors.accent
+    : resolveAccessibleAccent(
+      highContrast ? colors.accent : settings.accentColor,
+      colors.accent,
+      colors.background,
+      colors.text,
+    );
 
   return {
     theme,
     colorScheme,
     colors,
-    accentColor: highContrast ? colors.accent : settings.accentColor,
+    accentColor,
     reducedMotion: settings.reducedMotion || systemAppearance.prefersReducedMotion,
     highContrast,
     forcedColors,
