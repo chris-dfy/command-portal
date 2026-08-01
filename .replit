@@ -1,6 +1,6 @@
 run = "npm run start"
 entrypoint = "server/index.mjs"
-modules = ["nodejs-20"]
+modules = ["nodejs-22"]
 
 [deployment]
 build = ["sh", "-c", "npm ci && npm run build"]
