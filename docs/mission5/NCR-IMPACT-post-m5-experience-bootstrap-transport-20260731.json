@@ -1,0 +1,49 @@
+{
+  "impact_id": "NCR-IMPACT-post-m5-experience-bootstrap-transport-20260731",
+  "artifact_id": "nexus.experience.post-m5-full-scale-bootstrap-transport",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0002@1",
+      "NCR-CON-0006@1",
+      "NCR-CON-0019@1",
+      "NCR-CON-0020@1",
+      "NCR-CON-0026@1",
+      "NCR-CON-0027@1",
+      "NCR-CON-0028@1",
+      "NCR-CON-0029@1",
+      "NCR-CON-0030@1",
+      "NCR-CON-0033@1",
+      "NCR-ARC-0008@1",
+      "NCR-ARC-0012@1",
+      "NCR-ARC-0017@1",
+      "NCR-ARC-0019@1",
+      "NCR-ENG-0006@1",
+      "NCR-ENG-0008@1",
+      "NCR-ENG-0010@1",
+      "NCR-ENG-0011@1",
+      "NCR-ENG-0018@1",
+      "NCR-OPS-0028@1",
+      "NCR-OPS-0029@1",
+      "NCR-OPS-0030@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:85cc31f78ba6ac34fc58f02b36f6bc469ebf3c21a6343e46fc84bf66a29d3bd2"
+  },
+  "disposition": "no_constitutional_change",
+  "rationale": "This additive Experience transport correction implements the existing Runtime-truth, bounded-read, and honest capability-state contracts without changing constitutional meaning. Large same-origin JSON responses are gzip encoded only when the client accepts gzip, retain exact decoded content and projection digests, carry correct Content-Length and Vary headers, and remain no-store. The Experience Gateway explicitly requests gzip from the Runtime while retaining the existing four-MiB decoded Capability Registry ceiling, strict JSON and projection validation, current-verification admission, one Registry read per bootstrap, child-read concurrency bounded to three, independent failure envelopes, tenant and workspace binding, secret exclusion, and fail-closed behavior. Full-scale tests use exactly 1,396 unique action records and verify gzip, identity, and explicit gzip rejection paths without truncating Runtime-owned truth. No generic proxy, mutation route, execution Authority, capability promotion, provider configuration, production claim, secret, data migration, or historical Mission record mutation is introduced.",
+  "evidence_references": [
+    "command:./nexusctl constitution-registry validate (valid=true; NCR-1.0.0; sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa)",
+    "command:constitutional context resolution for 22 direct principles (sha256:85cc31f78ba6ac34fc58f02b36f6bc469ebf3c21a6343e46fc84bf66a29d3bd2)",
+    "command:npm run check (277 passed; 0 failed; TypeScript noEmit passed; Vite production build passed; 1641 modules transformed; sealed asset verification passed)",
+    "command:node --test --test-name-pattern='full-scale browser bootstrap|one browser bootstrap|actual gzipped Runtime' tests/experience-gateway.test.mjs (4 passed; 0 failed)",
+    "path:server/portal-server.mjs",
+    "path:tests/experience-gateway.test.mjs",
+    "rollback:revert only the scoped Experience bootstrap transport commit to restore identity-only JSON responses; no Runtime, root, secret, data, Mission, or deployment rollback is required"
+  ],
+  "conflicts": [],
+  "recorded_by": "NEXUS Engineering",
+  "recorded_at": "2026-08-01T03:57:08Z"
+}
