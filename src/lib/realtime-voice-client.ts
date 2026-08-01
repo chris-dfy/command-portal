@@ -16,7 +16,9 @@ type RealtimeEvent = {
   type?: string;
   transcript?: string;
   delta?: string;
-  error?: { message?: string };
+  response?: { id?: string };
+  response_id?: string;
+  error?: { message?: string; code?: string };
 };
 
 export class RealtimeVoiceClient {
@@ -33,6 +35,8 @@ export class RealtimeVoiceClient {
   private cancelling = false;
   /** A finalized transcript arrived while cancelling; create its response after response.done. */
   private queuedCreate = false;
+  /** id of the response currently in flight; used to target cancellation and ignore stale events. */
+  private activeResponseId: string | null = null;
   private microphoneMuted = false;
   private outputMuted = false;
   private responseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -129,6 +133,7 @@ export class RealtimeVoiceClient {
     this.responseActive = false;
     this.cancelling = false;
     this.queuedCreate = false;
+    this.activeResponseId = null;
     this.callbacks.onAmplitude(0);
   }
 
@@ -153,12 +158,14 @@ export class RealtimeVoiceClient {
     catch { return; }
     switch (event.type) {
       case "input_audio_buffer.speech_started":
-        if (this.responseActive) {
-          this.send({ type: "response.cancel" });
+        if (this.responseActive && !this.cancelling) {
+          this.send(this.activeResponseId
+            ? { type: "response.cancel", response_id: this.activeResponseId }
+            : { type: "response.cancel" });
           this.send({ type: "output_audio_buffer.clear" });
           this.cancelling = true;
           this.callbacks.onState("interrupted");
-        } else this.callbacks.onState("listening");
+        } else if (!this.responseActive) this.callbacks.onState("listening");
         break;
       case "input_audio_buffer.speech_stopped":
         // Liveness guard: something (finalized transcript -> creation, or a
@@ -168,6 +175,7 @@ export class RealtimeVoiceClient {
         break;
       case "response.created":
         this.responseActive = true;
+        this.activeResponseId = event.response?.id ?? null;
         this.startResponseBoundary();
         this.callbacks.onState("thinking");
         break;
@@ -183,6 +191,7 @@ export class RealtimeVoiceClient {
         break;
       case "response.output_audio.delta":
       case "response.audio.delta":
+        if (this.cancelling || this.isStaleResponseEvent(event)) break;
         this.clearResponseBoundary();
         this.speaking = true;
         this.callbacks.onState("speaking");
@@ -191,6 +200,7 @@ export class RealtimeVoiceClient {
       case "response.audio_transcript.delta":
       case "response.output_text.delta":
       case "response.text.delta":
+        if (this.cancelling || this.isStaleResponseEvent(event)) break;
         this.clearResponseBoundary();
         this.speaking = true;
         this.assistantTranscript += event.delta ?? "";
@@ -198,20 +208,41 @@ export class RealtimeVoiceClient {
         this.callbacks.onState("speaking");
         break;
       case "response.done":
-        this.clearResponseBoundary();
-        this.speaking = false;
-        this.responseActive = false;
-        this.cancelling = false;
-        this.assistantTranscript = "";
-        if (this.queuedCreate) {
-          this.queuedCreate = false;
-          this.createResponse();
-        } else this.callbacks.onState("listening");
+        if (this.isStaleResponseEvent(event)) break;
+        this.settleResponse();
         break;
-      case "error":
+      case "error": {
+        // A cancellation race is benign: the response finished before our
+        // response.cancel arrived. Settle locally instead of failing the session.
+        const message = event.error?.message ?? "";
+        if (this.cancelling && /cancell?ation failed|no active response/i.test(message)) {
+          this.settleResponse();
+          break;
+        }
         this.fail(event.error?.message ?? "The live voice provider reported an error.");
         break;
+      }
     }
+  }
+
+  /** True when the event carries a response id that is not the active response. */
+  private isStaleResponseEvent(event: RealtimeEvent) {
+    const id = event.response?.id ?? event.response_id;
+    return Boolean(id && this.activeResponseId && id !== this.activeResponseId);
+  }
+
+  /** Terminal handling for the active response (done, cancelled, or cancel race). */
+  private settleResponse() {
+    this.clearResponseBoundary();
+    this.speaking = false;
+    this.responseActive = false;
+    this.cancelling = false;
+    this.activeResponseId = null;
+    this.assistantTranscript = "";
+    if (this.queuedCreate) {
+      this.queuedCreate = false;
+      this.createResponse();
+    } else this.callbacks.onState("listening");
   }
 
   private createResponse() {
