@@ -11,7 +11,7 @@
     "dev:server": "PORT=4175 node --watch server/index.mjs",
     "build": "tsc --noEmit && vite build",
     "start": "node server/index.mjs",
-    "test": "node --test",
+    "test": "node --import ./tests/_sanitize-env.mjs --test",
     "verify:build": "node tests/verify-build-assets.mjs",
     "verify:engines": "node tests/verify-engines.mjs",
     "check": "npm run verify:engines && npm run build && npm run test && npm run verify:build"
