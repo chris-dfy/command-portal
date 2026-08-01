@@ -1,4 +1,4 @@
-import { OPERATIONAL_SESSION_INVALID_EVENT, operationalSessionClient } from "./local-client";
+import { OPERATIONAL_SESSION_INVALID_EVENT, operationalSessionClient } from "./local-client.ts";
 
 export type RealtimeVoiceState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "interrupted" | "error";
 
@@ -41,7 +41,13 @@ export class RealtimeVoiceClient {
   private outputMuted = false;
   private responseTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly audio: HTMLAudioElement, private readonly callbacks: RealtimeVoiceCallbacks) {}
+  private readonly audio: HTMLAudioElement;
+  private readonly callbacks: RealtimeVoiceCallbacks;
+
+  constructor(audio: HTMLAudioElement, callbacks: RealtimeVoiceCallbacks) {
+    this.audio = audio;
+    this.callbacks = callbacks;
+  }
 
   static supported() {
     return typeof window !== "undefined" && "RTCPeerConnection" in window && Boolean(navigator.mediaDevices?.getUserMedia);
