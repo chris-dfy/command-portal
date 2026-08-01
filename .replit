@@ -3,7 +3,7 @@ entrypoint = "server/index.mjs"
 modules = ["nodejs-22"]
 
 [deployment]
-build = ["sh", "-c", "npm ci && npm run build"]
+build = ["sh", "-c", "npm ci && npm run verify:engines && npm run build"]
 run = ["sh", "-c", "npm run start"]
 deploymentTarget = "cloudrun"
 
