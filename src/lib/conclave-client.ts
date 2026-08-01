@@ -4,6 +4,12 @@ import {
   stableConclaveRunIdempotencyKey,
   type ConclaveWorkspaceCreateRequest,
 } from "./conclave-request-identity";
+import {
+  createConclaveWorkspaceOnly,
+  createdConclaveRunIdentity,
+  invokeConclaveRun,
+} from "./conclave-action-flow";
+import { isVerifiedCanonicalReview } from "./conclave-directory";
 
 export type ConclaveRun = {
   workspace: ConclaveWorkspaceRecord;
@@ -12,13 +18,6 @@ export type ConclaveRun = {
   runIdempotencyKey: string;
   expectedWorkspaceVersion: string;
 };
-
-function verifiedTerminalReview(workspace: ConclaveWorkspaceRecord) {
-  return workspace.displayStatus === "completed"
-    && workspace.reviewCompleted === true
-    && workspace.reviewIntegrityVerified === true
-    && workspace.terminalReceiptVerified === true;
-}
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -33,6 +32,21 @@ export function conclaveRunFromWorkspace(
   };
 }
 
+export function createdConclaveRunFromWorkspace(
+  workspace: ConclaveWorkspaceRecord,
+): ConclaveRun {
+  if (workspace.lifecyclePosture !== "canonical_operational" || workspace.reviewCompleted === true) {
+    return conclaveRunFromWorkspace(workspace);
+  }
+  return {
+    workspace,
+    ...createdConclaveRunIdentity(
+      workspace,
+      stableConclaveRunIdempotencyKey(workspace.workspaceVersion),
+    ),
+  };
+}
+
 async function executeAndRefresh(
   created: ConclaveWorkspaceRecord,
   runIdempotencyKey: string,
@@ -41,14 +55,17 @@ async function executeAndRefresh(
   let lastError = "The governed Conclave run did not reach a verified terminal review.";
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const executed = await localNexusClient.runConclaveWorkspace(
-        created.missionId,
-        created.workspaceVersion,
-        runIdempotencyKey,
+      const executed = await invokeConclaveRun(
+        {
+          workspace: created,
+          expectedWorkspaceVersion: created.workspaceVersion,
+          runIdempotencyKey,
+        },
+        localNexusClient.runConclaveWorkspace,
       );
       const workspace = await localNexusClient.conclaveWorkspace(created.missionId)
         .catch(() => executed);
-      if (!verifiedTerminalReview(workspace)) {
+      if (!isVerifiedCanonicalReview(workspace)) {
         throw new Error(
           "Conclave returned without completed, reviewIntegrityVerified, and terminalReceiptVerified postconditions.",
         );
@@ -68,7 +85,7 @@ async function executeAndRefresh(
 
   const recovered = await localNexusClient.conclaveWorkspace(created.missionId)
     .catch(() => created);
-  if (verifiedTerminalReview(recovered)) {
+  if (isVerifiedCanonicalReview(recovered)) {
     return {
       workspace: recovered,
       runPending: false,
@@ -85,18 +102,16 @@ async function executeAndRefresh(
   };
 }
 
-export async function startConclaveInvestigation(
+export async function createConclaveInvestigation(
   request: ConclaveWorkspaceCreateRequest,
   createIdempotencyKey: string,
 ): Promise<ConclaveRun> {
-  const workspace = await localNexusClient.createConclaveWorkspace(
+  return createConclaveWorkspaceOnly(
     request,
     createIdempotencyKey,
+    localNexusClient.createConclaveWorkspace,
+    createdConclaveRunFromWorkspace,
   );
-  const runIdempotencyKey = stableConclaveRunIdempotencyKey(
-    workspace.workspaceVersion,
-  );
-  return executeAndRefresh(workspace, runIdempotencyKey);
 }
 
 export async function retryConclaveInvestigation(run: ConclaveRun): Promise<ConclaveRun> {

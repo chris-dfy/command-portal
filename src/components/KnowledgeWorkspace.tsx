@@ -16,16 +16,20 @@ import {
   type OperationalSession,
 } from "../lib/local-client";
 import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 import type { CapabilityRegistryProjection, RuntimeSnapshot } from "../lib/types";
 import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 
 type RuntimeRecord = Record<string, unknown>;
-type PendingKnowledgeIntake = {
-  payload: Parameters<typeof localNexusClient.knowledgeIntake>[0];
-  idempotencyKey: string;
-};
+type PendingKnowledgeIntake = PrivateDraftOperation<Parameters<typeof localNexusClient.knowledgeIntake>[0]>;
 type SourceState = "loading" | "available" | "empty" | "unavailable";
 type KnowledgeSources = {
   readiness: RuntimeRecord | null;
@@ -148,6 +152,7 @@ export function KnowledgeWorkspace({
   const [intakeSource, setIntakeSource] = useState<"model_native" | "platform_knowledge" | "tenant_knowledge" | "retrieved_evidence" | "live_external_source" | "runtime_evidence">("runtime_evidence");
   const [completeIntakeTask, setCompleteIntakeTask] = useState(false);
   const [expectedDeployedCommit, setExpectedDeployedCommit] = useState("");
+  const [pendingBaseline, setPendingBaseline] = useState<PrivateDraftOperation<Parameters<typeof localNexusClient.establishRuntimeBaseline>[0]> | null>(null);
   const [pendingIntake, setPendingIntake] = useState<PendingKnowledgeIntake | null>(null);
   const [busy, setBusy] = useState<"" | "intake" | "baseline" | "candidate" | "promotion">("");
   const [errors, setErrors] = useState<string[]>([]);
@@ -353,16 +358,16 @@ export function KnowledgeWorkspace({
 
   async function submitIntake() {
     if (!intakeGate.allowed) { setErrors([intakeGate.reason]); return; }
-    let operation = pendingIntake;
-    if (!operation) {
+    let staged = pendingIntake;
+    if (!staged) {
       const missionId = identifier(intakeMission ?? {}, ["missionId", "mission_id", "id"]);
       const confidence = Number(intakeConfidence);
       if (!missionId || !intakeTaskId || !intakeOrigin.trim() || !intakeClaim.trim() || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
         setErrors(["Select a mission task and provide a valid origin, factual claim, and confidence between zero and one."]);
         return;
       }
-      operation = {
-        payload: {
+      staged = snapshotPrivateDraftOperation(
+        {
           missionId,
           taskId: intakeTaskId,
           origin: intakeOrigin.trim(),
@@ -374,35 +379,46 @@ export function KnowledgeWorkspace({
           operationalContext: {},
           completeTask: completeIntakeTask,
         },
-        idempotencyKey: `knowledge-intake-${globalThis.crypto.randomUUID()}`,
-      };
-      setPendingIntake(operation);
+        `knowledge-intake-${globalThis.crypto.randomUUID()}`,
+      );
+      setPendingIntake(staged);
       setIntakeOrigin("");
       setIntakeClaim("");
       setCompleteIntakeTask(false);
     }
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingIntake(operation);
     setBusy("intake"); setErrors([]); setOperationResult(null);
     try {
       const result = await localNexusClient.knowledgeIntake(operation.payload, operation.idempotencyKey);
       setOperationResult(result);
-      setPendingIntake(null);
+      setPendingIntake(clearPrivateDraftAfterSuccess());
       await refresh();
     } catch (caught) {
+      setPendingIntake(retainPrivateDraftAfterFailure(operation));
       setErrors([caught instanceof Error ? caught.message : "Knowledge intake failed safely."]);
     } finally { setBusy(""); }
   }
 
   async function establishBaseline() {
     if (!baselineGate.allowed) { setErrors([baselineGate.reason]); return; }
-    const submittedExpectedCommit = expectedDeployedCommit.trim();
-    setExpectedDeployedCommit("");
+    const staged = pendingBaseline ?? snapshotPrivateDraftOperation(
+      expectedDeployedCommit.trim()
+        ? { expectedDeployedCommit: expectedDeployedCommit.trim() }
+        : {},
+      `baseline-${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingBaseline) setExpectedDeployedCommit("");
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingBaseline(operation);
     setBusy("baseline"); setErrors([]); setOperationResult(null);
     try {
-      const payload = submittedExpectedCommit ? { expectedDeployedCommit: submittedExpectedCommit } : {};
-      const result = await localNexusClient.establishRuntimeBaseline(payload, `baseline-${globalThis.crypto.randomUUID()}`);
+      const result = await localNexusClient.establishRuntimeBaseline(operation.payload, operation.idempotencyKey);
+      setPendingBaseline(clearPrivateDraftAfterSuccess());
       setOperationResult(result);
       await refresh();
     } catch (caught) {
+      setPendingBaseline(retainPrivateDraftAfterFailure(operation));
       setErrors([caught instanceof Error ? caught.message : "Runtime baseline creation failed safely."]);
     } finally { setBusy(""); }
   }
@@ -528,8 +544,8 @@ export function KnowledgeWorkspace({
         <p className="boundary-note">Promotion history is read from the Runtime. Mission completion never creates these records automatically.</p>
       </DataPanel>
       <DataPanel eyebrow="Runtime Baseline" title="Capture the deployed operational baseline" icon={<FileCheck2 size={18} />}>
-        <label className="operation-field"><span>Expected deployed commit (optional)</span><input value={expectedDeployedCommit} onChange={(event) => setExpectedDeployedCommit(event.target.value)} placeholder="Full source commit for compare-and-record" autoComplete="off" spellCheck={false} /></label>
-        <button className="nx-action" onClick={() => void establishBaseline()} disabled={Boolean(busy) || !baselineGate.allowed}><FileCheck2 size={14} />{busy === "baseline" ? "Recording Runtime baseline…" : "Record Runtime baseline"}</button>
+        <label className="operation-field"><span>Expected deployed commit (optional)</span><input value={expectedDeployedCommit} onChange={(event) => { setExpectedDeployedCommit(event.target.value); setPendingBaseline(null); }} placeholder="Full source commit for compare-and-record" autoComplete="off" spellCheck={false} /></label>
+        <button className="nx-action" onClick={() => void establishBaseline()} disabled={Boolean(busy) || !baselineGate.allowed}><FileCheck2 size={14} />{busy === "baseline" ? "Recording Runtime baseline…" : pendingBaseline ? "Retry exact Runtime baseline" : "Record Runtime baseline"}</button>
         <p className="boundary-note">Baseline gate: {baselineGate.reason}</p>
         <p className="boundary-note">The Runtime observes its own deployed identity, capability state, routes, missions, Replay, receipts, stores, and Edge posture. The browser may only provide an optional expected commit for mismatch detection.</p>
       </DataPanel>

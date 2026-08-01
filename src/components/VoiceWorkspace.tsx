@@ -9,6 +9,15 @@ import type { CanonicalActionAvailability } from "../lib/portal-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
 import { browserSpeechAvailability, recognizeBrowserSpeech, speakBrowserResponse } from "../lib/browser-speech";
 import { runBoundedTask } from "../lib/request-coordination.mjs";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  executeExplicitPrivateDraftAction,
+  retainPrivateDraftAfterFailure,
+  shouldPresentPrivateDraft,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 
 type VoiceStatus = {
@@ -24,13 +33,13 @@ type VoiceStatus = {
 };
 
 type TranscriptEntry = { speaker: "You" | "NEXUS"; text: string };
-type PendingVoiceRequest = {
+type VoiceRequestPayload = {
   transcript: string;
   source: "browser_speech" | "text_fallback";
   fallbackContext: string;
-  historyAlreadyRecorded: true;
-  idempotencyKey: string;
+  historyAlreadyRecorded: boolean;
 };
+type PendingVoiceRequest = PrivateDraftOperation<VoiceRequestPayload>;
 const GOVERNED_VOICE_RESPONSE_TIMEOUT_MS = 12_000;
 
 export function VoiceWorkspace({
@@ -118,13 +127,26 @@ export function VoiceWorkspace({
       onError: (errorMessage, code) => {
         setMessage(errorMessage);
         const captured = latestUserTranscript.current.trim();
-        if (code === "response_timeout" && captured && textAction.available) {
-          void routeGovernedTranscript(
-            captured,
-            "browser_speech",
-            "Live voice timed out, so the captured utterance was sent through the governed Runtime Voice Operator.",
-            true,
+        if (code === "response_timeout" && captured) {
+          const staged = snapshotPrivateDraftOperation(
+            {
+              transcript: captured,
+              source: "browser_speech" as const,
+              fallbackContext: "Live voice timed out; the captured utterance was sent only after your explicit governed Voice action.",
+              historyAlreadyRecorded: true,
+            },
+            `voice-transcript:${globalThis.crypto.randomUUID()}`,
           );
+          setPendingRequest((current) => (
+            current
+            && current.payload.transcript === staged.payload.transcript
+            && current.payload.source === staged.payload.source
+            && current.payload.fallbackContext === staged.payload.fallbackContext
+            && current.payload.historyAlreadyRecorded === staged.payload.historyAlreadyRecorded
+              ? current
+              : staged
+          ));
+          setMessage(`${errorMessage} The captured transcript has not been sent. Use the explicit governed Voice action to send it.`);
         }
       },
     });
@@ -175,50 +197,60 @@ export function VoiceWorkspace({
       setMessage(textAction.reason);
       return;
     }
-    const operation = retryRequest ?? {
-      transcript: submittedTranscript,
-      source,
-      fallbackContext,
-      historyAlreadyRecorded: true as const,
-      idempotencyKey: `voice-transcript:${globalThis.crypto.randomUUID()}`,
-    };
+    const staged = retryRequest ?? snapshotPrivateDraftOperation(
+      {
+        transcript: submittedTranscript,
+        source,
+        fallbackContext,
+        historyAlreadyRecorded,
+      },
+      `voice-transcript:${globalThis.crypto.randomUUID()}`,
+    );
+    const presentOperatorTranscript = shouldPresentPrivateDraft(
+      staged,
+      staged.payload.historyAlreadyRecorded,
+    );
+    const operation = beginPrivateDraftAttempt(staged);
     setPendingRequest(operation);
-    setTranscript("");
-    if (!historyAlreadyRecorded) {
+    if (!retryRequest) setTranscript("");
+    if (presentOperatorTranscript) {
       setHistory((items) => [
-        { speaker: "You", text: operation.transcript } as TranscriptEntry,
+        { speaker: "You", text: operation.payload.transcript } as TranscriptEntry,
         ...items,
       ].slice(0, 10));
     }
     setBusy(true);
     setMessage(null);
     try {
-      const response = await runBoundedTask(
-        (signal) => localNexusClient.routeTranscript(
-          operation.transcript,
-          operation.source,
-          signal,
-          operation.idempotencyKey,
+      const response = await executeExplicitPrivateDraftAction(
+        operation,
+        (explicitOperation) => runBoundedTask(
+          (signal) => localNexusClient.routeTranscript(
+            explicitOperation.payload.transcript,
+            explicitOperation.payload.source,
+            signal,
+            explicitOperation.idempotencyKey,
+          ),
+          { timeoutMs: GOVERNED_VOICE_RESPONSE_TIMEOUT_MS },
         ),
-        { timeoutMs: GOVERNED_VOICE_RESPONSE_TIMEOUT_MS },
       );
       const responseText = response.spokenSummary?.trim()
         || response.event?.failureReason?.trim()
         || "NEXUS recorded the request without a spoken summary.";
       const proofId = response.proof?.proofId ?? response.event?.proofId;
       const receiptId = response.receipt?.receiptId ?? response.event?.receiptId;
-      const spoken = operation.source === "browser_speech" && !nexusMuted && speakBrowserResponse(responseText);
+      const spoken = operation.payload.source === "browser_speech" && !nexusMuted && speakBrowserResponse(responseText);
       setRouteResult(response);
-      setPendingRequest(null);
+      setPendingRequest(clearPrivateDraftAfterSuccess());
       setAssistantTranscript(responseText);
       setHistory((items) => [
         { speaker: "NEXUS", text: responseText } as TranscriptEntry,
         ...items,
       ].slice(0, 10));
       setMessage([
-        operation.fallbackContext,
+        operation.payload.fallbackContext,
         "Text request was processed by the governed NEXUS Runtime Voice Operator.",
-        operation.source === "browser_speech"
+        operation.payload.source === "browser_speech"
           ? spoken
             ? "The browser is playing the actual Runtime response locally."
             : "Browser speech output is unavailable; the actual Runtime response remains visible as text."
@@ -227,9 +259,10 @@ export function VoiceWorkspace({
         receiptId ? `Receipt ${receiptId}.` : "",
       ].filter(Boolean).join(" "));
     } catch (error) {
+      setPendingRequest(retainPrivateDraftAfterFailure(operation));
       setMessage(messageFrom(error));
     } finally {
-      if (latestUserTranscript.current.trim() === operation.transcript) latestUserTranscript.current = "";
+      if (latestUserTranscript.current.trim() === operation.payload.transcript) latestUserTranscript.current = "";
       setBusy(false);
     }
   }
@@ -276,9 +309,9 @@ export function VoiceWorkspace({
         </button>}
       </div>
       <div className="voice-text-fallback">
-        <textarea value={transcript} onChange={(event) => { setTranscript(event.target.value); setPendingRequest(null); }} disabled={!textAction.available} placeholder={textAction.available ? "Or type a request for the governed Runtime Voice Operator" : "Runtime Voice Operator is unavailable"} autoComplete="off" />
+        <textarea value={transcript} onChange={(event) => { setTranscript(event.target.value); setPendingRequest((current) => current?.attempts === 0 && current.payload.historyAlreadyRecorded ? current : null); }} disabled={!textAction.available} placeholder={textAction.available ? "Or type a request for the governed Runtime Voice Operator" : "Runtime Voice Operator is unavailable"} autoComplete="off" />
         {browserSpeech.input && <button onClick={() => void useBrowserMicrophone()} disabled={!textAction.available || busy || browserListening} title="Uses this browser's speech recognition, then submits the transcript through the governed Runtime Voice Operator"><Mic size={17} /> {browserListening ? "Listening…" : "Use browser microphone"}</button>}
-        {pendingRequest && <button onClick={() => void routeGovernedTranscript("", pendingRequest.source, pendingRequest.fallbackContext, true, pendingRequest)} disabled={!textAction.available || busy}><Send size={17} /> Retry exact governed request</button>}
+        {pendingRequest && <button onClick={() => void routeGovernedTranscript("", pendingRequest.payload.source, pendingRequest.payload.fallbackContext, pendingRequest.payload.historyAlreadyRecorded, pendingRequest)} disabled={!textAction.available || busy} title={textAction.available ? undefined : textAction.reason}><Send size={17} /> {pendingRequest.attempts === 0 ? "Send captured transcript through governed Voice" : "Retry exact governed Voice request"}</button>}
         <button onClick={() => void sendText()} disabled={!textAction.available || busy || !transcript.trim()}><Send size={17} /> Send text</button>
       </div>
       <p className="boundary-note">{browserSpeech.input ? "Browser microphone fallback is available and bounded to 8 seconds." : "Browser speech recognition is unavailable; typed governed fallback remains available."} {browserSpeech.output ? "Browser speech playback can read the actual Runtime response aloud." : "Browser speech playback is unavailable; responses remain visible as text."}</p>

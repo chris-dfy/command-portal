@@ -10,6 +10,15 @@ import {
 import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
 import { successfulDocumentUploadMessage } from "../lib/document-intake-result";
 import type { CapabilityRegistryProjection } from "../lib/types";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
+
+type IntakeQueryPayload = { question: string; projectId?: string };
 
 export function DocumentIntake({
   capabilityRegistry = null,
@@ -21,6 +30,7 @@ export function DocumentIntake({
   const [history, setHistory] = useState<IntakeHistory | null>(null);
   const [projectId, setProjectId] = useState("");
   const [question, setQuestion] = useState("");
+  const [pendingQuery, setPendingQuery] = useState<PrivateDraftOperation<IntakeQueryPayload> | null>(null);
   const [answer, setAnswer] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -106,16 +116,35 @@ export function DocumentIntake({
   }
 
   async function ask() {
-    const submittedQuestion = question.trim();
-    if (!submittedQuestion) return;
+    if (!pendingQuery && !question.trim()) return;
     if (!queryAction.available) {
       setAnswer(queryAction.reason);
       return;
     }
-    setQuestion("");
+    const staged = pendingQuery ?? snapshotPrivateDraftOperation(
+      {
+        question: question.trim(),
+        ...(projectId.trim() ? { projectId: projectId.trim() } : {}),
+      },
+      `intake-query:${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingQuery) setQuestion("");
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingQuery(operation);
     setBusy(true); setAnswer(null);
-    try { setAnswer((await localNexusClient.intakeQuery(submittedQuestion, projectId.trim() || undefined)).answer); }
-    catch (error) { setAnswer(messageFrom(error)); }
+    try {
+      const result = await localNexusClient.intakeQuery(
+        operation.payload.question,
+        operation.payload.projectId,
+        operation.idempotencyKey,
+      );
+      setPendingQuery(clearPrivateDraftAfterSuccess());
+      setAnswer(result.answer);
+    }
+    catch (error) {
+      setPendingQuery(retainPrivateDraftAfterFailure(operation));
+      setAnswer(messageFrom(error));
+    }
     finally { setBusy(false); }
   }
 
@@ -131,13 +160,13 @@ export function DocumentIntake({
         <button type="button" onClick={() => input.current?.click()} disabled={busy || !uploadAction.available} title={uploadAction.available ? undefined : uploadAction.reason}>Choose files</button>
         <input ref={input} className="sr-only" type="file" multiple accept=".pdf,.docx,.pptx,.xlsx,.csv,.json,.html,.htm,.txt,.md,.eml,.mbox" onChange={(event) => void upload(Array.from(event.target.files ?? []))} disabled={!uploadAction.available} />
       </div>
-      <label className="workspace-field"><span>Project ID for evidence linkage</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="PROJECT-… or leave blank" /></label>
+      <label className="workspace-field"><span>Project ID for evidence linkage</span><input value={projectId} onChange={(event) => { setProjectId(event.target.value); setPendingQuery(null); }} placeholder="PROJECT-… or leave blank" /></label>
       {message && <p className="workspace-message" role="status">{message}</p>}
       <p className="boundary-note">Upload action: {uploadAction.reason}</p>
     </DataPanel>
 
     <DataPanel eyebrow="Evidence-grounded" title="Ask ingested sources" icon={<Search size={18} />}>
-      <div className="workspace-stack"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What requirements, prices, quantities, risks, and deadlines are supported by the source evidence?" autoComplete="off" /><button onClick={() => void ask()} disabled={busy || !question.trim() || !queryAction.available} title={queryAction.available ? undefined : queryAction.reason}><Search size={15} /> Ask sources</button></div>
+      <div className="workspace-stack"><textarea value={question} onChange={(event) => { setQuestion(event.target.value); setPendingQuery(null); }} placeholder="What requirements, prices, quantities, risks, and deadlines are supported by the source evidence?" autoComplete="off" /><button onClick={() => void ask()} disabled={busy || (!question.trim() && !pendingQuery) || !queryAction.available} title={queryAction.available ? undefined : queryAction.reason}><Search size={15} /> {pendingQuery ? "Retry exact source query" : "Ask sources"}</button></div>
       {answer && <pre className="evidence-answer">{answer}</pre>}
       <p className="boundary-note">Query action: {queryAction.reason}</p>
     </DataPanel>

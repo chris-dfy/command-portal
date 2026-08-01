@@ -178,7 +178,6 @@ export function recoverableConclaveRun(
     workspace.schemaVersion === "nexus.conclave-workspace@2.0.0"
     && workspace.lifecyclePosture === "canonical_operational"
     && workspace.reviewCompleted !== true
-    && workspace.availableActions?.includes("run") === true
   );
   return {
     runPending,

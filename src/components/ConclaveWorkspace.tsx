@@ -5,8 +5,8 @@ import { OperationalResultLineage, type OpenOperationalReplay } from "./Operatio
 import { StatusPill } from "./StatusPill";
 import {
   conclaveRunFromWorkspace,
+  createConclaveInvestigation,
   retryConclaveInvestigation,
-  startConclaveInvestigation,
   type ConclaveRun,
 } from "../lib/conclave-client";
 import {
@@ -31,6 +31,7 @@ import {
   orderConclaveDirectory,
 } from "../lib/conclave-directory";
 import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import { conclaveActionGates } from "../lib/conclave-action-flow";
 import { displayLabel } from "../lib/presentation";
 import type { CapabilityRegistryProjection } from "../lib/types";
 
@@ -162,13 +163,13 @@ export function ConclaveWorkspace({
     hostedActionAccess,
     "evidence:write",
   );
-  const creationAllowed = createAction.available && runAction.available;
-  const creationReason = !createAction.available
-    ? `Create: ${createAction.reason}`
-    : !runAction.available
-      ? `Run: ${runAction.reason}`
-      : "The exact Conclave create and run actions are live under the hosted operations:write scope.";
-  const runAllowed = runAction.available;
+  const { createAllowed: creationAllowed, runAllowed } = conclaveActionGates(
+    createAction.available,
+    runAction.available,
+  );
+  const creationReason = createAction.available
+    ? "The exact durable Conclave create action is live under the hosted operations:write scope. Creation does not dispatch a run."
+    : createAction.reason;
   const evidenceAdmissionAllowed = workspace?.lifecyclePosture === "canonical_operational"
     && evidenceAction.available;
   const evidenceAdmissionReason = workspace?.lifecyclePosture !== "canonical_operational"
@@ -235,7 +236,7 @@ export function ConclaveWorkspace({
       );
       setPendingCreate(createIdentity);
       setProposal("");
-      const next = await startConclaveInvestigation(
+      const next = await createConclaveInvestigation(
         {
           proposal: createIdentity.proposal,
           ...(createIdentity.predecessor ? { predecessor: createIdentity.predecessor } : {}),
@@ -246,9 +247,6 @@ export function ConclaveWorkspace({
       setRun(next);
       setWorkspaces((current) => orderConclaveDirectory([next.workspace, ...current.filter((item) => item.missionId !== next.workspace.missionId)]));
       setSourceState("available");
-      if (next.runPending) {
-        setError(`${next.runError ?? "The governed run did not complete."} The created workspace was preserved; retry the exact idempotent run below.`);
-      }
     }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
@@ -370,9 +368,9 @@ export function ConclaveWorkspace({
     <DataPanel eyebrow="Investigation mission" title="Frame the operational question" icon={<Scale size={18} />}>
       <div className="conclave-composer"><label htmlFor="conclave-workspace">Durable Runtime records</label><select id="conclave-workspace" value={workspace?.missionId ?? ""} onChange={(event) => { const selected = workspaces.find((item) => item.missionId === event.target.value); setRun(selected ? conclaveRunFromWorkspace(selected) : null); }} disabled={sourceState === "loading"}><option value="">{sourceState === "loading" ? "Loading Runtime records…" : "New governed Review — browser-local draft"}</option>{orderedWorkspaces.map((item) => <option key={item.missionId} value={item.missionId}>{conclaveDirectoryLabel(item)}</option>)}</select><label htmlFor="conclave-proposal">Browser-local Review draft</label><textarea id="conclave-proposal" value={proposal} onChange={(event) => setProposal(event.target.value)} placeholder={suggestedProposal} maxLength={8000} autoComplete="off" /><div><small>{proposal.length.toLocaleString()} / 8,000 · not yet a Runtime record</small><span className="conclave-composer__actions">{run?.runPending && <button className="conclave-secondary-action" onClick={() => void retryInvestigation()} disabled={busy || !runAllowed} title={runAllowed ? undefined : runAction.reason}><RefreshCw size={16} />Run governed review</button>}{workspace && <button className="conclave-secondary-action" onClick={() => void refreshWorkspace()} disabled={busy}><RefreshCw size={16} />Refresh</button>}<button onClick={() => void startInvestigation()} disabled={busy || !creationAllowed || (workspace ? !(workspace.lifecyclePosture === "legacy_read_only" && workspace.availableActions.includes("restart_canonical")) : !proposal.trim() && !pendingCreate?.proposal)} title={creationAllowed ? undefined : creationReason}><BrainCircuit size={16} />{busy ? "Coordinating…" : workspace?.lifecyclePosture === "legacy_read_only" ? "Restart as canonical Review" : pendingCreate ? "Retry governed start" : "Start governed Review"}</button></span></div></div>
       {error && <p className="conclave-error" role="alert">{error}</p>}
-      <p className="boundary-note">Typing remains browser-local. No Runtime record is requested until the operator invokes Start governed Review and both exact create and run admissions are available.</p>
+      <p className="boundary-note">Typing remains browser-local. No Runtime record is requested until the operator invokes Start governed Review and the exact create action is available. Creation never dispatches the distinct run action.</p>
       <p className="boundary-note">Workspace directory: <strong>{sourceState}</strong>. The portal does not substitute a static one-shot review when durable Conclave is unavailable.</p>
-      <p className="boundary-note">Investigation creation gate: <strong>{creationReason}</strong></p>
+      <p className="boundary-note">Investigation creation gate: <strong>{creationReason}</strong> Run gate: <strong>{runAction.reason}</strong></p>
       <p className="boundary-note">Readiness context only: <strong>{conclaveReadinessNote}</strong></p>
     </DataPanel>
 

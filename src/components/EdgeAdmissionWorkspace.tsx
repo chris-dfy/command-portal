@@ -38,6 +38,13 @@ import {
   type RuntimeAdmissionResponse,
 } from "../lib/local-client";
 import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 import type { CapabilityRegistryProjection } from "../lib/types";
 
 const ADMISSION_REFRESH_INTERVAL_MS = 5_000;
@@ -59,10 +66,7 @@ type AdmissionForm = {
 type MissionOption = { missionId: string; label: string; status: string };
 type SafeArtifact = { id: string; status: string; result: string; recordedAt: string };
 type SafeReplayEvent = { eventId: string; stage: string; status: string; occurredAt: string; summary: string };
-type PendingAdmissionCreate = {
-  payload: RuntimeAdmissionIntentRequest;
-  idempotencyKey: string;
-};
+type PendingAdmissionCreate = PrivateDraftOperation<RuntimeAdmissionIntentRequest>;
 
 const INITIAL_FORM: AdmissionForm = {
   missionId: "",
@@ -488,9 +492,8 @@ export function EdgeAdmissionWorkspace({
     event.preventDefault();
     if (!createAction.available) { setActionError(createAction.reason); return; }
     if (!pendingCreate && !canCreate) { setActionError(gateReason); return; }
-    const operation = pendingCreate ?? {
-      idempotencyKey: `edge-admission:${globalThis.crypto.randomUUID()}`,
-      payload: {
+    const staged = pendingCreate ?? snapshotPrivateDraftOperation(
+      {
         missionId: form.missionId,
         intent: {
           displayName: form.displayName.trim(),
@@ -502,15 +505,18 @@ export function EdgeAdmissionWorkspace({
           ...(evidenceRefs.length ? { evidenceRefs } : {}),
         },
       },
-    } satisfies PendingAdmissionCreate;
+      `edge-admission:${globalThis.crypto.randomUUID()}`,
+    );
     if (!pendingCreate) {
-      setPendingCreate(operation);
+      setPendingCreate(staged);
       setForm({
         ...INITIAL_FORM,
-        missionId: operation.payload.missionId,
-        nodeClass: operation.payload.intent.nodeClass,
+        missionId: staged.payload.missionId,
+        nodeClass: staged.payload.intent.nodeClass,
       });
     }
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingCreate(operation);
     setCreating(true);
     setActionError(null);
     try {
@@ -518,10 +524,11 @@ export function EdgeAdmissionWorkspace({
       setAdmissions((current) => [admission, ...current.filter((item) => item.admissionRequestId !== admission.admissionRequestId)]);
       setSelectedAdmission(admission);
       setSelectedId(admission.admissionRequestId);
-      setPendingCreate(null);
+      setPendingCreate(clearPrivateDraftAfterSuccess());
       setForm((current) => ({ ...INITIAL_FORM, missionId: current.missionId, nodeClass: current.nodeClass }));
       onFleetRefresh();
     } catch (error) {
+      setPendingCreate(retainPrivateDraftAfterFailure(operation));
       setActionError(messageFrom(error));
     } finally {
       setCreating(false);

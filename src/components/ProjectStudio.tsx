@@ -17,7 +17,21 @@ import {
 } from "../lib/hosted-capability-gate";
 import { displayLabel } from "../lib/presentation";
 import type { CapabilityRegistryProjection } from "../lib/types";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
+
+type ProjectCreatePayload = { name: string };
+type ProjectCompilePayload = {
+  projectId: string;
+  artifactType: string;
+  options: Record<string, unknown>;
+};
 
 export function ProjectStudio({
   onReplay,
@@ -30,10 +44,12 @@ export function ProjectStudio({
 } = {}) {
   const [definitions, setDefinitions] = useState<ArtifactDefinition[]>([]);
   const [projectName, setProjectName] = useState("");
+  const [pendingCreate, setPendingCreate] = useState<PrivateDraftOperation<ProjectCreatePayload> | null>(null);
   const [projectId, setProjectId] = useState("");
   const [artifactType, setArtifactType] = useState("roadmap");
   const [weeks, setWeeks] = useState("");
   const [assumption, setAssumption] = useState("");
+  const [pendingCompile, setPendingCompile] = useState<PrivateDraftOperation<ProjectCompilePayload> | null>(null);
   const [scope, setScope] = useState<ProjectScope | null>(null);
   const [estimate, setEstimate] = useState<ProjectEstimate | null>(null);
   const [planning, setPlanning] = useState<PlanningModel | null>(null);
@@ -73,14 +89,23 @@ export function ProjectStudio({
       setMessage(createAction.reason);
       return;
     }
-    const submittedName = projectName.trim() || "New NEXUS Project";
-    setProjectName("");
+    const staged = pendingCreate ?? snapshotPrivateDraftOperation(
+      { name: projectName.trim() || "New NEXUS Project" },
+      `project-create:${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingCreate) setProjectName("");
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingCreate(operation);
     setBusy(true); setMessage(null);
     try {
-      const project = await localNexusClient.projectCreate(submittedName);
+      const project = await localNexusClient.projectCreate(operation.payload.name, operation.idempotencyKey);
+      setPendingCreate(clearPrivateDraftAfterSuccess());
       setProjectId(project.projectId);
       setMessage(`Created ${project.name}. Add evidence before relying on scope or pricing.`);
-    } catch (error) { setMessage(messageFrom(error)); }
+    } catch (error) {
+      setPendingCreate(retainPrivateDraftAfterFailure(operation));
+      setMessage(messageFrom(error));
+    }
     finally { setBusy(false); }
   }
 
@@ -101,21 +126,39 @@ export function ProjectStudio({
       setMessage(compileAction.reason);
       return;
     }
-    const submittedProjectId = projectId.trim();
-    if (!submittedProjectId) return;
-    const submittedWeeks = weeks;
-    const submittedAssumption = assumption.trim();
-    setWeeks("");
-    setAssumption("");
+    if (!pendingCompile && !projectId.trim()) return;
+    const staged = pendingCompile ?? snapshotPrivateDraftOperation(
+      {
+        projectId: projectId.trim(),
+        artifactType,
+        options: {
+          ...(weeks ? { defaultPhaseDurationWeeks: Number(weeks) } : {}),
+          assumptions: assumption.trim() ? [assumption.trim()] : [],
+        },
+      },
+      `project-compile:${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingCompile) {
+      setWeeks("");
+      setAssumption("");
+    }
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingCompile(operation);
     setBusy(true); setMessage(null);
     try {
-      const result = await localNexusClient.projectCompile(submittedProjectId, artifactType, {
-        ...(submittedWeeks ? { defaultPhaseDurationWeeks: Number(submittedWeeks) } : {}),
-        assumptions: submittedAssumption ? [submittedAssumption] : []
-      });
+      const result = await localNexusClient.projectCompile(
+        operation.payload.projectId,
+        operation.payload.artifactType,
+        operation.payload.options,
+        operation.idempotencyKey,
+      );
+      setPendingCompile(clearPrivateDraftAfterSuccess());
       setArtifact(result);
       setMessage(result.status === "compiled_verified" ? "Artifact compiled and recorded with proof." : `Artifact ${result.status ?? "unavailable"}: ${result.reason ?? "not implemented"}.`);
-    } catch (error) { setMessage(messageFrom(error)); }
+    } catch (error) {
+      setPendingCompile(retainPrivateDraftAfterFailure(operation));
+      setMessage(messageFrom(error));
+    }
     finally { setBusy(false); }
   }
 
@@ -126,9 +169,9 @@ export function ProjectStudio({
   return <div className="experience-grid local-workspace">
     <DataPanel eyebrow="NEXUS Projects" title="Project control" icon={<FolderKanban size={18} />} className="span-2">
       <div className="project-control-grid">
-        <label className="workspace-field"><span>Project name</span><input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Customer transformation program" autoComplete="off" /></label>
-        <button onClick={() => void create()} disabled={busy || !createAction.available} title={createAction.available ? undefined : createAction.reason}><Plus size={15} /> Create project</button>
-        <label className="workspace-field"><span>Active project ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="PROJECT-…" /></label>
+        <label className="workspace-field"><span>Project name</span><input value={projectName} onChange={(event) => { setProjectName(event.target.value); setPendingCreate(null); }} placeholder="Customer transformation program" autoComplete="off" /></label>
+        <button onClick={() => void create()} disabled={busy || !createAction.available} title={createAction.available ? undefined : createAction.reason}><Plus size={15} /> {pendingCreate ? "Retry exact project creation" : "Create project"}</button>
+        <label className="workspace-field"><span>Active project ID</span><input value={projectId} onChange={(event) => { setProjectId(event.target.value); setPendingCompile(null); }} placeholder="PROJECT-…" /></label>
         <button onClick={() => void analyze()} disabled={busy || !projectId.trim()}><RefreshCw size={15} /> Build project context</button>
       </div>
       {message && <p className="workspace-message" role="status">{message}</p>}
@@ -150,10 +193,10 @@ export function ProjectStudio({
     <DataPanel eyebrow="Operational plan" title="Planning model" icon={<Route size={18} />} className="span-2">
       <div className="planning-summary"><span><strong>{planning?.sourceCount ?? 0}</strong> linked sources</span><span><strong>{planning?.requirements?.length ?? 0}</strong> planning requirements</span><span><strong>{planning?.openQuestions?.length ?? 0}</strong> open questions</span></div>
       <div className="artifact-controls">
-        <label className="workspace-field"><span>Artifact</span><select value={artifactType} onChange={(event) => setArtifactType(event.target.value)}>{definitions.map((definition) => <option key={definition.artifactType} value={definition.artifactType}>{definition.name} · {definition.status}</option>)}</select></label>
-        <label className="workspace-field"><span>Default phase weeks</span><input type="number" min="0.5" max="520" step="0.5" value={weeks} onChange={(event) => setWeeks(event.target.value)} placeholder="Optional" autoComplete="off" /></label>
-        <label className="workspace-field span-input"><span>Explicit operator assumption</span><input value={assumption} onChange={(event) => setAssumption(event.target.value)} placeholder="Clearly labeled; never treated as source evidence" autoComplete="off" /></label>
-        <button onClick={() => void compile()} disabled={busy || !projectId.trim() || !compileAction.available} title={compileAction.available ? undefined : compileAction.reason}><FileCheck2 size={15} /> Compile</button>
+        <label className="workspace-field"><span>Artifact</span><select value={artifactType} onChange={(event) => { setArtifactType(event.target.value); setPendingCompile(null); }}>{definitions.map((definition) => <option key={definition.artifactType} value={definition.artifactType}>{definition.name} · {definition.status}</option>)}</select></label>
+        <label className="workspace-field"><span>Default phase weeks</span><input type="number" min="0.5" max="520" step="0.5" value={weeks} onChange={(event) => { setWeeks(event.target.value); setPendingCompile(null); }} placeholder="Optional" autoComplete="off" /></label>
+        <label className="workspace-field span-input"><span>Explicit operator assumption</span><input value={assumption} onChange={(event) => { setAssumption(event.target.value); setPendingCompile(null); }} placeholder="Clearly labeled; never treated as source evidence" autoComplete="off" /></label>
+        <button onClick={() => void compile()} disabled={busy || (!projectId.trim() && !pendingCompile) || !compileAction.available} title={compileAction.available ? undefined : compileAction.reason}><FileCheck2 size={15} /> {pendingCompile ? "Retry exact compile" : "Compile"}</button>
         <p className="boundary-note">Compile action: {compileAction.reason}</p>
       </div>
       {artifact && <div className="artifact-result"><strong>{displayLabel(artifact.status ?? "unknown")}</strong><span>{artifact.confidence ?? "Unrated"} confidence · {displayLabel(artifact.estimateStatus ?? "no estimate")}</span>{artifact.reason && <p>{artifact.reason}</p>}<OperationalResultLineage proofId={artifact.proofId} receiptId={artifact.receiptId} onOpenReplay={onReplay} empty={artifact.status === "compiled_verified" ? "The Runtime returned a verified artifact without discoverable proof or receipt lineage." : "No proof or receipt is claimed for this unavailable artifact."} /></div>}

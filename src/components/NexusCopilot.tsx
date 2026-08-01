@@ -7,11 +7,31 @@ import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-vo
 import { browserSpeechAvailability, recognizeBrowserSpeech, speakBrowserResponse } from "../lib/browser-speech";
 import { runBoundedTask } from "../lib/request-coordination.mjs";
 import { assistantPresence } from "../lib/assistant-presence";
+import {
+  beginAcceptanceBoundDraft,
+  clearDraftAfterAcceptance,
+  retainDraftAfterUnacceptedFailure,
+  type AcceptanceBoundDraft,
+} from "../lib/acceptance-bound-draft";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  executeExplicitPrivateDraftAction,
+  retainPrivateDraftAfterFailure,
+  shouldPresentPrivateDraft,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 import { deriveAssistantAvatarState, NexusAvatar, NEXUS_AVATAR_STATE_LABELS } from "./NexusAvatar";
 import "./NexusAvatar.css";
 
 type Message = { speaker: "operator" | "nexus"; text: string; limitation?: string };
 type AreaId = "center" | "intake" | "projects" | "voice" | "operations" | "replay" | "missions" | "knowledge" | "edge" | "conclave" | "information" | "health" | "topology" | "providers" | "evidence";
+type CopilotVoicePayload = {
+  transcript: string;
+  operatorAlreadyVisible: boolean;
+};
+type PendingCopilotVoiceRequest = PrivateDraftOperation<CopilotVoicePayload>;
 
 const SKILLS: Array<{ label: string; prompt: string; area: AreaId }> = [
   { label: "Summarize operational readiness", prompt: "Summarize operational readiness and identify the highest-priority constraint.", area: "center" },
@@ -41,6 +61,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
 }) {
   const [introduced, setIntroduced] = useState(true);
   const [input, setInput] = useState("");
+  const [pendingAskDraft, setPendingAskDraft] = useState<AcceptanceBoundDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voiceAvailable, setVoiceAvailable] = useState(false);
@@ -50,6 +71,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   const [amplitude, setAmplitude] = useState(0);
   const [liveAssistant, setLiveAssistant] = useState("");
   const [browserListening, setBrowserListening] = useState(false);
+  const [pendingVoiceRequest, setPendingVoiceRequest] = useState<PendingCopilotVoiceRequest | null>(null);
   const [messages, setMessages] = useState<Message[]>([
     { speaker: "nexus", text: "NEXUS is online. I can help you understand registered operational context, frame decisions, govern bounded work, and identify what evidence is still missing." },
   ]);
@@ -83,22 +105,40 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     setIntroduced(false);
   }
 
-  async function ask(text = input) {
-    const request = text.trim();
+  async function ask(text?: string) {
+    const fromComposer = text === undefined;
+    const request = (text ?? input).trim();
     if (!request || busy) return;
     if (!interactionAction.available) {
       setError(interactionAction.reason);
       return;
     }
-    setInput("");
+    const draftOperation = fromComposer ? beginAcceptanceBoundDraft(input) : null;
+    if (draftOperation) setPendingAskDraft(draftOperation);
     setError(null);
-    setMessages((items) => [...items, { speaker: "operator", text: request }]);
     setBusy(true);
     try {
       const result = await hifClient.start(request, "text", {}, conversationId.current);
+      if (!result.interaction.interactionId?.trim()) {
+        throw new Error("NEXUS did not return a durable interaction identity; the draft remains editable.");
+      }
       const limitation = result.interaction.limitations.find((item) => item.includes("model_native"));
-      setMessages((items) => [...items, { speaker: "nexus", text: result.interaction.responseText, limitation }]);
+      setMessages((items) => [
+        ...items,
+        { speaker: "operator", text: request },
+        { speaker: "nexus", text: result.interaction.responseText, limitation },
+      ]);
+      if (draftOperation) {
+        const accepted = clearDraftAfterAcceptance(draftOperation);
+        setInput(accepted.draft);
+        setPendingAskDraft(accepted.pending);
+      }
     } catch (caught) {
+      if (draftOperation) {
+        const retained = retainDraftAfterUnacceptedFailure(draftOperation);
+        setInput(retained.draft);
+        setPendingAskDraft(retained.pending);
+      }
       setError(messageFrom(caught));
     } finally {
       setBusy(false);
@@ -122,12 +162,26 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
         latestUserTranscript.current = text;
         setMessages((items) => [...items, { speaker: "operator", text }]);
       },
-      onAssistantTranscript: setLiveAssistant,
+      onAssistantTranscript: (text) => {
+        if (text.trim()) latestUserTranscript.current = "";
+        setLiveAssistant(text);
+      },
       onError: (message, code) => {
         setError(message);
         const captured = latestUserTranscript.current.trim();
-        if (code === "response_timeout" && captured && textAction.available) {
-          void routeGovernedVoice(captured, true);
+        if (code === "response_timeout" && captured) {
+          const staged = snapshotPrivateDraftOperation(
+            { transcript: captured, operatorAlreadyVisible: true },
+            `copilot-voice:${globalThis.crypto.randomUUID()}`,
+          );
+          setPendingVoiceRequest((current) => (
+            current
+            && current.payload.transcript === staged.payload.transcript
+            && current.payload.operatorAlreadyVisible === staged.payload.operatorAlreadyVisible
+              ? current
+              : staged
+          ));
+          setError(`${message} The captured transcript has not been sent. Use the explicit governed Voice action to send it.`);
         }
       },
     });
@@ -136,27 +190,52 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     catch (caught) { setVoiceState("error"); setError(messageFrom(caught)); }
   }
 
-  async function routeGovernedVoice(request: string, operatorAlreadyVisible = false) {
-    if (!request.trim() || !textAction.available) {
+  async function routeGovernedVoice(
+    request: string,
+    operatorAlreadyVisible = false,
+    retryRequest: PendingCopilotVoiceRequest | null = null,
+  ) {
+    if ((!request.trim() && !retryRequest) || !textAction.available) {
       setError(textAction.reason);
       return;
     }
+    const staged = retryRequest ?? snapshotPrivateDraftOperation(
+      { transcript: request.trim(), operatorAlreadyVisible },
+      `copilot-voice:${globalThis.crypto.randomUUID()}`,
+    );
+    const presentOperatorTranscript = shouldPresentPrivateDraft(
+      staged,
+      staged.payload.operatorAlreadyVisible,
+    );
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingVoiceRequest(operation);
     setBusy(true);
     setError(null);
-    if (!operatorAlreadyVisible) {
-      setMessages((items) => [...items, { speaker: "operator", text: request.trim() }]);
+    if (presentOperatorTranscript) {
+      setMessages((items) => [...items, { speaker: "operator", text: operation.payload.transcript }]);
     }
     try {
-      const result = await runBoundedTask(
-        (signal) => localNexusClient.routeTranscript(request.trim(), "browser_speech", signal),
-        { timeoutMs: 12_000 },
+      const result = await executeExplicitPrivateDraftAction(
+        operation,
+        (explicitOperation) => runBoundedTask(
+          (signal) => localNexusClient.routeTranscript(
+            explicitOperation.payload.transcript,
+            "browser_speech",
+            signal,
+            explicitOperation.idempotencyKey,
+          ),
+          { timeoutMs: 12_000 },
+        ),
       );
       const responseText = result.spokenSummary?.trim()
         || result.event?.failureReason?.trim()
         || "NEXUS recorded the request without a spoken summary.";
       setMessages((items) => [...items, { speaker: "nexus", text: responseText }]);
       if (!nexusMuted) speakBrowserResponse(responseText);
+      setPendingVoiceRequest(clearPrivateDraftAfterSuccess());
+      if (latestUserTranscript.current.trim() === operation.payload.transcript) latestUserTranscript.current = "";
     } catch (caught) {
+      setPendingVoiceRequest(retainPrivateDraftAfterFailure(operation));
       setError(messageFrom(caught));
     } finally {
       setBusy(false);
@@ -187,6 +266,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     if (liveAssistant.trim()) setMessages((items) => [...items, { speaker: "nexus", text: liveAssistant.trim(), limitation: "Realtime response may include model_native reasoning; operational claims still require Runtime evidence." }]);
     liveClient.current?.stop();
     liveClient.current = null;
+    latestUserTranscript.current = "";
     setLiveAssistant("");
     setMicrophoneMuted(false);
     setNexusMuted(false);
@@ -246,6 +326,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       <div className="nexus-copilot__voice">
         <div><NexusAvatar state={avatarState} amplitude={amplitude} size="xs" micMuted={microphoneMuted && voiceConnected} unavailable={(!voiceAvailable || !realtimeAction.available) && !voiceConnected} label={voiceConnected ? NEXUS_AVATAR_STATE_LABELS[avatarState] : voiceAvailable && realtimeAction.available ? "Voice ready" : "Voice unavailable"} /><strong>{voiceConnected ? microphoneMuted ? "Microphone muted" : voiceState : voiceAvailable && realtimeAction.available ? "Voice ready" : "Voice unavailable — Runtime voice cannot be established"}</strong></div>
         <div className="nexus-copilot__voice-controls">
+          {pendingVoiceRequest && <button type="button" onClick={() => void routeGovernedVoice("", pendingVoiceRequest.payload.operatorAlreadyVisible, pendingVoiceRequest)} disabled={!textAction.available || busy} title={textAction.available ? undefined : textAction.reason}><Send size={15} />{pendingVoiceRequest.attempts === 0 ? "Send captured transcript through governed Voice" : "Retry exact governed Voice request"}</button>}
           {voiceConnected && <>
             <button type="button" data-active={microphoneMuted} aria-pressed={microphoneMuted} onClick={toggleMicrophoneMute}>{microphoneMuted ? <MicOff size={15} /> : <Mic size={15} />}{microphoneMuted ? "Unmute mic" : "Mute mic"}</button>
             <button type="button" data-active={nexusMuted} aria-pressed={nexusMuted} onClick={toggleNexusMute}>{nexusMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}{nexusMuted ? "Unmute NEXUS" : "Mute NEXUS"}</button>
@@ -273,7 +354,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       </section>
 
       <form className="nexus-copilot__composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}>
-        <input value={input} onChange={(event) => setInput(event.target.value)} disabled={!interactionAction.available} placeholder={interactionAction.available ? "Ask NEXUS…" : "NEXUS interaction is unavailable"} aria-label="Ask NEXUS" autoComplete="off" />
+        <input value={input} onChange={(event) => setInput(event.target.value)} disabled={!interactionAction.available || busy || Boolean(pendingAskDraft)} placeholder={interactionAction.available ? "Ask NEXUS…" : "NEXUS interaction is unavailable"} aria-label="Ask NEXUS" autoComplete="off" />
         <button type="button" onClick={voiceConnected ? toggleMicrophoneMute : () => void askByVoice()} disabled={voiceConnected ? !realtimeAction.available : !browserSpeech.input || !textAction.available || browserListening} aria-label={voiceConnected ? microphoneMuted ? "Unmute microphone" : "Mute microphone" : "Ask NEXUS by voice"}>{microphoneMuted ? <MicOff size={17} /> : <Mic size={17} />}</button>
         <button type="submit" disabled={!interactionAction.available || !input.trim() || busy} aria-label="Send message"><Send size={17} /></button>
       </form>

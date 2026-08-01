@@ -1059,13 +1059,13 @@ export const localNexusClient = Object.freeze({
   clientCapabilities: () => request<ClientCapabilityContract>("/client-capabilities"),
   intakeHistory: () => request<IntakeHistory>("/intake/history"),
   intakeUpload: (filename: string, contentBase64: string, projectId?: string) => post<Record<string, unknown>>("/intake/upload", { filename, contentBase64, ...(projectId ? { projectId } : {}) }),
-  intakeQuery: (question: string, projectId?: string) => post<{ status: string; answer: string; citations?: Array<Record<string, unknown>> }>("/intake/query", { question, ...(projectId ? { projectId } : {}) }),
-  projectCreate: (name: string) => post<{ projectId: string; name: string }>("/projects", { name }),
+  intakeQuery: (question: string, projectId?: string, idempotencyKey?: string) => post<{ status: string; answer: string; citations?: Array<Record<string, unknown>> }>("/intake/query", { question, ...(projectId ? { projectId } : {}) }, idempotencyKey),
+  projectCreate: (name: string, idempotencyKey?: string) => post<{ projectId: string; name: string }>("/projects", { name }, idempotencyKey),
   artifactTypes: () => request<{ artifacts: ArtifactDefinition[] }>("/projects/artifact-types"),
   projectScope: (projectId: string) => request<ProjectScope>(`/projects/${encodeURIComponent(projectId)}/scope`),
   projectEstimate: (projectId: string) => request<ProjectEstimate>(`/projects/${encodeURIComponent(projectId)}/estimate`),
   projectPlanningModel: (projectId: string) => request<PlanningModel>(`/projects/${encodeURIComponent(projectId)}/planning-model`),
-  projectCompile: (projectId: string, artifactType: string, options: Record<string, unknown>) => post<CompiledArtifact>(`/projects/${encodeURIComponent(projectId)}/compile`, { artifactType, options }),
+  projectCompile: (projectId: string, artifactType: string, options: Record<string, unknown>, idempotencyKey?: string) => post<CompiledArtifact>(`/projects/${encodeURIComponent(projectId)}/compile`, { artifactType, options }, idempotencyKey),
   voiceStatus: () => request<Record<string, unknown>>("/voice-operator/status"),
   voiceHistory: () => request<{ events?: Array<Record<string, unknown>> }>("/voice-operator/history"),
   routeTranscript: (
@@ -1086,10 +1086,10 @@ export const localNexusClient = Object.freeze({
   mission: (missionId: string) => request<Record<string, unknown>>(
     `/missions/${encodeURIComponent(missionId)}`,
   ),
-  planMission: (objective: string) => post<Record<string, unknown>>(
+  planMission: (objective: string, idempotencyKey?: string) => post<Record<string, unknown>>(
     "/missions/plan",
     { objective },
-    `mission-plan:${globalThis.crypto.randomUUID()}`,
+    idempotencyKey ?? `mission-plan:${globalThis.crypto.randomUUID()}`,
   ),
   executeMissionStep: (missionId: string, stepId: string) => post<Record<string, unknown>>(
     `/missions/${encodeURIComponent(missionId)}/execute-step`,
@@ -1154,8 +1154,8 @@ export const localNexusClient = Object.freeze({
     `/operational-replay/receipts/${encodeURIComponent(receiptId)}`,
   ),
   workSessions: () => request<Record<string, unknown>>("/work-sessions"),
-  planWorkSession: (objective: string) => post<Record<string, unknown>>("/work-sessions/plan", { objective }),
-  startWorkSession: (objective: string) => post<Record<string, unknown>>("/work-sessions/start", { objective }),
+  planWorkSession: (objective: string, idempotencyKey?: string) => post<Record<string, unknown>>("/work-sessions/plan", { objective }, idempotencyKey),
+  startWorkSession: (objective: string, idempotencyKey?: string) => post<Record<string, unknown>>("/work-sessions/start", { objective }, idempotencyKey),
   workSession: (sessionId: string) => request<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}`),
   controlWorkSession: (sessionId: string, action: "step" | "continue" | "pause" | "cancel") => post<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}/${action}`, {}),
   workSessionReceipt: (sessionId: string) => request<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}/receipt`),

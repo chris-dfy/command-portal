@@ -1,4 +1,5 @@
 import registryDocument from "./surface-registry.json";
+import { assertPortableLimitationProofs } from "./portable-limitation-proof";
 
 export type NexusClientId = "desktop" | "web";
 export type NexusSurfaceState = "functional" | "read_only" | "local_only" | "unavailable";
@@ -99,36 +100,10 @@ export const NEXUS_MODULES = Object.freeze(
   NEXUS_SURFACES.flatMap((surface) => surface.modules),
 );
 
-const LIMITATION_PROOF_BASES = new Set<NonNullable<NexusModuleClientState["limitationProof"]>["basis"]>([
-  "runtime_contract",
-  "authority_boundary",
-  "hardware_dependency",
-  "external_provider_evidence",
-]);
-
 export function assertNexusPortableLimitationProofs(
   modules: readonly NexusModuleDefinition[] = NEXUS_MODULES,
 ): void {
-  for (const module of modules) {
-    if (module.portability !== "portable") continue;
-    if (module.clients.desktop.state === module.clients.web.state) continue;
-    for (const client of ["desktop", "web"] as const) {
-      const projection = module.clients[client];
-      if (projection.state !== "unavailable") continue;
-      const proof = projection.limitationProof;
-      if (!proof || !LIMITATION_PROOF_BASES.has(proof.basis) || !proof.evidenceRefs.length) {
-        throw new Error(
-          `Portable module ${module.moduleId} is unavailable in ${client} without a contract-backed limitation proof.`,
-        );
-      }
-      if (proof.evidenceRefs.some((reference) => !reference.trim())) {
-        throw new Error(`Portable module ${module.moduleId} has an empty ${client} limitation evidence reference.`);
-      }
-      if (/not (?:copied|implemented)|source (?:is|was) absent/i.test(projection.reason)) {
-        throw new Error(`Portable module ${module.moduleId} uses implementation absence as a ${client} limitation.`);
-      }
-    }
-  }
+  assertPortableLimitationProofs(modules);
 }
 
 assertNexusPortableLimitationProofs();

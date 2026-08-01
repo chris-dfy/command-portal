@@ -68,15 +68,15 @@
           }
         },
         {
-      "moduleId": "dashboard.executive-status",
+          "moduleId": "dashboard.executive-status",
           "label": "Executive status",
           "portability": "portable",
           "capabilityIds": [],
           "clients": {
-        "desktop": {
-          "state": "read_only",
-          "reason": "Local NEXUS renders the existing executive status rail as a distinct read-only module without inferring capability from process health.",
-          "componentKey": "desktop.dashboard.executive-status"
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS renders the existing executive status rail as a distinct read-only module without inferring capability from process health.",
+              "componentKey": "desktop.dashboard.executive-status"
             },
             "web": {
               "state": "read_only",
@@ -155,7 +155,7 @@
           }
         },
         {
-      "moduleId": "missions.runtime-evidence",
+          "moduleId": "missions.runtime-evidence",
           "label": "Runtime Mission evidence",
           "portability": "portable",
           "capabilityIds": [
@@ -167,10 +167,10 @@
               "reason": "Local NEXUS reads Runtime Mission identities, objectives, and status without inferring receipt, proof, or completion lineage.",
               "componentKey": "desktop.missions.runtime-evidence"
             },
-        "web": {
-          "state": "read_only",
-          "reason": "Hosted NEXUS exposes Runtime Mission identities, objectives, and status as a distinct read-only module without claiming receipt or proof lineage.",
-          "componentKey": "web.missions.runtime-evidence"
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted NEXUS exposes Runtime Mission identities, objectives, and status as a distinct read-only module without claiming receipt or proof lineage.",
+              "componentKey": "web.missions.runtime-evidence"
             }
           }
         },
@@ -396,15 +396,15 @@
           }
         },
         {
-      "moduleId": "edge.diagnostics-topology",
+          "moduleId": "edge.diagnostics-topology",
           "label": "Edge diagnostics topology",
           "portability": "portable",
           "capabilityIds": [],
           "clients": {
-        "desktop": {
-          "state": "read_only",
-          "reason": "Local NEXUS exposes the Edge monitor's existing exchange and diagnostics topology as a distinct read-only module without treating reachability as readiness.",
-          "componentKey": "desktop.edge.diagnostics-topology"
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS exposes the Edge monitor's existing exchange and diagnostics topology as a distinct read-only module without treating reachability as readiness.",
+              "componentKey": "desktop.edge.diagnostics-topology"
             },
             "web": {
               "state": "read_only",
@@ -444,12 +444,28 @@
             "desktop": {
               "state": "unavailable",
               "reason": "Physical node enrollment is unavailable until identity, transport, challenge, verification, first signed state, and postcondition evidence all pass.",
-              "componentKey": null
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "hardware_dependency",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "evidence:src/components/EdgeAdmissionWorkspace.tsx#awaitingNodeProof"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
               "reason": "Hosted physical node enrollment is unavailable until identity, transport, challenge, verification, first signed state, and postcondition evidence all pass.",
-              "componentKey": null
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "hardware_dependency",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "evidence:src/components/EdgeAdmissionWorkspace.tsx#awaitingNodeProof"
+                ]
+              }
             }
           }
         }
@@ -505,7 +521,7 @@
           }
         },
         {
-      "moduleId": "mission-control.mission-dashboard",
+          "moduleId": "mission-control.mission-dashboard",
           "label": "Mission execution dashboard",
           "portability": "portable",
           "capabilityIds": [
@@ -518,15 +534,15 @@
               "reason": "Local NEXUS exposes Mission planning and lifecycle controls inside Mission Control.",
               "componentKey": "desktop.mission-control.mission-dashboard"
             },
-        "web": {
-          "state": "functional",
-          "reason": "Hosted Mission Control mounts the existing canonical Mission Dashboard through its exact planning, read, and governed step routes.",
-          "componentKey": "web.mission-control.mission-dashboard"
+            "web": {
+              "state": "functional",
+              "reason": "Hosted Mission Control mounts the existing canonical Mission Dashboard through its exact planning, read, and governed step routes.",
+              "componentKey": "web.mission-control.mission-dashboard"
             }
           }
         },
         {
-      "moduleId": "mission-control.runtime-missions",
+          "moduleId": "mission-control.runtime-missions",
           "label": "Runtime Mission records",
           "portability": "portable",
           "capabilityIds": [
@@ -538,15 +554,15 @@
               "reason": "Local NEXUS reads Runtime Mission identities and state; receipt and proof lineage remain separate modules.",
               "componentKey": "desktop.mission-control.runtime-missions"
             },
-        "web": {
-          "state": "read_only",
-          "reason": "Hosted Mission Control reads the canonical Runtime Mission inventory and state without claiming receipt or proof lineage.",
-          "componentKey": "web.mission-control.runtime-missions"
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted Mission Control reads the canonical Runtime Mission inventory and state without claiming receipt or proof lineage.",
+              "componentKey": "web.mission-control.runtime-missions"
             }
           }
         },
         {
-      "moduleId": "mission-control.functional-readiness",
+          "moduleId": "mission-control.functional-readiness",
           "label": "Functional readiness",
           "portability": "portable",
           "capabilityIds": [],
@@ -556,10 +572,10 @@
               "reason": "Local NEXUS reads functional readiness evidence without promoting deployment or external capability.",
               "componentKey": "desktop.mission-control.functional-readiness"
             },
-        "web": {
-          "state": "read_only",
-          "reason": "Hosted Mission Control renders the existing Runtime capability readiness evidence without promoting deployment or external capability.",
-          "componentKey": "web.mission-control.functional-readiness"
+            "web": {
+              "state": "read_only",
+              "reason": "Hosted Mission Control renders the existing Runtime capability readiness evidence without promoting deployment or external capability.",
+              "componentKey": "web.mission-control.functional-readiness"
             }
           }
         }
@@ -809,13 +825,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "No canonical Data Platform contract or verified operational adapter is registered for either client.",
-              "componentKey": null
+              "reason": "The Data Platform contract is outside the current registered Runtime operation and exact gateway route inventory.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "No canonical Data Platform contract or verified operational adapter is registered for either client.",
-              "componentKey": null
+              "reason": "The Data Platform contract is outside the current registered Runtime operation and exact gateway route inventory.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         }
@@ -863,15 +895,15 @@
           }
         },
         {
-      "moduleId": "providers.truth-boundary",
+          "moduleId": "providers.truth-boundary",
           "label": "Provider truth boundary",
           "portability": "portable",
           "capabilityIds": [],
           "clients": {
-        "desktop": {
-          "state": "read_only",
-          "reason": "Local NEXUS exposes the provider registry's existing truth boundary as a distinct read-only module, separating configuration from verified connectivity.",
-          "componentKey": "desktop.providers.truth-boundary"
+            "desktop": {
+              "state": "read_only",
+              "reason": "Local NEXUS exposes the provider registry's existing truth boundary as a distinct read-only module, separating configuration from verified connectivity.",
+              "componentKey": "desktop.providers.truth-boundary"
             },
             "web": {
               "state": "read_only",
@@ -1017,13 +1049,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "No verified standalone storage capability is admitted; storage remains an implementation dependency.",
-              "componentKey": null
+              "reason": "A standalone storage capability is unavailable without a registered provider contract, exact Runtime operation, and verified operational evidence.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "No verified standalone storage capability is admitted; storage remains an implementation dependency.",
-              "componentKey": null
+              "reason": "A standalone storage capability is unavailable without a registered provider contract, exact Runtime operation, and verified operational evidence.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         }
@@ -1060,13 +1108,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Hosted team alpha remains unverified and unavailable in both accepted clients.",
-              "componentKey": null
+              "reason": "Team alpha is unavailable while enterpriseReady is false and no verified external provider evidence establishes its operational postconditions.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Hosted team alpha remains unverified and unavailable in both accepted clients.",
-              "componentKey": null
+              "reason": "Team alpha is unavailable while enterpriseReady is false and no verified external provider evidence establishes its operational postconditions.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         },
@@ -1078,13 +1142,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Hosted Postgres readiness lacks verified non-production provider evidence.",
-              "componentKey": null
+              "reason": "Postgres readiness is unavailable until external provider evidence verifies reachability, configuration, and bounded non-production postconditions.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Hosted Postgres readiness lacks verified non-production provider evidence.",
-              "componentKey": null
+              "reason": "Postgres readiness is unavailable until external provider evidence verifies reachability, configuration, and bounded non-production postconditions.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         },
@@ -1096,13 +1176,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Production tenant-isolation postconditions are not verified for either client.",
-              "componentKey": null
+              "reason": "Tenant-isolation control is unavailable while enterpriseReady is false and external provider evidence has not verified isolation postconditions.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Production tenant-isolation postconditions are not verified for either client.",
-              "componentKey": null
+              "reason": "Tenant-isolation control is unavailable while enterpriseReady is false and external provider evidence has not verified isolation postconditions.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         },
@@ -1114,13 +1210,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Production workspace-isolation postconditions are not verified for either client.",
-              "componentKey": null
+              "reason": "Workspace-isolation control is unavailable while enterpriseReady is false and external provider evidence has not verified isolation postconditions.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Production workspace-isolation postconditions are not verified for either client.",
-              "componentKey": null
+              "reason": "Workspace-isolation control is unavailable while enterpriseReady is false and external provider evidence has not verified isolation postconditions.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         },
@@ -1132,13 +1244,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Hosted observability readiness has no verified operational adapter or receipt.",
-              "componentKey": null
+              "reason": "Observability readiness is unavailable until external provider health evidence and a verified Runtime receipt establish the operational state.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Hosted observability readiness has no verified operational adapter or receipt.",
-              "componentKey": null
+              "reason": "Observability readiness is unavailable until external provider health evidence and a verified Runtime receipt establish the operational state.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         },
@@ -1150,13 +1278,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Hosted observability component deployment is not admitted by either client.",
-              "componentKey": null
+              "reason": "Observability component control is unavailable until external provider deployment evidence and Runtime receipts verify the deployed components.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Hosted observability component deployment is not admitted by either client.",
-              "componentKey": null
+              "reason": "Observability component control is unavailable until external provider deployment evidence and Runtime receipts verify the deployed components.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         },
@@ -1168,13 +1312,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Hosted alpha blocker evidence remains an unavailable diagnostic module.",
-              "componentKey": null
+              "reason": "Hosted alpha blocker diagnostics are unavailable until live provider evidence and a verified diagnostic receipt are registered.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Hosted alpha blocker evidence remains an unavailable diagnostic module.",
-              "componentKey": null
+              "reason": "Hosted alpha blocker diagnostics are unavailable until live provider evidence and a verified diagnostic receipt are registered.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         },
@@ -1186,13 +1346,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Production deployment and mutation remain outside the admitted non-production scope.",
-              "componentKey": null
+              "reason": "Production deployment is outside the admitted non-production Authority boundary while productionReady and enterpriseReady remain false.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Production deployment and mutation remain outside the admitted non-production scope.",
-              "componentKey": null
+              "reason": "Production deployment is outside the admitted non-production Authority boundary while productionReady and enterpriseReady remain false.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         }
@@ -1229,13 +1405,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Production multi-user team readiness is not verified.",
-              "componentKey": null
+              "reason": "Team readiness is not verified while enterpriseReady is false and external provider postconditions and receipts are absent.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Production multi-user team readiness is not verified.",
-              "componentKey": null
+              "reason": "Team readiness is not verified while enterpriseReady is false and external provider postconditions and receipts are absent.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         },
@@ -1247,13 +1439,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Operator alpha readiness is not verified for either client.",
-              "componentKey": null
+              "reason": "Operator alpha readiness is not verified while enterpriseReady is false and external provider postconditions and receipts are absent.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Operator alpha readiness is not verified for either client.",
-              "componentKey": null
+              "reason": "Operator alpha readiness is not verified while enterpriseReady is false and external provider postconditions and receipts are absent.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         },
@@ -1265,13 +1473,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "No live operator trial capability is admitted.",
-              "componentKey": null
+              "reason": "Operator trial capability is unavailable without a registered Runtime operation, verified trial postconditions, and a receipt.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "No live operator trial capability is admitted.",
-              "componentKey": null
+              "reason": "Operator trial capability is unavailable without a registered Runtime operation, verified trial postconditions, and a receipt.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         },
@@ -1283,13 +1507,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "The operator runbook has no verified interactive client module.",
-              "componentKey": null
+              "reason": "Operator runbook execution is unavailable because no registered Runtime operation and receipt contract admit it.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "The operator runbook has no verified interactive client module.",
-              "componentKey": null
+              "reason": "Operator runbook execution is unavailable because no registered Runtime operation and receipt contract admit it.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         },
@@ -1301,13 +1541,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "The first-run checklist remains a non-operational source artifact.",
-              "componentKey": null
+              "reason": "First-run readiness is unavailable without a registered Runtime contract, verified postconditions, and a receipt.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "The first-run checklist remains a non-operational source artifact.",
-              "componentKey": null
+              "reason": "First-run readiness is unavailable without a registered Runtime contract, verified postconditions, and a receipt.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         },
@@ -1319,13 +1575,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "No standalone approval administration module is admitted.",
-              "componentKey": null
+              "reason": "Approval administration is unavailable because no exact governed route and Authority contract admit the operation.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "No standalone approval administration module is admitted.",
-              "componentKey": null
+              "reason": "Approval administration is unavailable because no exact governed route and Authority contract admit the operation.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         },
@@ -1337,13 +1609,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "No verified operator handoff workflow is admitted.",
-              "componentKey": null
+              "reason": "Operator handoff workflow is unavailable because no exact governed route and Authority contract admit the transition.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "No verified operator handoff workflow is admitted.",
-              "componentKey": null
+              "reason": "Operator handoff workflow is unavailable because no exact governed route and Authority contract admit the transition.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         }
@@ -1423,13 +1711,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Acceptance checklist source presence is not an admitted governance capability.",
-              "componentKey": null
+              "reason": "Acceptance checklist execution is unavailable without a registered Runtime contract, verified postconditions, and a receipt.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Acceptance checklist source presence is not an admitted governance capability.",
-              "componentKey": null
+              "reason": "Acceptance checklist execution is unavailable without a registered Runtime contract, verified postconditions, and a receipt.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         },
@@ -1441,13 +1745,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "No standalone boundary-acknowledgement mutation workflow is admitted.",
-              "componentKey": null
+              "reason": "Boundary-acknowledgement mutation is unavailable because no exact governed route and Authority contract admit it.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "No standalone boundary-acknowledgement mutation workflow is admitted.",
-              "componentKey": null
+              "reason": "Boundary-acknowledgement mutation is unavailable because no exact governed route and Authority contract admit it.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         },
@@ -1459,13 +1779,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "No generic first-workflow launcher is admitted outside exact capability routes.",
-              "componentKey": null
+              "reason": "First-workflow launch is unavailable outside registered exact capability routes and their per-action Authority contracts.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "No generic first-workflow launcher is admitted outside exact capability routes.",
-              "componentKey": null
+              "reason": "First-workflow launch is unavailable outside registered exact capability routes and their per-action Authority contracts.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         }
@@ -1568,11 +1904,15 @@
             },
             "web": {
               "state": "unavailable",
-              "reason": "The hosted Evidence surface has no separately verified acceptance-receipt projection.",
+              "reason": "Acceptance-receipt access is unavailable because the registered Runtime read contract and exact gateway route inventory do not identify that record type.",
               "componentKey": null,
               "limitationProof": {
                 "basis": "runtime_contract",
-                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient.receipt"]
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
               }
             }
           }
@@ -1590,11 +1930,15 @@
             },
             "web": {
               "state": "unavailable",
-              "reason": "The hosted Evidence surface has no separately verified distribution-receipt projection.",
+              "reason": "Distribution-receipt access is unavailable because the registered Runtime read contract and exact gateway route inventory do not identify that record type.",
               "componentKey": null,
               "limitationProof": {
                 "basis": "runtime_contract",
-                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient.receipt"]
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
               }
             }
           }
@@ -1612,11 +1956,15 @@
             },
             "web": {
               "state": "unavailable",
-              "reason": "The hosted Evidence surface has no package-manifest contract.",
+              "reason": "Package-manifest access is unavailable because the registered Runtime read contract and exact gateway route inventory do not identify that record type.",
               "componentKey": null,
               "limitationProof": {
                 "basis": "runtime_contract",
-                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient"]
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
               }
             }
           }
@@ -1690,13 +2038,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Secret-manager and redaction boundaries remain enforced internally; no administration module is admitted.",
-              "componentKey": null
+              "reason": "Secret-manager administration is unavailable because no exact governed route and Authority contract admit secret mutation in a client.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Secret-manager and redaction boundaries remain enforced internally; no administration module is admitted.",
-              "componentKey": null
+              "reason": "Secret-manager administration is unavailable because no exact governed route and Authority contract admit secret mutation in a client.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         },
@@ -1708,13 +2072,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "The install checklist is not a verified operational security capability.",
-              "componentKey": null
+              "reason": "Install checklist execution is unavailable without a registered Runtime security capability, verified postconditions, and a receipt.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "The install checklist is not a verified operational security capability.",
-              "componentKey": null
+              "reason": "Install checklist execution is unavailable without a registered Runtime security capability, verified postconditions, and a receipt.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         },
@@ -1726,13 +2106,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Production launch verification remains outside admitted non-production client capability.",
-              "componentKey": null
+              "reason": "Production launch verification is unavailable while productionReady and enterpriseReady remain false and provider postconditions are unverified.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Production launch verification remains outside admitted non-production client capability.",
-              "componentKey": null
+              "reason": "Production launch verification is unavailable while productionReady and enterpriseReady remain false and provider postconditions are unverified.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "external_provider_evidence",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/TRUTH_BOUNDARIES.md#truth-boundaries",
+                  "evidence:server/portal-server.mjs#TRUTH",
+                  "evidence:src/lib/portal-client.ts#productionReady"
+                ]
+              }
             }
           }
         }
@@ -1792,11 +2188,15 @@
             },
             "web": {
               "state": "unavailable",
-              "reason": "The hosted Receipts surface has no separate operator acceptance-trial projection.",
+              "reason": "Acceptance-trial receipt access is unavailable because the registered Runtime read contract and exact gateway route inventory do not identify that record type.",
               "componentKey": null,
               "limitationProof": {
                 "basis": "runtime_contract",
-                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient.receipt"]
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
               }
             }
           }
@@ -1832,11 +2232,15 @@
             },
             "web": {
               "state": "unavailable",
-              "reason": "The hosted Receipts surface has no separately verified distribution receipt projection.",
+              "reason": "Distribution receipt access is unavailable because the registered Runtime read contract and exact gateway route inventory do not identify that record type.",
               "componentKey": null,
               "limitationProof": {
                 "basis": "runtime_contract",
-                "evidenceRefs": ["contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES", "contract:src/lib/local-client.ts#localNexusClient.receipt"]
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
               }
             }
           }
@@ -2044,13 +2448,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Step execution is unavailable until an exact per-step action adapter proves canonical Authority and postcondition lineage.",
-              "componentKey": null
+              "reason": "Step execution is unavailable until an exact per-step Authority contract and postcondition lineage are verified.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Hosted step execution is unavailable until an exact per-step action adapter proves canonical Authority and postcondition lineage.",
-              "componentKey": null
+              "reason": "Step execution is unavailable until an exact per-step Authority contract and postcondition lineage are verified.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         },
@@ -2064,13 +2484,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "Continuation is unavailable while the recorded canonical per-action Authority limitation remains unresolved.",
-              "componentKey": null
+              "reason": "Continuation is unavailable while the exact per-action Authority contract and postcondition lineage remain unverified.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "Hosted continuation is unavailable while the recorded canonical per-action Authority limitation remains unresolved.",
-              "componentKey": null
+              "reason": "Continuation is unavailable while the exact per-action Authority contract and postcondition lineage remain unverified.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "authority_boundary",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#ownership-boundary",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         }
@@ -2107,13 +2543,29 @@
           "clients": {
             "desktop": {
               "state": "unavailable",
-              "reason": "No government-specific product capability is admitted; NEXUS remains a general executive operating system.",
-              "componentKey": null
+              "reason": "A government-specific workspace is outside the registered Runtime operation inventory; NEXUS remains a general executive operating system.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             },
             "web": {
               "state": "unavailable",
-              "reason": "No government-specific product capability is admitted; NEXUS remains a general executive operating system.",
-              "componentKey": null
+              "reason": "A government-specific workspace is outside the registered Runtime operation inventory; NEXUS remains a general executive operating system.",
+              "componentKey": null,
+              "limitationProof": {
+                "basis": "runtime_contract",
+                "evidenceRefs": [
+                  "boundary:docs/nexus-runtime-contract/ASSET_PROVISIONING.md#model-native-knowledge-and-explicit-provisioning",
+                  "contract:docs/ClientParityContract.md#current-registered-operational-scope",
+                  "contract:server/portal-server.mjs#CANONICAL_OPERATIONAL_ROUTES"
+                ]
+              }
             }
           }
         }

@@ -23,10 +23,18 @@ import { nexusModuleById } from "../platform/surfaceRegistry";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 
 type RuntimeRecord = Record<string, unknown>;
 type LoadState = "loading" | "ready" | "empty" | "unavailable";
 type MissionStepState = "complete" | "active" | "ready" | "staged" | "blocked" | "unavailable" | "planned";
+type MissionPlanPayload = { objective: string };
 
 const object = (value: unknown): RuntimeRecord => value && typeof value === "object" && !Array.isArray(value) ? value as RuntimeRecord : {};
 const rows = (value: unknown, names: string[]) => {
@@ -129,6 +137,7 @@ export function MissionDashboard({
   const [missionState, setMissionState] = useState<LoadState>("loading");
   const [receiptState, setReceiptState] = useState<LoadState>("loading");
   const [objective, setObjective] = useState("");
+  const [pendingPlan, setPendingPlan] = useState<PrivateDraftOperation<MissionPlanPayload> | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -198,19 +207,26 @@ export function MissionDashboard({
   }, [selected]);
 
   async function plan() {
-    const submittedObjective = objective.trim();
-    if (!submittedObjective) return;
+    if (!pendingPlan && !objective.trim()) return;
     if (hosted && !missionCreationAllowed) {
       setError(missionCreationReason);
       return;
     }
-    setObjective("");
+    const staged = pendingPlan ?? snapshotPrivateDraftOperation(
+      { objective: objective.trim() },
+      `mission-plan:${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingPlan) setObjective("");
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingPlan(operation);
     setBusy(true);
     setError("");
     try {
-      await localNexusClient.planMission(submittedObjective);
+      await localNexusClient.planMission(operation.payload.objective, operation.idempotencyKey);
+      setPendingPlan(clearPrivateDraftAfterSuccess());
       await refresh();
     } catch (caught) {
+      setPendingPlan(retainPrivateDraftAfterFailure(operation));
       setError(caught instanceof Error ? caught.message : "Mission planning failed safely.");
       setBusy(false);
     }
@@ -322,7 +338,7 @@ export function MissionDashboard({
       <NexusMetric label="Mission Health" value={health} detail={selectedMission ? `${progress}% selected progress` : "No selected Runtime mission"} tone={health === "operational" || health === "stable" ? "success" : health === "attention" ? "attention" : "neutral"} />
     </section>
     {error && <section className="operation-error" role="alert"><ShieldAlert size={18} /><span>{error}</span></section>}
-    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the governed outcome NEXUS should coordinate…" autoComplete="off" /></label><button onClick={() => void plan()} disabled={busy || !objective.trim() || !missionCreationAllowed}><Network size={15} />Plan governed mission</button><small>{missionCreationReason} {missionReadinessNote}</small></div>
+    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => { setObjective(event.target.value); setPendingPlan(null); }} placeholder="Describe the governed outcome NEXUS should coordinate…" autoComplete="off" /></label><button onClick={() => void plan()} disabled={busy || (!objective.trim() && !pendingPlan) || !missionCreationAllowed}><Network size={15} />{pendingPlan ? "Retry exact mission plan" : "Plan governed mission"}</button><small>{missionCreationReason} {missionReadinessNote}</small></div>
     <div className="mission-dashboard__grid">
       <DataPanel eyebrow="Mission portfolio" title="Active, blocked, and completed missions" icon={<CircleGauge size={18} />}>
         <div className="mission-list">{missionState === "loading" ? <p className="replay-loading">Loading mission history from Runtime…</p> : missionState === "unavailable" ? <EmptyRecord>Runtime did not supply mission history. Mission status is unavailable.</EmptyRecord> : missions.length ? missions.map((mission) => { const id = missionId(mission); return <button key={id} data-active={id === selected} onClick={() => setSelected(id)}><div><strong>{text(mission.userObjective ?? mission.objective ?? mission.title, "Mission")}</strong><small>{id}</small></div><StatusPill value={statusOf(mission)} /></button>; }) : <EmptyRecord>No missions have been recorded by Runtime.</EmptyRecord>}</div>

@@ -8,6 +8,13 @@ import {
 import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
 import type { CapabilityRegistryProjection } from "../lib/types";
 import { nexusModuleById } from "../platform/surfaceRegistry";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
@@ -22,6 +29,7 @@ type WorkSessionRecord = {
   receiptIds?: string[];
   approvalIds?: string[];
 };
+type WorkSessionDraftPayload = { objective: string; action: "plan" | "start" };
 
 const object = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value)
@@ -66,6 +74,7 @@ export function WorkSessionsWorkspace({
 } = {}) {
   const hosted = operationalSessionClient.mode() === "hosted";
   const [objective, setObjective] = useState("");
+  const [pendingObjective, setPendingObjective] = useState<PrivateDraftOperation<WorkSessionDraftPayload> | null>(null);
   const [sessions, setSessions] = useState<WorkSessionRecord[]>([]);
   const [selected, setSelected] = useState<WorkSessionRecord | null>(null);
   const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null);
@@ -98,7 +107,7 @@ export function WorkSessionsWorkspace({
     return () => { mounted = false; };
   }, []);
 
-  async function run(operation: () => Promise<Record<string, unknown>>) {
+  async function run(operation: () => Promise<Record<string, unknown>>): Promise<boolean> {
     setBusy(true);
     setError("");
     setReceipt(null);
@@ -113,20 +122,37 @@ export function WorkSessionsWorkspace({
         : "";
       await refresh();
       if (failureReason) setError(failureReason);
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The governed Work Session operation failed safely.");
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  async function submitObjective(
-    operation: (submittedObjective: string) => Promise<Record<string, unknown>>,
-  ) {
-    const submittedObjective = objective.trim();
-    if (!submittedObjective || busy) return;
-    setObjective("");
-    await run(() => operation(submittedObjective));
+  async function submitObjective(action: "plan" | "start") {
+    if (busy) return;
+    const actionAvailability = action === "plan" ? planAction : startAction;
+    if (!actionAvailability.available) {
+      setError(actionAvailability.reason);
+      return;
+    }
+    const matchingPending = pendingObjective?.payload.action === action ? pendingObjective : null;
+    if (!matchingPending && !objective.trim()) return;
+    const staged = matchingPending ?? snapshotPrivateDraftOperation(
+      { objective: objective.trim(), action },
+      `work-session-${action}:${globalThis.crypto.randomUUID()}`,
+    );
+    if (!matchingPending) setObjective("");
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingObjective(operation);
+    const succeeded = await run(() => action === "plan"
+      ? localNexusClient.planWorkSession(operation.payload.objective, operation.idempotencyKey)
+      : localNexusClient.startWorkSession(operation.payload.objective, operation.idempotencyKey));
+    setPendingObjective(succeeded
+      ? clearPrivateDraftAfterSuccess()
+      : retainPrivateDraftAfterFailure(operation));
   }
 
   async function showReceipt() {
@@ -175,7 +201,8 @@ export function WorkSessionsWorkspace({
   const pauseAvailable = pauseAction.available;
   const cancelAvailable = cancelAction.available;
   const receiptAvailable = receiptAction.available;
-  const canSubmit = objective.trim().length > 0 && !busy;
+  const canPlan = !busy && (objective.trim().length > 0 || pendingObjective?.payload.action === "plan");
+  const canStart = !busy && (objective.trim().length > 0 || pendingObjective?.payload.action === "start");
   const selectedStatus = (selected?.status ?? "").toLowerCase();
   const terminal = new Set(["cancelled", "completed", "failed", "blocked", "budget_exceeded"]);
   const stepModule = nexusModuleById("work-sessions.step-execution");
@@ -212,7 +239,7 @@ export function WorkSessionsWorkspace({
         <span>Objective</span>
         <textarea
           value={objective}
-          onChange={(event) => setObjective(event.target.value)}
+          onChange={(event) => { setObjective(event.target.value); setPendingObjective(null); }}
           placeholder="Describe one bounded objective."
           maxLength={4_000}
           disabled={busy}
@@ -220,11 +247,11 @@ export function WorkSessionsWorkspace({
         />
       </label>
       <div className="work-sessions-workspace__actions">
-        <button type="button" disabled={!canSubmit || !planAvailable} title={planAvailable ? undefined : planAction.reason} onClick={() => void submitObjective((submittedObjective) => localNexusClient.planWorkSession(submittedObjective))}>
-          <Route size={15} aria-hidden="true" /> Plan
+        <button type="button" disabled={!canPlan || !planAvailable} title={planAvailable ? undefined : planAction.reason} onClick={() => void submitObjective("plan")}>
+          <Route size={15} aria-hidden="true" /> {pendingObjective?.payload.action === "plan" ? "Retry exact plan" : "Plan"}
         </button>
-        <button type="button" disabled={!canSubmit || !startAvailable} title={startAvailable ? undefined : startAction.reason} onClick={() => void submitObjective((submittedObjective) => localNexusClient.startWorkSession(submittedObjective))}>
-          <Play size={15} aria-hidden="true" /> Start
+        <button type="button" disabled={!canStart || !startAvailable} title={startAvailable ? undefined : startAction.reason} onClick={() => void submitObjective("start")}>
+          <Play size={15} aria-hidden="true" /> {pendingObjective?.payload.action === "start" ? "Retry exact start" : "Start"}
         </button>
       </div>
       {unavailableActionReasons.length > 0 && <p className="boundary-note">{unavailableActionReasons.join(" ")}</p>}

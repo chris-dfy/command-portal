@@ -32,26 +32,35 @@
     "resolution_digest": "sha256:96f967e6d7fcc76d4e4809d792f537138c306a2aa7643cf84fe6084cc8f6e6e7"
   },
   "disposition": "no_constitutional_change",
-  "rationale": "This additive post-Mission-5 Experience integration implements existing presentation and contract-consumption duties without changing constitutional meaning. It mounts a read-only hosted command directory, makes every mutation retain its exact action and session gate, consumes transient drafts before transport while keeping exact idempotent retry material only in private component state, distinguishes verified Realtime voice from governed text and browser-speech fallback, and exposes Runtime-returned proof, receipt, Mission, and Replay identities next to successful results. Operational Replay remains a passive generic projection selected through canonical Mission, receipt, or Replay routes with stale-request guards. Portable cross-client unavailability now requires an enumerated Runtime-contract limitation proof; source absence is not accepted as capability evidence. Browser persistence is reduced to the Light, Dark, or System color-mode preference. The change creates no Runtime truth, Authority, completion claim, deployment, production-readiness claim, Mission 6 work, or mutation of accepted Mission history and receipts.",
+  "rationale": "This additive post-Mission-5 Experience integration and corrective follow-up implement existing presentation and contract-consumption duties without changing constitutional meaning. Conclave creation is independently gated and create-only: it preserves and selects the durable canonical workspace with a stable run-pending identity even when the distinct run action is unavailable; only the explicit, separately run-gated control can dispatch that exact run, and terminal success requires the canonical receipt-backed verification predicate. Realtime response timeout in Voice and Copilot now stages the captured transcript and stable idempotency identity only in private component state, performs zero governed Voice POSTs until the operator clicks the explicit text-action-gated control, preserves unrelated editable composer text, and reuses one key without duplicating user history across ambiguous retries. Project, Document, Work Session, Mission, Knowledge, Edge, and baseline draft mutations use the same executable private snapshot, attempt, retain-on-failure, and clear-on-success lifecycle where their gateway contract supports idempotency; Copilot HIF text remains visible and disabled in flight and clears only after a durable interaction identity because that contract exposes no truthful browser idempotency seam. Every unavailable portable client projection, including symmetric desktop/web states, must exactly match an exhaustive module/client/basis evidence catalog whose repo paths and authoritative headings or symbols are resolved by tests; implementation absence, circular registry references, opaque strings, and generic unmatched evidence fail closed. Operational Replay remains passive, browser persistence remains limited to color-mode preference, and no Runtime truth, Authority, completion claim, deployment, production-readiness claim, Mission 6 work, or accepted Mission history or receipt is created or mutated.",
   "evidence_references": [
     "command:./nexusctl constitution-registry validate (valid=true; NCR-1.0.0; sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa)",
     "command:constitutional basis resolution for 21 direct principle revisions (sha256:96f967e6d7fcc76d4e4809d792f537138c306a2aa7643cf84fe6084cc8f6e6e7)",
-    "command:npm run build (TypeScript noEmit and Vite production build passed; 1637 modules transformed)",
-    "command:npm test (266 passed; 0 failed)",
-    "command:npm run verify:build (hashed JavaScript and stylesheet present; secretValuesExposed=false)",
+    "command:npm run check (TypeScript noEmit and Vite production build passed; 1641 modules transformed; 274 tests passed; 0 failed)",
+    "command:npm run verify:build (javascript=/assets/index-Bp4JYUsE.js; stylesheet=/assets/index-2uPu4ePX.css; secretValuesExposed=false)",
     "path:src/platform/surface-registry.json",
     "path:src/platform/surfaceRegistry.ts",
+    "path:src/platform/portable-limitation-proof.ts",
+    "path:src/lib/conclave-action-flow.ts",
+    "path:src/lib/private-draft-operation.ts",
+    "path:src/lib/acceptance-bound-draft.ts",
+    "path:src/components/ConclaveWorkspace.tsx",
+    "path:src/components/NexusCopilot.tsx",
     "path:src/components/OperationalResultLineage.tsx",
     "path:src/components/OperationalReplay.tsx",
     "path:src/components/VoiceWorkspace.tsx",
     "path:src/appearance/colorModePreference.js",
     "path:tests/prompt-draft-lifecycle.test.mjs",
+    "path:tests/conclave-action-flow.test.mjs",
+    "path:tests/private-draft-operation.test.mjs",
+    "path:tests/acceptance-bound-draft.test.mjs",
+    "path:tests/portable-limitation-proof.test.mjs",
     "path:tests/post-m5-functional-closure.test.mjs",
     "path:tests/surface-registry.test.mjs",
     "limitation:verification is local source, contract, test, and production-build evidence only; it does not claim a Replit deployment or authenticated live-browser postcondition",
-    "rollback:additively revert only the scoped web functional-closure commit after the two preserved merge commits; retain all Runtime records, receipts, accepted Mission history, and predecessor branches"
+    "rollback:additively revert the corrective follow-up commit and, only if necessary, the prior scoped web functional-closure commit after the two preserved merge commits; retain all Runtime records, receipts, accepted Mission history, and predecessor branches"
   ],
   "conflicts": [],
   "recorded_by": "NEXUS Engineering",
-  "recorded_at": "2026-07-31T23:44:22Z"
+  "recorded_at": "2026-08-01T00:21:57Z"
 }

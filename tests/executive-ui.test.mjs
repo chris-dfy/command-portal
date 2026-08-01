@@ -211,7 +211,7 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /REALTIME_RESPONSE_TIMEOUT_MS = 10_000/);
   assert.match(realtime, /"response_timeout"/);
   for (const event of ["SpeechStarted", "SpeechInterrupted", "ConversationStarted", "AvatarMoveRequested", "NavigationRequested", "FocusRequested", "PresentationStarted", "StreamingChunk"]) assert.match(hif, new RegExp(event));
-  assert.match(voice, /localNexusClient\.routeTranscript\([\s\S]*?operation\.transcript,[\s\S]*?operation\.source,[\s\S]*?signal,[\s\S]*?operation\.idempotencyKey/);
+  assert.match(voice, /localNexusClient\.routeTranscript\([\s\S]*?explicitOperation\.payload\.transcript,[\s\S]*?explicitOperation\.payload\.source,[\s\S]*?signal,[\s\S]*?explicitOperation\.idempotencyKey/);
   assert.match(voice, /setTranscript\(""\)/);
   assert.match(voice, /governed NEXUS Runtime Voice Operator/);
   assert.match(hif, /clientId: "nexus-web"/);
@@ -278,9 +278,10 @@ test("direct hosted workspace paths survive a fresh page load", async () => {
 });
 
 test("Conclave is a visible Runtime-owned decision challenge capability", async () => {
-  const [app, registry, conclave, client, localClient, styles] = await Promise.all([
+  const [app, registry, conclave, client, directory, localClient, styles] = await Promise.all([
     read("../src/App.tsx"), surfaceRegistry(),
     read("../src/components/ConclaveWorkspace.tsx"), read("../src/lib/conclave-client.ts"),
+    read("../src/lib/conclave-directory.ts"),
     read("../src/lib/local-client.ts"), read("../src/styles.css")
   ]);
   assert.equal(registry.surfaces.find((surface) => surface.id === "conclave")?.label, "Conclave");
@@ -289,8 +290,11 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(client, /localNexusClient\.createConclaveWorkspace/);
   assert.match(client, /localNexusClient\.runConclaveWorkspace/);
   assert.match(client, /localNexusClient\.conclaveWorkspace/);
-  assert.match(client, /reviewIntegrityVerified === true/);
-  assert.match(client, /terminalReceiptVerified === true/);
+  assert.match(client, /isVerifiedCanonicalReview/);
+  assert.match(directory, /lifecyclePosture === "canonical_operational"/);
+  assert.match(directory, /reviewIntegrityVerified === true/);
+  assert.match(directory, /terminalReceiptVerified === true/);
+  assert.match(directory, /completionReceipt[\s\S]*runReceipt/);
   assert.match(client, /runPending: true/);
   assert.match(client, /expectedWorkspaceVersion/);
   assert.doesNotMatch(client, /\/api\/runtime\/conclave\/reviews|runConclaveReview/);
@@ -304,7 +308,9 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(conclave, /Historical prompt only — not a Review result/);
   assert.match(conclave, /does not substitute a static one-shot review/);
   assert.match(conclave, /Run governed review/);
-  assert.match(conclave, /created workspace was preserved/i);
+  assert.match(conclave, /Creation does not dispatch a run/);
+  assert.match(conclave, /createAllowed: creationAllowed, runAllowed/);
+  assert.match(conclave, /createConclaveInvestigation/);
   assert.match(conclave, /workspaceDisplayStatus\(workspace\)/);
   assert.match(conclave, /workspace\.lifecyclePosture === "legacy_read_only"/);
   assert.doesNotMatch(conclave, /displayStatus\s*\?\?\s*(?:workspace\??\.)?status/);
@@ -317,8 +323,9 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(conclave, /pathTemplate: "\/conclave\/workspaces"/);
   assert.match(conclave, /pathTemplate: "\/conclave\/workspaces\/\{mission_id\}\/run"/);
   assert.match(conclave, /pathTemplate: "\/conclave\/workspaces\/\{mission_id\}\/tasks\/\{task_id\}\/evidence"/);
-  assert.match(conclave, /const creationAllowed = createAction\.available && runAction\.available/);
-  assert.match(conclave, /const runAllowed = runAction\.available/);
+  assert.match(conclave, /conclaveActionGates\([\s\S]*createAction\.available,[\s\S]*runAction\.available/);
+  assert.doesNotMatch(conclave, /creationAllowed[^\n]*&& runAction\.available/);
+  assert.match(conclave, /createAllowed: creationAllowed, runAllowed/);
   assert.match(conclave, /Runtime derives the collector from the authenticated principal/);
   assert.match(conclave, /"tenant_knowledge"/);
   assert.match(conclave, /"retrieved_evidence"/);
@@ -796,8 +803,10 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
     "VoiceWorkspace must reject unavailable typed text routing before forwarding",
   );
   assert.match(voice, /disabled=\{!textAction\.available/);
-  assert.match(voice, /code === "response_timeout" && captured && textAction\.available/);
-  assert.match(voice, /routeGovernedTranscript\([\s\S]*?captured,[\s\S]*?"browser_speech"/);
+  assert.match(voice, /code === "response_timeout" && captured/);
+  assert.match(voice, /The captured transcript has not been sent/);
+  assert.doesNotMatch(voice, /code === "response_timeout" && captured[\s\S]{0,700}void routeGovernedTranscript/);
+  assert.match(voice, /Send captured transcript through governed Voice/);
   assert.match(voice, /runBoundedTask\([\s\S]*?GOVERNED_VOICE_RESPONSE_TIMEOUT_MS/);
   assert.match(realtime, /this\.startResponseBoundary\(\)/);
   assert.match(realtime, /this\.disposeTransport\(\)[\s\S]*?this\.callbacks\.onState\("error"\)/);

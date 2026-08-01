@@ -77,7 +77,7 @@ test("Voice distinguishes provider-backed live availability from governed fallba
   assert.match(voice, /<dt>Browser capture<\/dt>/);
   assert.match(voice, /<dt>Governed fallback<\/dt>/);
   assert.match(voice, /\["listening", "thinking", "speaking", "interrupted"\]\.includes\(voiceState\)/);
-  assert.match(voice, /Retry exact governed request/);
+  assert.match(voice, /Retry exact governed Voice request/);
   assert.match(client, /idempotencyKey = `voice-transcript:\$\{globalThis\.crypto\.randomUUID\(\)\}`/);
   assert.match(client, /routeTranscript:[\s\S]*idempotencyKey,[\s\S]*\),/);
 });

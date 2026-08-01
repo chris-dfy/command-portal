@@ -164,7 +164,7 @@ test("a preexisting canonical v2 investigation resumes with a stable run identit
   assert.equal(first.runIdempotencyKey, `conclave-run-${"c".repeat(64)}`);
 });
 
-test("completed, legacy, unavailable, and malformed workspaces do not become runnable", () => {
+test("canonical incomplete run identity survives action-unavailable refresh while completed and legacy records do not become pending", () => {
   const canonical = {
     schemaVersion: "nexus.conclave-workspace@2.0.0",
     workspaceVersion: `sha256:${"d".repeat(64)}`,
@@ -175,10 +175,15 @@ test("completed, legacy, unavailable, and malformed workspaces do not become run
   for (const workspace of [
     { ...canonical, reviewCompleted: true },
     { ...canonical, lifecyclePosture: "legacy_read_only", availableActions: ["restart_canonical"] },
-    { ...canonical, availableActions: [] },
   ]) {
     assert.equal(identity.recoverableConclaveRun(workspace).runPending, false);
   }
+  const actionUnavailableRefresh = identity.recoverableConclaveRun({
+    ...canonical,
+    availableActions: [],
+  });
+  assert.equal(actionUnavailableRefresh.runPending, true);
+  assert.equal(actionUnavailableRefresh.runIdempotencyKey, `conclave-run-${"d".repeat(64)}`);
   assert.throws(
     () => identity.stableConclaveRunIdempotencyKey("not-a-workspace-version"),
     /exact sha256 workspace version/,

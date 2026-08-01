@@ -6,9 +6,17 @@ import { StatusPill } from "./StatusPill";
 import { localNexusClient, operationalSessionClient, type OperationalSession } from "../lib/local-client";
 import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
 import type { CapabilityRegistryProjection } from "../lib/types";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 import "./OperationsWorkspace.css";
 
 type RuntimeRecord = Record<string, unknown>;
+type MissionPlanPayload = { objective: string };
 
 const object = (value: unknown): RuntimeRecord => value && typeof value === "object" && !Array.isArray(value) ? value as RuntimeRecord : {};
 const records = (value: unknown, keys: string[]): RuntimeRecord[] => {
@@ -55,6 +63,7 @@ export function OperationsWorkspace({
   const [missionReceipts, setMissionReceipts] = useState<RuntimeRecord[]>([]);
   const [missionReplay, setMissionReplay] = useState<RuntimeRecord | null>(null);
   const [objective, setObjective] = useState("");
+  const [pendingPlan, setPendingPlan] = useState<PrivateDraftOperation<MissionPlanPayload> | null>(null);
   const [result, setResult] = useState<RuntimeRecord | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -172,19 +181,26 @@ export function OperationsWorkspace({
       setErrors([missionCreationReason]);
       return;
     }
-    const submittedObjective = objective.trim();
-    if (!submittedObjective) {
+    if (!pendingPlan && !objective.trim()) {
       setErrors(["Enter an evidence-bound mission objective."]);
       return;
     }
-    setObjective("");
+    const staged = pendingPlan ?? snapshotPrivateDraftOperation(
+      { objective: objective.trim() },
+      `mission-plan:${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingPlan) setObjective("");
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingPlan(operation);
     setBusy(true);
     setErrors([]);
     try {
-      const next = await localNexusClient.planMission(submittedObjective);
+      const next = await localNexusClient.planMission(operation.payload.objective, operation.idempotencyKey);
+      setPendingPlan(clearPrivateDraftAfterSuccess());
       setResult(next);
       await refresh();
     } catch (caught) {
+      setPendingPlan(retainPrivateDraftAfterFailure(operation));
       setErrors([caught instanceof Error ? caught.message : "Mission creation failed safely."]);
     } finally { setBusy(false); }
   }
@@ -228,8 +244,8 @@ export function OperationsWorkspace({
     {errors.length > 0 && <section className="operation-error span-2" role="alert"><ShieldAlert size={18} /><span>{[...new Set(errors)].join(" ")}</span></section>}
 
     <DataPanel eyebrow="Mission Control" title="Plan a canonical Mission" icon={<Route size={18} />}>
-      <label className="operation-field"><span>Evidence-bound objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the operational question NEXUS should investigate…" autoComplete="off" /></label>
-      <div className="operation-actions"><button onClick={() => void planMission()} disabled={busy || !objective.trim() || !missionCreationAllowed}><ClipboardCheck size={15} /> Plan governed Mission</button><button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} /> Refresh</button></div>
+      <label className="operation-field"><span>Evidence-bound objective</span><textarea value={objective} onChange={(event) => { setObjective(event.target.value); setPendingPlan(null); }} placeholder="Describe the operational question NEXUS should investigate…" autoComplete="off" /></label>
+      <div className="operation-actions"><button onClick={() => void planMission()} disabled={busy || (!objective.trim() && !pendingPlan) || !missionCreationAllowed}><ClipboardCheck size={15} /> {pendingPlan ? "Retry exact Mission plan" : "Plan governed Mission"}</button><button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} /> Refresh</button></div>
       <p className="boundary-note">Mission planning gate for <code>POST /missions/plan</code>: {missionCreationReason}</p>
       <p className="boundary-note">Readiness context only: {missionCapabilityReadinessNote}</p>
       {result && <><p className="boundary-note">Runtime accepted mission {plannedMissionId || "response recorded"}.</p><OperationalResultLineage missionId={plannedMissionId} onOpenReplay={onReplay} empty="The accepted Mission response did not include a discoverable Mission identity." /></>}
