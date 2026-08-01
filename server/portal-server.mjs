@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, createHmac, randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { createSessionAuthority, requiredScope } from "./operational-auth.mjs";
 import {
   createExecutiveRegistrationMapper,
@@ -45,6 +46,7 @@ export const CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE = "nexus_capability_regist
 export const CAPABILITY_REGISTRY_SCHEMA_DIGEST = "sha256:52f825444f39d285afd1d3bac82ebdab4125f85feb381339314a39faa05fa166";
 export const CAPABILITY_REGISTRY_VALIDATOR_VERSION = "nexus.capability-registry-validator@1.0.0";
 const CAPABILITY_REGISTRY_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const JSON_GZIP_MINIMUM_BYTES = 64 * 1024;
 const CAPABILITY_REGISTRY_OWNER = "context_runtime";
 const CAPABILITY_REGISTRY_PROJECTION_OWNER = "runtime.state.RuntimeState.capability_registry_projection";
 const CAPABILITY_REGISTRY_RELEASE_ID = "NCR-1.0.0";
@@ -1240,7 +1242,15 @@ export function publicExecutiveSessionTrust(config) {
 }
 
 class GatewayFailure extends Error {
-  constructor(code, message, state, status, retryable = false, details = undefined) {
+  constructor(
+    code,
+    message,
+    state,
+    status,
+    retryable = false,
+    details = undefined,
+    retryAfterMs = 0,
+  ) {
     super(message);
     this.name = "GatewayFailure";
     this.code = code;
@@ -1248,11 +1258,22 @@ class GatewayFailure extends Error {
     this.status = status;
     this.retryable = retryable;
     this.details = details;
+    this.retryAfterMs = Number.isSafeInteger(retryAfterMs) && retryAfterMs > 0
+      ? Math.min(retryAfterMs, 120_000)
+      : 0;
   }
 }
 
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 const nowIso = () => new Date().toISOString();
+
+function boundedRetryAfterMs(value) {
+  const normalized = String(value ?? "").trim();
+  if (!/^\d+$/.test(normalized)) return 0;
+  const seconds = Number(normalized);
+  if (!Number.isFinite(seconds)) return 120_000;
+  return Math.min(seconds * 1_000, 120_000);
+}
 
 function structuredLog(event, fields = {}) {
   console.log(JSON.stringify({ timestamp: nowIso(), event, ...fields }));
@@ -1316,18 +1337,64 @@ function gatewayMetadata(config, tracker, route, state, entry, additions = {}) {
   };
 }
 
+function acceptsGzip(header) {
+  const codings = String(header ?? "")
+    .split(",")
+    .map((entry) => {
+      const [coding, ...parameters] = entry.trim().toLowerCase().split(";");
+      const quality = parameters
+        .map((parameter) => parameter.trim())
+        .find((parameter) => parameter.startsWith("q="));
+      return [coding, quality === undefined ? 1 : Number(quality.slice(2))];
+    });
+  const acceptableQuality = (quality) => Number.isFinite(quality) && quality > 0 && quality <= 1;
+  const gzip = codings.find(([coding]) => coding === "gzip");
+  if (gzip) return acceptableQuality(gzip[1]);
+  const wildcard = codings.find(([coding]) => coding === "*");
+  return Boolean(wildcard && acceptableQuality(wildcard[1]));
+}
+
+function mergeVary(existing, addition) {
+  const values = String(existing ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!values.some((value) => value.toLowerCase() === addition.toLowerCase())) {
+    values.push(addition);
+  }
+  return values.join(", ");
+}
+
 function sendJson(response, status, body, extraHeaders = {}) {
   const raw = Buffer.from(JSON.stringify(body));
+  const representationVaries = raw.byteLength >= JSON_GZIP_MINIMUM_BYTES;
+  const compressed = representationVaries && acceptsGzip(response.req?.headers["accept-encoding"]);
+  const payload = compressed ? gzipSync(raw) : raw;
+  const providedVary = Object.entries(extraHeaders)
+    .find(([name]) => name.toLowerCase() === "vary")?.[1];
+  const normalizedExtraHeaders = Object.fromEntries(
+    Object.entries(extraHeaders).filter(([name]) => ![
+      "content-length",
+      "content-encoding",
+      "vary",
+    ].includes(name.toLowerCase())),
+  );
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": raw.byteLength,
+    "Content-Length": payload.byteLength,
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
-    ...extraHeaders
+    ...(
+      representationVaries
+        ? { Vary: mergeVary(providedVary, "Accept-Encoding") }
+        : (providedVary === undefined ? {} : { Vary: providedVary })
+    ),
+    ...(compressed ? { "Content-Encoding": "gzip" } : {}),
+    ...normalizedExtraHeaders,
   });
-  response.end(raw);
+  response.end(payload);
 }
 
 function localEnvelope(config, route, data, additions = {}) {
@@ -4100,7 +4167,13 @@ function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
       } catch (error) {
         clear();
         refreshFailure = error;
-        refreshRetryAt = Number(clock()) + refreshFailureCooldownMs;
+        const retryAfterMs = error instanceof GatewayFailure
+          ? error.retryAfterMs
+          : 0;
+        refreshRetryAt = Number(clock()) + Math.max(
+          refreshFailureCooldownMs,
+          retryAfterMs,
+        );
         throw error;
       }
     })();
@@ -4261,7 +4334,11 @@ async function fetchRuntime(
     try {
       response = await runtimeFetch(`${config.runtimeBaseUrl}${runtimePath}`, {
         method: "GET",
-        headers: { Accept: "application/json", Authorization: `Bearer ${config.runtimeToken}` },
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "gzip",
+          Authorization: `Bearer ${config.runtimeToken}`,
+        },
         signal: controller.signal,
         redirect: "error"
       });
@@ -4276,7 +4353,15 @@ async function fetchRuntime(
     }
     const processReadyDegraded = runtimePath === "/ready" && response.status === 503;
     if (!response.ok && !processReadyDegraded) {
-      throw new GatewayFailure("runtime_unavailable", `Runtime returned status ${response.status}.`, "Unavailable", 503, response.status >= 500 || response.status === 429);
+      throw new GatewayFailure(
+        "runtime_unavailable",
+        `Runtime returned status ${response.status}.`,
+        "Unavailable",
+        503,
+        response.status >= 500 || response.status === 429,
+        undefined,
+        boundedRetryAfterMs(response.headers.get("retry-after")),
+      );
     }
     const declaredLength = Number(response.headers.get("content-length") ?? 0);
     if (declaredLength > maximumResponseBytes) {
@@ -4555,7 +4640,11 @@ async function fetchWithRetry(
       };
     } catch (error) {
       failure = error instanceof GatewayFailure ? error : new GatewayFailure("runtime_unknown", "Runtime request failed.", "Unknown", 502);
-      if (!failure.retryable || attempt === config.maxAttempts) break;
+      if (
+        !failure.retryable
+        || failure.retryAfterMs > 0
+        || attempt === config.maxAttempts
+      ) break;
       structuredLog("runtime_retry", { state: "Retrying", attempt, runtimePath });
       await delay(config.retryDelayMs);
     }

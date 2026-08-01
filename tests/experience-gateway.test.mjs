@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { afterEach, test } from "node:test";
+import { gunzipSync, gzipSync } from "node:zlib";
 import {
   CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE,
   CAPABILITY_REGISTRY_RECORD_TYPE,
@@ -104,6 +106,29 @@ function resignCapabilityProjection(projection) {
   delete projection.projectionDigest;
   projection.projectionDigest = capabilityProjectionDigest(projection);
   return projection;
+}
+
+function rawHttpGet(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(url, { method: "GET", headers }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({
+        status: response.statusCode,
+        headers: response.headers,
+        body: Buffer.concat(chunks),
+      }));
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+async function startHttpServer(handler) {
+  const server = createHttpServer(handler);
+  servers.push(server);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return `http://127.0.0.1:${server.address().port}`;
 }
 
 function capabilityRegistryProjection(overrides = {}) {
@@ -441,6 +466,51 @@ function actionAdmissionProjection({
           : "Complete Runtime registration and current verification before invocation.",
       };
     });
+  projection.actionCount = projection.actions.length;
+  projection.summary = {
+    ...projection.summary,
+    actionCount: projection.actions.length,
+    actionClassifications: projection.actions.reduce((counts, action) => ({
+      ...counts,
+      [action.classification]: (counts[action.classification] ?? 0) + 1,
+    }), {}),
+  };
+  return resignCapabilityProjection(projection);
+}
+
+function fullScaleActionAdmissionProjection(actionCount = 1_396) {
+  const projection = actionAdmissionProjection();
+  const additionalActions = Array.from(
+    { length: actionCount - projection.actions.length },
+    (_, index) => {
+      const identity = String(index + 1).padStart(4, "0");
+      return {
+        actionId: `test.transport.action.${identity}`,
+        capabilityId: projection.capabilities[0].capabilityId,
+        connectorId: projection.connectors[0].connectorId,
+        handlerId: `test.transport.handler.${identity}`,
+        operationId: `test.transport.operation.${identity}`,
+        inputSchemaId: `contracts.capabilities.testTransportAction${identity}Input`,
+        method: "GET",
+        pathTemplate: `/runtime/test-transport/${identity}`,
+        invocationSurfaces: ["api"],
+        invocationPaths: [`api:GET /runtime/test-transport/${identity}`],
+        classification: "unavailable",
+        operationalAvailability: false,
+        invocable: false,
+        authorizationRequirement: "No execution Authority is granted by this transport-scale test record.",
+        authorityGranted: false,
+        receiptRefs: [],
+        limitations: ["Synthetic unavailable action used only to reproduce canonical projection transport scale."],
+        requiredNextAction: "Register and verify a real Runtime action before invocation.",
+      };
+    },
+  );
+  projection.actions = [...projection.actions, ...additionalActions];
+  projection.inventory = {
+    ...projection.inventory,
+    totalActionCount: projection.actions.length,
+  };
   projection.actionCount = projection.actions.length;
   projection.summary = {
     ...projection.summary,
@@ -1188,6 +1258,103 @@ test("a failed concurrent admission refresh has a bounded cooldown instead of cr
   assert.equal(runtimeCalls, 0);
 });
 
+test("Runtime Retry-After bounds concurrent admission failure cooldown at 120 seconds", async () => {
+  let now = Date.now();
+  let registryCalls = 0;
+  let runtimeCalls = 0;
+  const runtimeFetch = async (url) => {
+    if (url.endsWith("/runtime/capability-registry")) {
+      registryCalls += 1;
+      return runtimeResponse({}, {
+        status: 503,
+        headers: { "Retry-After": "600" },
+      });
+    }
+    runtimeCalls += 1;
+    return runtimeResponse({ route: url });
+  };
+  const base = await start(
+    runtimeFetch,
+    {
+      testUseProvidedCapabilityRegistry: true,
+      maxAttempts: 3,
+      retryDelayMs: 500,
+    },
+    runtimeFetch,
+    runtimeFetch,
+    runtimeFetch,
+    () => now,
+  );
+  const routes = ["status", "health", "version", "providers", "environment", "diagnostics"];
+
+  const concurrent = await Promise.all(
+    routes.map((route) => fetch(`${base}/api/runtime/${route}`)),
+  );
+  assert.deepEqual(concurrent.map((response) => response.status), routes.map(() => 503));
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+
+  now += 119_999;
+  assert.equal((await fetch(`${base}/api/runtime/status`)).status, 503);
+  assert.equal(registryCalls, 1);
+
+  now += 1;
+  assert.equal((await fetch(`${base}/api/runtime/status`)).status, 503);
+  assert.equal(registryCalls, 2);
+  assert.equal(runtimeCalls, 0);
+});
+
+test("admission refresh recovers once Runtime Retry-After expires", async () => {
+  let now = Date.now();
+  let registryAvailable = false;
+  let registryCalls = 0;
+  let runtimeCalls = 0;
+  const runtimeFetch = async (url) => {
+    if (url.endsWith("/runtime/capability-registry")) {
+      registryCalls += 1;
+      return registryAvailable
+        ? runtimeResponse(actionAdmissionProjection())
+        : runtimeResponse({}, {
+            status: 503,
+            headers: { "Retry-After": "30" },
+          });
+    }
+    runtimeCalls += 1;
+    return runtimeResponse({ route: new URL(url).pathname });
+  };
+  const base = await start(
+    runtimeFetch,
+    { testUseProvidedCapabilityRegistry: true, maxAttempts: 3 },
+    runtimeFetch,
+    runtimeFetch,
+    runtimeFetch,
+    () => now,
+  );
+
+  assert.equal((await fetch(`${base}/api/runtime/status`)).status, 503);
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+
+  registryAvailable = true;
+  now += 29_999;
+  assert.equal((await fetch(`${base}/api/runtime/health`)).status, 503);
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+
+  now += 1;
+  const recovered = await fetch(`${base}/api/runtime/status`);
+  const recoveredBody = await recovered.json();
+  assert.equal(recovered.status, 200);
+  assert.equal(recoveredBody.ok, true);
+  assert.equal(recoveredBody.data.route, "/runtime/status");
+  assert.equal(registryCalls, 2);
+  assert.equal(runtimeCalls, 1);
+
+  assert.equal((await fetch(`${base}/api/runtime/health`)).status, 200);
+  assert.equal(registryCalls, 2);
+  assert.equal(runtimeCalls, 2);
+});
+
 test("one browser bootstrap stays on one Gateway instance and reads the Runtime Registry once", async () => {
   let activeRuntimeReads = 0;
   let maximumRuntimeReads = 0;
@@ -1253,6 +1420,216 @@ test("one browser bootstrap stays on one Gateway instance and reads the Runtime 
   assert.equal(result.data.ready?.data.processReady, true);
   assert.ok(firstServer.experienceGateway.actionAdmission.snapshot());
   assert.equal(secondServer.experienceGateway.actionAdmission.snapshot(), null);
+});
+
+test("Runtime Registry Retry-After suppresses bootstrap retry amplification", async () => {
+  let registryCalls = 0;
+  let childCalls = 0;
+  const base = await start(async (url) => {
+    if (url.endsWith("/runtime/capability-registry")) {
+      registryCalls += 1;
+      return runtimeResponse({}, {
+        status: 503,
+        headers: { "Retry-After": "30" },
+      });
+    }
+    childCalls += 1;
+    return runtimeResponse({ route: url });
+  }, {
+    testUseProvidedCapabilityRegistry: true,
+    maxAttempts: 3,
+    retryDelayMs: 0,
+  });
+
+  const response = await originalFetch(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`);
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.registryAdmitted, false);
+  assert.equal(body.failedRoutes.length, body.routeCount);
+  assert.equal(body.data["capability-registry"].error.code, "runtime_unavailable");
+  assert.equal(Object.values(body.data).every((envelope) => envelope.ok === false), true);
+  assert.equal(registryCalls, 1);
+  assert.equal(childCalls, 0);
+  assert.doesNotMatch(JSON.stringify(body), /retryAfter/i);
+});
+
+test("full-scale browser bootstrap is gzip-bounded without truncating Runtime truth", async () => {
+  const projection = fullScaleActionAdmissionProjection();
+  let activeRuntimeReads = 0;
+  let maximumRuntimeReads = 0;
+  let registryReads = 0;
+  const upstreamEncodings = [];
+  const runtimeFetch = async (url, options) => {
+    const runtimePath = new URL(url).pathname;
+    upstreamEncodings.push(options.headers["Accept-Encoding"]);
+    activeRuntimeReads += 1;
+    maximumRuntimeReads = Math.max(maximumRuntimeReads, activeRuntimeReads);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (runtimePath === "/runtime/capability-registry") {
+        registryReads += 1;
+        return runtimeResponse(projection);
+      }
+      if (runtimePath === "/ready") {
+        return runtimeResponse({
+          processReady: true,
+          platformContractReady: false,
+        }, {
+          status: 503,
+          body: { status: "not_ready" },
+        });
+      }
+      return runtimeResponse({ route: runtimePath });
+    } finally {
+      activeRuntimeReads -= 1;
+    }
+  };
+  const base = await start(runtimeFetch, {
+    testUseProvidedCapabilityRegistry: true,
+    timeoutMs: 250,
+  });
+
+  const compressed = await rawHttpGet(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`, {
+    "Accept-Encoding": "gzip",
+  });
+  assert.equal(compressed.status, 200);
+  assert.equal(compressed.headers["content-encoding"], "gzip");
+  assert.equal(Number(compressed.headers["content-length"]), compressed.body.byteLength);
+  assert.match(compressed.headers.vary, /(?:^|,)\s*Accept-Encoding\s*(?:,|$)/i);
+  const decoded = gunzipSync(compressed.body);
+  assert.ok(compressed.body.byteLength < decoded.byteLength / 3);
+  const compressedBody = JSON.parse(decoded.toString("utf8"));
+  assert.equal(compressedBody.registryAdmitted, true);
+  assert.equal(compressedBody.routeCount, Object.keys(RUNTIME_BOOTSTRAP_ROUTES).length);
+  const transportedProjection = compressedBody.data["capability-registry"].data;
+  assert.deepEqual(transportedProjection, projection);
+  assert.equal(capabilityProjectionDigest(transportedProjection), transportedProjection.projectionDigest);
+  assert.equal(transportedProjection.actions.length, 1_396);
+  assert.equal(new Set(transportedProjection.actions.map((action) => action.actionId)).size, 1_396);
+  assert.equal(transportedProjection.actionCount, 1_396);
+  assert.equal(transportedProjection.summary.actionCount, 1_396);
+  assert.equal(transportedProjection.inventory.totalActionCount, 1_396);
+  assert.equal(transportedProjection.secretValuesExposed, false);
+  assert.equal(registryReads, 1);
+  assert.ok(maximumRuntimeReads <= 3, `observed ${maximumRuntimeReads} concurrent Runtime reads`);
+  assert.equal(upstreamEncodings.every((value) => value === "gzip"), true);
+
+  const identity = await rawHttpGet(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`, {
+    "Accept-Encoding": "identity",
+  });
+  assert.equal(identity.status, 200);
+  assert.equal(identity.headers["content-encoding"], undefined);
+  assert.equal(Number(identity.headers["content-length"]), identity.body.byteLength);
+  assert.match(identity.headers.vary, /(?:^|,)\s*Accept-Encoding\s*(?:,|$)/i);
+  const identityBody = JSON.parse(identity.body.toString("utf8"));
+  assert.equal(identityBody.data["capability-registry"].data.projectionDigest, projection.projectionDigest);
+  assert.equal(identityBody.data["capability-registry"].data.actions.length, 1_396);
+  assert.equal(registryReads, 2);
+
+  const explicitlyRejected = await rawHttpGet(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`, {
+    "Accept-Encoding": "gzip;q=0, *;q=1",
+  });
+  assert.equal(explicitlyRejected.status, 200);
+  assert.equal(explicitlyRejected.headers["content-encoding"], undefined);
+  assert.equal(Number(explicitlyRejected.headers["content-length"]), explicitlyRejected.body.byteLength);
+  assert.equal(JSON.parse(explicitlyRejected.body.toString("utf8")).registryAdmitted, true);
+  assert.equal(registryReads, 3);
+  assert.equal(upstreamEncodings.every((value) => value === "gzip"), true);
+});
+
+test("actual gzipped Runtime bootstrap preserves full-scale projection identity", async () => {
+  const projection = fullScaleActionAdmissionProjection();
+  const upstreamEncodings = [];
+  const upstreamWireLengths = [];
+  const upstreamDecodedLengths = [];
+  const runtimeBase = await startHttpServer((request, response) => {
+    const runtimePath = new URL(request.url, "http://runtime.invalid").pathname;
+    upstreamEncodings.push(request.headers["accept-encoding"]);
+    let status = 200;
+    let body;
+    if (runtimePath === "/runtime/capability-registry") {
+      body = runtimeEnvelope(projection);
+    } else if (runtimePath === "/ready") {
+      status = 503;
+      body = runtimeEnvelope({
+        processReady: true,
+        platformContractReady: false,
+      }, { status: "not_ready" });
+    } else {
+      body = runtimeEnvelope({ route: runtimePath });
+    }
+    const raw = Buffer.from(JSON.stringify(body));
+    const encoded = gzipSync(raw);
+    upstreamDecodedLengths.push(raw.byteLength);
+    upstreamWireLengths.push(encoded.byteLength);
+    response.writeHead(status, {
+      "Content-Type": "application/json",
+      "Content-Encoding": "gzip",
+      "Content-Length": encoded.byteLength,
+      Connection: "close",
+    });
+    response.end(encoded);
+  });
+  const base = await start(originalFetch, {
+    testUseProvidedCapabilityRegistry: true,
+    runtimeBaseUrl: runtimeBase,
+    timeoutMs: 1_000,
+  });
+
+  const response = await rawHttpGet(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`, {
+    "Accept-Encoding": "gzip",
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers["content-encoding"], "gzip");
+  assert.equal(Number(response.headers["content-length"]), response.body.byteLength);
+  const body = JSON.parse(gunzipSync(response.body).toString("utf8"));
+  assert.equal(body.registryAdmitted, true);
+  assert.deepEqual(body.data["capability-registry"].data, projection);
+  assert.equal(capabilityProjectionDigest(body.data["capability-registry"].data), projection.projectionDigest);
+  assert.equal(upstreamEncodings.every((value) => value === "gzip"), true);
+  assert.ok(upstreamWireLengths[0] < upstreamDecodedLengths[0] / 3);
+});
+
+test("actual gzipped Runtime Registry still enforces the decoded four-MiB ceiling", async () => {
+  const oversizedRuntimeBody = runtimeEnvelope({
+    padding: "A".repeat((4 * 1024 * 1024) + 1),
+  });
+  const raw = Buffer.from(JSON.stringify(oversizedRuntimeBody));
+  const encoded = gzipSync(raw);
+  assert.ok(raw.byteLength > 4 * 1024 * 1024);
+  assert.ok(encoded.byteLength < 4 * 1024 * 1024);
+  let upstreamRequests = 0;
+  const upstreamEncodings = [];
+  const runtimeBase = await startHttpServer((request, response) => {
+    upstreamRequests += 1;
+    upstreamEncodings.push(request.headers["accept-encoding"]);
+    response.writeHead(200, {
+      "Content-Type": "application/json",
+      "Content-Encoding": "gzip",
+      "Content-Length": encoded.byteLength,
+      Connection: "close",
+    });
+    response.end(encoded);
+  });
+  const base = await start(originalFetch, {
+    testUseProvidedCapabilityRegistry: true,
+    runtimeBaseUrl: runtimeBase,
+    timeoutMs: 1_000,
+  });
+
+  const response = await rawHttpGet(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`, {
+    "Accept-Encoding": "gzip",
+  });
+  assert.equal(response.status, 200);
+  const bodyBuffer = response.headers["content-encoding"] === "gzip"
+    ? gunzipSync(response.body)
+    : response.body;
+  const body = JSON.parse(bodyBuffer.toString("utf8"));
+  assert.equal(body.registryAdmitted, false);
+  assert.equal(body.data["capability-registry"].error.code, "runtime_response_too_large");
+  assert.equal(Object.values(body.data).every((envelope) => envelope.ok === false), true);
+  assert.equal(upstreamRequests, 1);
+  assert.deepEqual(upstreamEncodings, ["gzip"]);
 });
 
 test("malformed or unauthorized bootstrap Registry responses fail closed before child dispatch", async () => {

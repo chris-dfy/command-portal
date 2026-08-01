@@ -1,0 +1,51 @@
+{
+  "impact_id": "NCR-IMPACT-post-m5-experience-registry-retry-after-20260801",
+  "artifact_id": "nexus.experience.post-m5-registry-retry-after-coordination",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0002@1",
+      "NCR-CON-0006@1",
+      "NCR-CON-0019@1",
+      "NCR-CON-0020@1",
+      "NCR-CON-0026@1",
+      "NCR-CON-0027@1",
+      "NCR-CON-0028@1",
+      "NCR-CON-0029@1",
+      "NCR-CON-0030@1",
+      "NCR-CON-0033@1",
+      "NCR-ARC-0008@1",
+      "NCR-ARC-0012@1",
+      "NCR-ARC-0017@1",
+      "NCR-ARC-0019@1",
+      "NCR-ENG-0006@1",
+      "NCR-ENG-0008@1",
+      "NCR-ENG-0010@1",
+      "NCR-ENG-0011@1",
+      "NCR-ENG-0018@1",
+      "NCR-OPS-0028@1",
+      "NCR-OPS-0029@1",
+      "NCR-OPS-0030@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:85cc31f78ba6ac34fc58f02b36f6bc469ebf3c21a6343e46fc84bf66a29d3bd2"
+  },
+  "disposition": "no_constitutional_change",
+  "rationale": "This additive Experience coordination correction implements the existing Runtime-truth, bounded-read, fail-closed, and honest capability-state contracts without changing constitutional meaning. For ordinary non-success Runtime responses, the Experience Gateway accepts Retry-After only as delta-seconds, bounds it to 120 seconds, carries the result only as private Gateway failure metadata, suppresses immediate deterministic fetch retry amplification, and extends failed Capability Registry admission refresh cooldown to the greater of the local cooldown and that bounded Runtime interval. Concurrent admission refreshes remain single-flight, no stale or failed Registry projection is admitted or served, child reads remain blocked after Registry admission failure, and refresh resumes only after the bounded interval expires. The existing process-readiness /ready 503 projection remains a valid one-attempt Degraded result and is not reclassified as an ordinary failure. Invalid or absent Retry-After metadata retains the existing bounded local retry and cooldown behavior. No browser-visible retry metadata, generic proxy, mutation route, execution Authority, capability promotion, provider configuration, production claim, secret, live data, migration, deployment, or historical Mission record mutation is introduced.",
+  "evidence_references": [
+    "command:./nexusctl constitution-registry validate (valid=true; NCR-1.0.0; sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa)",
+    "command:constitutional context resolution for 22 direct principles (sha256:85cc31f78ba6ac34fc58f02b36f6bc469ebf3c21a6343e46fc84bf66a29d3bd2)",
+    "command:node --test --test-name-pattern='Runtime Retry-After bounds|admission refresh recovers|Runtime Registry Retry-After suppresses|process-ready Runtime 503|transient failure retries' tests/experience-gateway.test.mjs (5 passed; 0 failed)",
+    "command:node --test tests/experience-gateway.test.mjs tests/request-coordination.test.mjs tests/portal-client.test.mjs (97 passed; 0 failed)",
+    "command:npm run check (280 passed; 0 failed; TypeScript noEmit passed; Vite production build passed; 1641 modules transformed; sealed asset verification passed; secretValuesExposed=false)",
+    "path:server/portal-server.mjs",
+    "path:tests/experience-gateway.test.mjs",
+    "limitation:source, deterministic tests, and build verification only; this record adds no production deployment or live operational proof",
+    "rollback:revert only the scoped Experience Registry Retry-After coordination correction to restore the prior local-only admission cooldown and immediate retry behavior; no Runtime, root, secret, data, Mission, or deployment rollback is required"
+  ],
+  "conflicts": [],
+  "recorded_by": "NEXUS Engineering",
+  "recorded_at": "2026-08-01T06:10:19Z"
+}
