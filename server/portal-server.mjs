@@ -1242,7 +1242,15 @@ export function publicExecutiveSessionTrust(config) {
 }
 
 class GatewayFailure extends Error {
-  constructor(code, message, state, status, retryable = false, details = undefined) {
+  constructor(
+    code,
+    message,
+    state,
+    status,
+    retryable = false,
+    details = undefined,
+    retryAfterMs = 0,
+  ) {
     super(message);
     this.name = "GatewayFailure";
     this.code = code;
@@ -1250,11 +1258,22 @@ class GatewayFailure extends Error {
     this.status = status;
     this.retryable = retryable;
     this.details = details;
+    this.retryAfterMs = Number.isSafeInteger(retryAfterMs) && retryAfterMs > 0
+      ? Math.min(retryAfterMs, 120_000)
+      : 0;
   }
 }
 
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 const nowIso = () => new Date().toISOString();
+
+function boundedRetryAfterMs(value) {
+  const normalized = String(value ?? "").trim();
+  if (!/^\d+$/.test(normalized)) return 0;
+  const seconds = Number(normalized);
+  if (!Number.isFinite(seconds)) return 120_000;
+  return Math.min(seconds * 1_000, 120_000);
+}
 
 function structuredLog(event, fields = {}) {
   console.log(JSON.stringify({ timestamp: nowIso(), event, ...fields }));
@@ -4148,7 +4167,13 @@ function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
       } catch (error) {
         clear();
         refreshFailure = error;
-        refreshRetryAt = Number(clock()) + refreshFailureCooldownMs;
+        const retryAfterMs = error instanceof GatewayFailure
+          ? error.retryAfterMs
+          : 0;
+        refreshRetryAt = Number(clock()) + Math.max(
+          refreshFailureCooldownMs,
+          retryAfterMs,
+        );
         throw error;
       }
     })();
@@ -4328,7 +4353,15 @@ async function fetchRuntime(
     }
     const processReadyDegraded = runtimePath === "/ready" && response.status === 503;
     if (!response.ok && !processReadyDegraded) {
-      throw new GatewayFailure("runtime_unavailable", `Runtime returned status ${response.status}.`, "Unavailable", 503, response.status >= 500 || response.status === 429);
+      throw new GatewayFailure(
+        "runtime_unavailable",
+        `Runtime returned status ${response.status}.`,
+        "Unavailable",
+        503,
+        response.status >= 500 || response.status === 429,
+        undefined,
+        boundedRetryAfterMs(response.headers.get("retry-after")),
+      );
     }
     const declaredLength = Number(response.headers.get("content-length") ?? 0);
     if (declaredLength > maximumResponseBytes) {
@@ -4607,7 +4640,11 @@ async function fetchWithRetry(
       };
     } catch (error) {
       failure = error instanceof GatewayFailure ? error : new GatewayFailure("runtime_unknown", "Runtime request failed.", "Unknown", 502);
-      if (!failure.retryable || attempt === config.maxAttempts) break;
+      if (
+        !failure.retryable
+        || failure.retryAfterMs > 0
+        || attempt === config.maxAttempts
+      ) break;
       structuredLog("runtime_retry", { state: "Retrying", attempt, runtimePath });
       await delay(config.retryDelayMs);
     }

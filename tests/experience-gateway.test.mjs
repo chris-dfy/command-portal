@@ -1258,6 +1258,103 @@ test("a failed concurrent admission refresh has a bounded cooldown instead of cr
   assert.equal(runtimeCalls, 0);
 });
 
+test("Runtime Retry-After bounds concurrent admission failure cooldown at 120 seconds", async () => {
+  let now = Date.now();
+  let registryCalls = 0;
+  let runtimeCalls = 0;
+  const runtimeFetch = async (url) => {
+    if (url.endsWith("/runtime/capability-registry")) {
+      registryCalls += 1;
+      return runtimeResponse({}, {
+        status: 503,
+        headers: { "Retry-After": "600" },
+      });
+    }
+    runtimeCalls += 1;
+    return runtimeResponse({ route: url });
+  };
+  const base = await start(
+    runtimeFetch,
+    {
+      testUseProvidedCapabilityRegistry: true,
+      maxAttempts: 3,
+      retryDelayMs: 500,
+    },
+    runtimeFetch,
+    runtimeFetch,
+    runtimeFetch,
+    () => now,
+  );
+  const routes = ["status", "health", "version", "providers", "environment", "diagnostics"];
+
+  const concurrent = await Promise.all(
+    routes.map((route) => fetch(`${base}/api/runtime/${route}`)),
+  );
+  assert.deepEqual(concurrent.map((response) => response.status), routes.map(() => 503));
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+
+  now += 119_999;
+  assert.equal((await fetch(`${base}/api/runtime/status`)).status, 503);
+  assert.equal(registryCalls, 1);
+
+  now += 1;
+  assert.equal((await fetch(`${base}/api/runtime/status`)).status, 503);
+  assert.equal(registryCalls, 2);
+  assert.equal(runtimeCalls, 0);
+});
+
+test("admission refresh recovers once Runtime Retry-After expires", async () => {
+  let now = Date.now();
+  let registryAvailable = false;
+  let registryCalls = 0;
+  let runtimeCalls = 0;
+  const runtimeFetch = async (url) => {
+    if (url.endsWith("/runtime/capability-registry")) {
+      registryCalls += 1;
+      return registryAvailable
+        ? runtimeResponse(actionAdmissionProjection())
+        : runtimeResponse({}, {
+            status: 503,
+            headers: { "Retry-After": "30" },
+          });
+    }
+    runtimeCalls += 1;
+    return runtimeResponse({ route: new URL(url).pathname });
+  };
+  const base = await start(
+    runtimeFetch,
+    { testUseProvidedCapabilityRegistry: true, maxAttempts: 3 },
+    runtimeFetch,
+    runtimeFetch,
+    runtimeFetch,
+    () => now,
+  );
+
+  assert.equal((await fetch(`${base}/api/runtime/status`)).status, 503);
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+
+  registryAvailable = true;
+  now += 29_999;
+  assert.equal((await fetch(`${base}/api/runtime/health`)).status, 503);
+  assert.equal(registryCalls, 1);
+  assert.equal(runtimeCalls, 0);
+
+  now += 1;
+  const recovered = await fetch(`${base}/api/runtime/status`);
+  const recoveredBody = await recovered.json();
+  assert.equal(recovered.status, 200);
+  assert.equal(recoveredBody.ok, true);
+  assert.equal(recoveredBody.data.route, "/runtime/status");
+  assert.equal(registryCalls, 2);
+  assert.equal(runtimeCalls, 1);
+
+  assert.equal((await fetch(`${base}/api/runtime/health`)).status, 200);
+  assert.equal(registryCalls, 2);
+  assert.equal(runtimeCalls, 2);
+});
+
 test("one browser bootstrap stays on one Gateway instance and reads the Runtime Registry once", async () => {
   let activeRuntimeReads = 0;
   let maximumRuntimeReads = 0;
@@ -1323,6 +1420,37 @@ test("one browser bootstrap stays on one Gateway instance and reads the Runtime 
   assert.equal(result.data.ready?.data.processReady, true);
   assert.ok(firstServer.experienceGateway.actionAdmission.snapshot());
   assert.equal(secondServer.experienceGateway.actionAdmission.snapshot(), null);
+});
+
+test("Runtime Registry Retry-After suppresses bootstrap retry amplification", async () => {
+  let registryCalls = 0;
+  let childCalls = 0;
+  const base = await start(async (url) => {
+    if (url.endsWith("/runtime/capability-registry")) {
+      registryCalls += 1;
+      return runtimeResponse({}, {
+        status: 503,
+        headers: { "Retry-After": "30" },
+      });
+    }
+    childCalls += 1;
+    return runtimeResponse({ route: url });
+  }, {
+    testUseProvidedCapabilityRegistry: true,
+    maxAttempts: 3,
+    retryDelayMs: 0,
+  });
+
+  const response = await originalFetch(`${base}${RUNTIME_BOOTSTRAP_ROUTE}`);
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.registryAdmitted, false);
+  assert.equal(body.failedRoutes.length, body.routeCount);
+  assert.equal(body.data["capability-registry"].error.code, "runtime_unavailable");
+  assert.equal(Object.values(body.data).every((envelope) => envelope.ok === false), true);
+  assert.equal(registryCalls, 1);
+  assert.equal(childCalls, 0);
+  assert.doesNotMatch(JSON.stringify(body), /retryAfter/i);
 });
 
 test("full-scale browser bootstrap is gzip-bounded without truncating Runtime truth", async () => {
