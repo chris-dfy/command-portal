@@ -16,13 +16,25 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { localNexusClient, operationalSessionClient, type OperationalSession } from "../lib/local-client";
+import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import type { CapabilityRegistryProjection } from "../lib/types";
 import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
+import { nexusModuleById } from "../platform/surfaceRegistry";
 import { DataPanel, EmptyRecord } from "./DataPanel";
+import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 
 type RuntimeRecord = Record<string, unknown>;
 type LoadState = "loading" | "ready" | "empty" | "unavailable";
 type MissionStepState = "complete" | "active" | "ready" | "staged" | "blocked" | "unavailable" | "planned";
+type MissionPlanPayload = { objective: string };
 
 const object = (value: unknown): RuntimeRecord => value && typeof value === "object" && !Array.isArray(value) ? value as RuntimeRecord : {};
 const rows = (value: unknown, names: string[]) => {
@@ -101,15 +113,21 @@ function missionHasReceipt(mission: RuntimeRecord) {
 }
 
 const stepIcons = { complete: Check, active: Activity, ready: Play, staged: Radio, blocked: LockKeyhole, unavailable: TriangleAlert, planned: Circle };
+const missionStepExecutionModule = nexusModuleById("missions.step-execution");
+const missionStepExecutionAvailable = missionStepExecutionModule?.clients.web.state === "functional";
+const missionStepExecutionReason = missionStepExecutionModule?.clients.web.reason
+  ?? "Mission step execution has no verified canonical module contract.";
 
 export function MissionDashboard({
   onReplay,
   readiness = null,
   session = { authenticated: false },
+  capabilityRegistry = null,
 }: {
-  onReplay?: (missionId?: string) => void;
+  onReplay?: OpenOperationalReplay;
   readiness?: RuntimeRecord | null;
   session?: OperationalSession;
+  capabilityRegistry?: CapabilityRegistryProjection | null;
 } = {}) {
   const hosted = operationalSessionClient.mode() === "hosted";
   const [missions, setMissions] = useState<RuntimeRecord[]>([]);
@@ -119,6 +137,7 @@ export function MissionDashboard({
   const [missionState, setMissionState] = useState<LoadState>("loading");
   const [receiptState, setReceiptState] = useState<LoadState>("loading");
   const [objective, setObjective] = useState("");
+  const [pendingPlan, setPendingPlan] = useState<PrivateDraftOperation<MissionPlanPayload> | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -188,24 +207,40 @@ export function MissionDashboard({
   }, [selected]);
 
   async function plan() {
-    if (!objective.trim()) return;
+    if (!pendingPlan && !objective.trim()) return;
     if (hosted && !missionCreationAllowed) {
       setError(missionCreationReason);
       return;
     }
+    const staged = pendingPlan ?? snapshotPrivateDraftOperation(
+      { objective: objective.trim() },
+      `mission-plan:${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingPlan) setObjective("");
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingPlan(operation);
     setBusy(true);
     setError("");
     try {
-      await localNexusClient.planMission(objective.trim());
-      setObjective("");
+      await localNexusClient.planMission(operation.payload.objective, operation.idempotencyKey);
+      setPendingPlan(clearPrivateDraftAfterSuccess());
       await refresh();
     } catch (caught) {
+      setPendingPlan(retainPrivateDraftAfterFailure(operation));
       setError(caught instanceof Error ? caught.message : "Mission planning failed safely.");
       setBusy(false);
     }
   }
 
   async function execute(id: string, stepId: string) {
+    if (!missionStepExecutionAvailable) {
+      setError(missionStepExecutionReason);
+      return;
+    }
+    if (hosted && !missionStepAllowed) {
+      setError(missionStepExecutionBlockedReason);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -237,45 +272,87 @@ export function MissionDashboard({
   const replayId = selectedReplay
     ? text(selectedReplay.replayId ?? selectedReplay.runId ?? selectedReplay.run_id ?? selectedReplay.id, "")
     : text(object(selectedMission?.replay).replayId ?? selectedMission?.replay_run_id, "");
-  const executableCount = useMemo(
-    () => missions.flatMap((mission) => Array.isArray(mission.steps) ? mission.steps as RuntimeRecord[] : []).filter((step) => stepState(step) === "ready").length,
-    [missions],
-  );
   const metric = (value: number) => missionState === "loading" || missionState === "unavailable" ? "—" : value;
   const readinessCapabilities = rows(readiness, ["capabilities", "items", "records"]);
-  const conclaveCapability = readinessCapabilities.find((item) => text(item.capabilityId ?? item.capability_id ?? item.id, "") === "conclave");
-  const conclaveAvailable = text(conclaveCapability?.state ?? conclaveCapability?.status, "unavailable").toLowerCase() === "available";
-  const missionCreationAllowed = !hosted || (conclaveAvailable && session.scopes?.includes("operations:write") === true);
+  const missionCapability = readinessCapabilities.find((item) => (
+    text(item.capabilityId ?? item.capability_id ?? item.id, "") === "mission_executor"
+  ));
+  const missionCapabilityState = statusValue(missionCapability?.state ?? missionCapability?.status);
+  const missionCapabilityAvailable = missionCapability?.available === true
+    || missionCapabilityState === "available";
+  const missionReadinessNote = missionCapabilityAvailable
+    ? "Aggregate Mission readiness reports available."
+    : `Aggregate Mission readiness is ${missionCapabilityState || "unknown"}; each control still follows its exact canonical action record.`;
+  const hostedMissionScope = session.authenticated && session.scopes?.includes("operations:write") === true;
+  const hostedActionAccess = {
+    hosted,
+    authenticated: session.authenticated,
+    scopes: session.scopes,
+  };
+  const missionPlanAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "mission_executor",
+      method: "POST",
+      pathTemplate: "/missions/plan",
+    },
+    hostedActionAccess,
+    "operations:write",
+  );
+  const missionStepAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "mission_executor",
+      method: "POST",
+      pathTemplate: "/missions/{mission_id}/execute-step",
+    },
+    hostedActionAccess,
+    "operations:write",
+  );
+  const missionCreationAllowed = missionPlanAction.available;
+  const missionStepAllowed = missionStepExecutionAvailable
+    && missionStepAction.available;
+  const missionStepExecutionBlockedReason = !missionStepExecutionAvailable
+    ? missionStepExecutionReason
+    : !missionStepAction.available
+      ? missionStepAction.reason
+      : "The exact Runtime Mission step contract is available subject to per-action policy and Authority.";
+  const executableCount = useMemo(
+    () => missionStepAllowed
+      ? missions.flatMap((mission) => Array.isArray(mission.steps) ? mission.steps as RuntimeRecord[] : []).filter((step) => stepState(step) === "ready").length
+      : 0,
+    [missionStepAllowed, missions],
+  );
   const missionCreationReason = !hosted
     ? "Local mission planning remains bounded by the local Runtime contract."
-    : !conclaveAvailable
-      ? text(conclaveCapability?.reason ?? conclaveCapability?.requiredNextAction, "Conclave capability readiness is unavailable.")
-      : session.scopes?.includes("operations:write") ? "Conclave and the hosted mutation scope are available." : "The hosted session lacks operations:write.";
+    : !missionPlanAction.available
+      ? missionPlanAction.reason
+      : "The exact Runtime Mission contract remains subject to capability admission, policy, Authority, proof, receipt, and postcondition controls.";
 
   return <div className="mission-dashboard">
     <section className="nx-workspace-hero"><div><span className="nx-eyebrow">Mission Dashboard</span><h2>Coordinate governed work across independent mission streams.</h2><p>Each mission retains its own objective, task graph, specialist context, replay stream, receipts, and verification boundary.</p></div><NexusButton className="nx-action" size="sm" onClick={() => void refresh()} loading={busy}><RefreshCw size={15} />Refresh</NexusButton></section>
     <section className="nx-metrics">
-      <NexusMetric label="Active Missions" value={metric(active.length)} detail={missionState === "unavailable" ? "Runtime mission history unavailable" : `${executableCount} bounded steps executable now`} />
+      <NexusMetric label="Active Missions" value={metric(active.length)} detail={missionState === "unavailable" ? "Runtime mission history unavailable" : missionStepAllowed ? `${executableCount} bounded steps executable now` : "Step execution is capability-gated; planning and history remain usable"} />
       <NexusMetric label="Blocked Missions" value={metric(blocked.length)} detail="Recorded authority, capability, or evidence constraints" tone={blocked.length ? "attention" : "neutral"} />
       <NexusMetric label="Completed Missions" value={metric(completed.length)} detail={receiptState === "unavailable" ? "Receipt linkage unavailable" : `${receiptBackedCompleted.length} with linked successful Runtime receipts`} />
       <NexusMetric label="Mission Health" value={health} detail={selectedMission ? `${progress}% selected progress` : "No selected Runtime mission"} tone={health === "operational" || health === "stable" ? "success" : health === "attention" ? "attention" : "neutral"} />
     </section>
     {error && <section className="operation-error" role="alert"><ShieldAlert size={18} /><span>{error}</span></section>}
-    <div className="mission-compose"><label><span>{hosted ? "New Conclave mission" : "New mission objective"}</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder={hosted ? "Describe the evidence-bound investigation NEXUS should coordinate…" : "Describe the governed outcome NEXUS should coordinate…"} /></label><button onClick={() => void plan()} disabled={busy || !objective.trim() || !missionCreationAllowed}><Network size={15} />{hosted ? "Start canonical Conclave mission" : "Plan independent mission"}</button><small>{missionCreationReason}</small></div>
+    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => { setObjective(event.target.value); setPendingPlan(null); }} placeholder="Describe the governed outcome NEXUS should coordinate…" autoComplete="off" /></label><button onClick={() => void plan()} disabled={busy || (!objective.trim() && !pendingPlan) || !missionCreationAllowed}><Network size={15} />{pendingPlan ? "Retry exact mission plan" : "Plan governed mission"}</button><small>{missionCreationReason} {missionReadinessNote}</small></div>
     <div className="mission-dashboard__grid">
       <DataPanel eyebrow="Mission portfolio" title="Active, blocked, and completed missions" icon={<CircleGauge size={18} />}>
         <div className="mission-list">{missionState === "loading" ? <p className="replay-loading">Loading mission history from Runtime…</p> : missionState === "unavailable" ? <EmptyRecord>Runtime did not supply mission history. Mission status is unavailable.</EmptyRecord> : missions.length ? missions.map((mission) => { const id = missionId(mission); return <button key={id} data-active={id === selected} onClick={() => setSelected(id)}><div><strong>{text(mission.userObjective ?? mission.objective ?? mission.title, "Mission")}</strong><small>{id}</small></div><StatusPill value={statusOf(mission)} /></button>; }) : <EmptyRecord>No missions have been recorded by Runtime.</EmptyRecord>}</div>
       </DataPanel>
       <DataPanel eyebrow="Executive summary" title={selectedMission ? text(selectedMission.userObjective ?? selectedMission.objective ?? selectedMission.title, "Selected mission") : "No selected mission"} icon={<Activity size={18} />}>
-        {selectedMission ? <><div className="mission-progress"><span style={{ width: `${progress}%` }} /><strong>{progress}%</strong></div><p className="boundary-note">{executiveSummary(selectedMission)}</p><div className="mission-posture"><span><ShieldCheck size={13} />{text(selectedMission.riskLevel ?? selectedMission.risk_level, "unclassified")} risk</span><span><LockKeyhole size={13} />{blockers.length} constrained</span><span><Check size={13} />{explicitlyReversible} explicitly reversible · {reversibilityUnspecified} not supplied</span></div><p className="boundary-note">Replay reference: <code>{replayId || "not recorded"}</code></p>{onReplay && <div className="operation-actions"><button onClick={() => onReplay(missionId(selectedMission))}>Open Operational Replay</button></div>}</> : <EmptyRecord>No Runtime mission is selected.</EmptyRecord>}
+        {selectedMission ? <><div className="mission-progress"><span style={{ width: `${progress}%` }} /><strong>{progress}%</strong></div><p className="boundary-note">{executiveSummary(selectedMission)}</p><div className="mission-posture"><span><ShieldCheck size={13} />{text(selectedMission.riskLevel ?? selectedMission.risk_level, "unclassified")} risk</span><span><LockKeyhole size={13} />{blockers.length} constrained</span><span><Check size={13} />{explicitlyReversible} explicitly reversible · {reversibilityUnspecified} not supplied</span></div><OperationalResultLineage replayId={replayId} receiptId={latestReceiptId} missionId={missionId(selectedMission)} onOpenReplay={onReplay} /></> : <EmptyRecord>No Runtime mission is selected.</EmptyRecord>}
       </DataPanel>
       <DataPanel eyebrow="Mission Executor" title="Independent task graph" icon={<Play size={18} />}>
-        <ol className="mission-task-graph">{steps.length ? steps.map((step, index) => { const stepId = text(step.stepId ?? step.step_id ?? step.task_id ?? step.id, `step-${index + 1}`); const state = stepState(step); const StepIcon = stepIcons[state]; const linked = stepReceiptIds(step).length > 0; const evidenceRequired = list(step.evidenceRequired ?? step.evidence_required); const dependencies = list(step.dependencies); return <li key={stepId} data-state={state}><span className="mission-task-rail"><StepIcon size={14} /></span><article><header><div><span>Step {String(index + 1).padStart(2, "0")}</span><strong>{text(step.objective ?? step.title ?? step.action, stepId)}</strong></div><StatusPill value={state} /></header><p>{text(step.action ?? step.nextAction ?? step.honestNarration, evidenceRequired.length ? `Evidence required: ${evidenceRequired.join("; ")}` : "This step remains bounded by registered capability and authority.")}</p><footer><span>{dependencies.length ? `${dependencies.length} dependencies` : "dependency-ready"}</span><span>{evidenceRequired.length} evidence requirements</span><span>{text(step.specialistId ?? step.specialist_id, "specialist unassigned")}</span>{linked ? <span><Check size={11} />receipt linked</span> : <span>no receipt yet</span>}{state === "ready" && !hosted && <button onClick={() => void execute(missionId(selectedMission ?? {}), stepId)} disabled={busy}><Play size={12} />Execute bounded step</button>}{state === "ready" && hosted && <span>governed execution route unavailable</span>}</footer></article></li>; }) : <EmptyRecord>No task graph is available for the selected mission.</EmptyRecord>}</ol>
+        <ol className="mission-task-graph">{steps.length ? steps.map((step, index) => { const stepId = text(step.stepId ?? step.step_id ?? step.task_id ?? step.id, `step-${index + 1}`); const state = stepState(step); const StepIcon = stepIcons[state]; const linked = stepReceiptIds(step).length > 0; const evidenceRequired = list(step.evidenceRequired ?? step.evidence_required); const dependencies = list(step.dependencies); return <li key={stepId} data-state={state}><span className="mission-task-rail"><StepIcon size={14} /></span><article><header><div><span>Step {String(index + 1).padStart(2, "0")}</span><strong>{text(step.objective ?? step.title ?? step.action, stepId)}</strong></div><StatusPill value={state} /></header><p>{text(step.action ?? step.nextAction ?? step.honestNarration, evidenceRequired.length ? `Evidence required: ${evidenceRequired.join("; ")}` : "This step remains bounded by registered capability and authority.")}</p><footer><span>{dependencies.length ? `${dependencies.length} dependencies` : "dependency-ready"}</span><span>{evidenceRequired.length} evidence requirements</span><span>{text(step.specialistId ?? step.specialist_id, "specialist unassigned")}</span>{linked ? <span><Check size={11} />receipt linked</span> : <span>no receipt yet</span>}{state === "ready" && <button title={missionStepAllowed ? undefined : missionStepExecutionBlockedReason} onClick={() => void execute(missionId(selectedMission ?? {}), stepId)} disabled={busy || !missionStepAllowed}><Play size={12} />{missionStepAllowed ? "Execute bounded step" : "Execution unavailable"}</button>}{state === "ready" && hosted && !hostedMissionScope && <span>hosted session lacks operations:write</span>}</footer></article></li>; }) : <EmptyRecord>No task graph is available for the selected mission.</EmptyRecord>}</ol>
       </DataPanel>
       <aside className="mission-inspector" aria-label="Selected mission context">
         <section><span className="nx-eyebrow">Mission posture</span><strong>{selectedMission ? `${progress}% receipt-aware progress` : "Unavailable"}</strong><div className="mission-progress"><span style={{ width: `${progress}%` }} /></div></section>
         <section><header><Activity size={15} />Runtime record</header><dl><div><dt>Mission ID</dt><dd>{selectedMission ? missionId(selectedMission) : "unavailable"}</dd></div><div><dt>Created</dt><dd>{selectedMission ? text(selectedMission.createdAt ?? selectedMission.created_at, "not supplied") : "unavailable"}</dd></div><div><dt>Updated</dt><dd>{selectedMission ? text(selectedMission.updatedAt ?? selectedMission.updated_at, "not supplied") : "unavailable"}</dd></div><div><dt>Replay</dt><dd>{replayId || "not recorded"}</dd></div></dl></section>
-        <section><header><ShieldCheck size={15} />Governance boundary</header><dl><div><dt>Risk</dt><dd>{selectedMission ? text(selectedMission.riskLevel ?? selectedMission.risk_level, "unclassified") : "unavailable"}</dd></div><div><dt>Blocked steps</dt><dd>{blockers.length}</dd></div><div><dt>Reversible</dt><dd>{explicitlyReversible} explicit · {reversibilityUnspecified} not supplied</dd></div><div><dt>Authority</dt><dd>Runtime policy enforced</dd></div></dl></section>
+        <section><header><ShieldCheck size={15} />Governance boundary</header><dl><div><dt>Risk</dt><dd>{selectedMission ? text(selectedMission.riskLevel ?? selectedMission.risk_level, "unclassified") : "unavailable"}</dd></div><div><dt>Blocked steps</dt><dd>{blockers.length}</dd></div><div><dt>Reversible</dt><dd>{explicitlyReversible} explicit · {reversibilityUnspecified} not supplied</dd></div><div><dt>Authority</dt><dd>{missionStepExecutionAvailable ? "Required and revalidated per action" : "Execution adapter unavailable"}</dd></div></dl></section>
         <section><header><TriangleAlert size={15} />Constraints</header>{blockers.length ? <ul>{blockers.map((step, index) => <li key={text(step.stepId ?? step.step_id ?? step.id, `blocked-${index}`)}>{text(step.title ?? step.action, "Constrained mission step")}</li>)}</ul> : <p>No recorded blockers in the selected plan.</p>}</section>
         <section><header><Link2 size={15} />Required capabilities</header>{requirements.length ? <div className="mission-tags">{requirements.map((item) => <code key={item}>{item}</code>)}</div> : <p>No capability requirements were recorded.</p>}</section>
         <section><header><FileCheck2 size={15} />Latest receipt</header>{receiptState === "unavailable" ? <p>Runtime receipt history is unavailable.</p> : latestReceiptId ? <code>{latestReceiptId}</code> : <p>No execution receipt is linked.</p>}<StatusPill value={receiptState === "unavailable" ? "unavailable" : latestReceiptId ? text(latestReceipt?.verificationStatus ?? latestReceipt?.verification_status ?? latestReceipt?.status, "recorded") : "awaiting execution"} /></section>

@@ -1,0 +1,69 @@
+{
+  "recordType": "nexus_experience_corrective_receipt",
+  "schemaVersion": "nexus.experience-corrective-receipt@1.0.0",
+  "receiptId": "POST-M5-EXPERIENCE-FUNCTIONAL-CORRECTIVE-20260731",
+  "status": "locally_verified",
+  "scope": "additive post-acceptance Experience functional correction",
+  "source": {
+    "branch": "codex/post-m5-experience-parity-remediation",
+    "baseCommit": "08ea15ae98d74edc0537b9ad48ad0a1ef1f76964",
+    "sourceCommit": "e7131117109f8ad652641b7dc8db6cc0b96f0c0c",
+    "sourceTree": "8657c0e9d70f9f20dba20b3e11da399289bbfbb0",
+    "constitutionalRelease": "NCR-1.0.0",
+    "constitutionalReleaseDigest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa"
+  },
+  "lineage": {
+    "predecessorReceiptId": "POST-M5-EXPERIENCE-PARITY-REMEDIATION-20260730",
+    "predecessorDisposition": "superseded_historical_evidence",
+    "historicalReceiptMutated": false,
+    "acceptedMission5GateMutated": false,
+    "mission6CreatedOrAdmitted": false
+  },
+  "postconditions": {
+    "canonicalSurfaceCount": 26,
+    "webSurfaceStatesDerivedFrom": "src/platform/surface-registry.json",
+    "webSurfaceStates": {
+      "functional": 10,
+      "read_only": 9,
+      "local_only": 1,
+      "unavailable": 6
+    },
+    "everyWebSurfaceRenders": true,
+    "partialActionAvailabilityDoesNotHideFunctionalModules": true,
+    "hostedMutationsRequireExactCanonicalActionAndSessionScope": true,
+    "conclaveOperatorEvidenceClassifications": [
+      "tenant_knowledge",
+      "retrieved_evidence"
+    ],
+    "producerOwnedConclaveEvidenceClassificationRejected": true,
+    "successfulDocumentUploadSurvivesHistoryRefreshDegradation": true,
+    "genericOperationalProxyIntroduced": false,
+    "authorityExpanded": false,
+    "secretValuesExposed": false
+  },
+  "verification": {
+    "npmCheckPassed": true,
+    "testsPassed": 242,
+    "testsFailed": 0,
+    "productionBuildModules": 1631,
+    "builtJavascript": "/assets/index-zE3K63BU.js",
+    "builtStylesheet": "/assets/index-BGmABsqI.css",
+    "buildAssetSecretValuesExposed": false
+  },
+  "limitations": [
+    "This receipt proves local Experience source, contract, test, and production-build postconditions only.",
+    "Deployment and live provider postconditions are recorded by the parent corrective release receipt after publication.",
+    "The existing chunk-size advisory is non_blocking_degraded and does not alter capability truth.",
+    "Existing recorded non_blocking_degraded limitations and rollback lineage remain preserved."
+  ],
+  "rollback": {
+    "source": "Additively revert source commits e7131117109f8ad652641b7dc8db6cc0b96f0c0c then 17f56631238959286d14ae83c3c64cf74ec2c113; do not reset or rewrite history, and retain this receipt carrier.",
+    "deployment": "Redeploy the previously recorded private Experience Gateway release without changing Runtime or accepted Mission history.",
+    "preservation": "Retain the predecessor receipt and all earlier releases as superseded historical evidence."
+  },
+  "impedimentClassification": null,
+  "operatorActionRequired": false,
+  "sanitized": true,
+  "secretValuesExposed": false,
+  "recordedAt": "2026-07-31T09:42:09Z"
+}

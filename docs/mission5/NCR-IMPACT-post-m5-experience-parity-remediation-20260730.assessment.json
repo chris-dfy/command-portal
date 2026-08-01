@@ -1,0 +1,88 @@
+{
+  "record_type": "nexus_principle_impact_assessment_companion",
+  "schema_version": "1.0.0",
+  "impact_id": "NCR-IMPACT-post-m5-experience-parity-remediation-20260730",
+  "impact_record_digest": "sha256:03f814cfa9e54be7a7c78036a0a6fc0be708e78b3e0f979f41fb3ffccb79916e",
+  "validation_digest": "sha256:6a8618b1c2b1ae344dcd13310554b836e04384c56bbcc6ff0d7ee5603ef9d4ed",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:4262aca2c3cdeaaf3ef098bbc2c3b25c9a0c0b19ff4c9978ac76c023b790155e"
+  },
+  "authority_effect": "Traceability companion only. It creates no Authority and does not amend the Registry or sealed Principle Impact Record.",
+  "principle_assessments": [
+    {
+      "principle_entry_id": "NCR-CON-0006@1",
+      "disposition": "conforms",
+      "executable_evidence": ["src/platform/surface-registry.json", "validated Principle Impact Record"],
+      "migration_consequence": "Additive pinned Experience registry; rollback removes only the scoped registry consumer commit."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0019@1",
+      "disposition": "verifies",
+      "executable_evidence": ["server/portal-server.mjs operational scope and capability-admission pipeline", "tests/experience-gateway.test.mjs negative trust cases"],
+      "migration_consequence": "No Authority expansion; existing per-action Runtime Authority remains mandatory."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0020@1",
+      "disposition": "implements",
+      "executable_evidence": ["exact canonical operational resolver aliases", "current Runtime-owned capability projection admission tests"],
+      "migration_consequence": "Adds exact allowlisted adapters only; no generic forwarding route."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0021@1",
+      "disposition": "conforms",
+      "executable_evidence": ["SurfaceAvailabilityBoundary.tsx", "WorkSessionsWorkspace.tsx receipt read"],
+      "migration_consequence": "Unavailable and local-only routes remain explicit; the Experience makes no new completion claim."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0022@1",
+      "disposition": "implements",
+      "executable_evidence": ["canonical /missions/plan adapter", "canonical /missions/{mission_id}/execute-step adapter"],
+      "migration_consequence": "Hosted Mission planning no longer substitutes a Conclave workspace."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0029@1",
+      "disposition": "verifies",
+      "executable_evidence": ["tests/surface-registry.test.mjs", "npm test: 180 passed", "npm run build: passed"],
+      "migration_consequence": "Surface state is tied to implemented rendering and tested contracts rather than source presence."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0033@1",
+      "disposition": "implements",
+      "executable_evidence": ["explicit functional/read_only/local_only/unavailable reasons", "malformed readiness fail-closed test"],
+      "migration_consequence": "The hosted client reduces claims instead of fabricating capability."
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0008@1",
+      "disposition": "implements",
+      "executable_evidence": ["process-ready Degraded readiness projection", "independent Healthy health-route assertion"],
+      "migration_consequence": "Process reachability no longer collapses into platform capability readiness."
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0017@1",
+      "disposition": "implements",
+      "executable_evidence": ["canonical surface state separated from Runtime capability action admission", "CapabilityRegistryProjection read-only surface"],
+      "migration_consequence": "Navigation presence never implies invocability or Authority."
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0028@1",
+      "disposition": "verifies",
+      "executable_evidence": ["valid /ready 503 yields Degraded in one attempt", "independent /health remains Healthy"],
+      "migration_consequence": "No retry storm for deterministic not_ready; transport failures retain bounded retry behavior."
+    },
+    {
+      "principle_entry_id": "NCR-EXE-0008@1",
+      "disposition": "implements",
+      "executable_evidence": ["26-surface union registry", "six grouped navigation projections", "read-only Executive Views, Evidence, Outcome Ledger, and Capability Ledger"],
+      "migration_consequence": "Every permanent surface is visible with its independently sourced posture and limitation."
+    }
+  ],
+  "rollback": {
+    "action": "Deploy the previously recorded Experience release and revert only the scoped Experience remediation commit.",
+    "preservation": "Retain prior releases and receipts as historical evidence; no Runtime or root rollback is required."
+  },
+  "secret_values_exposed": false
+}

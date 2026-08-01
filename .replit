@@ -1,9 +1,9 @@
 run = "npm run start"
 entrypoint = "server/index.mjs"
-modules = ["nodejs-20"]
+modules = ["nodejs-22"]
 
 [deployment]
-build = ["sh", "-c", "npm ci && npm run build"]
+build = ["sh", "-c", "npm ci && npm run verify:engines && npm run build"]
 run = ["sh", "-c", "npm run start"]
 deploymentTarget = "cloudrun"
 
@@ -20,6 +20,15 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
+COMMAND_PORTAL_RUNTIME_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"
+COMMAND_PORTAL_TRUST_BOOTSTRAP_REQUIRED = "true"
+COMMAND_PORTAL_RUNTIME_READ_TOKEN_KEY_ID = "runtime-read-current"
+COMMAND_PORTAL_RUNTIME_READ_TOKEN_REF = "secret-manager:experience-gateway/mission-1/runtime-read-current"
+COMMAND_PORTAL_CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway"
+COMMAND_PORTAL_CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime"
+COMMAND_PORTAL_CONTEXT_ASSERTION_CLIENT_IDS = "nexus-web"
+NEXUS_CONTEXT_ASSERTION_KEY_ID = "context-assertion-current"
+NEXUS_CONTEXT_ASSERTION_SECRET_REF = "secret-manager:experience-gateway/mission-1/context-assertion-current"
 COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"
 COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"
 COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,actions:simulate,evidence:write,edge:node_admission:request"
@@ -27,3 +36,24 @@ COMMAND_PORTAL_OPERATOR_ROLE = "operator"
 COMMAND_PORTAL_OPERATOR_USER_ID = "nexus-workspace-service"
 COMMAND_PORTAL_TENANT_ID = "nexicron"
 COMMAND_PORTAL_WORKSPACE_ID = "primary"
+COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED = "true"
+COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF = "secret-manager:experience-gateway/mission-3/provider-session-current"
+COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID = "provider-session-current"
+COMMAND_PORTAL_PROVIDER_SESSION_TTL_SECONDS = "3600"
+COMMAND_PORTAL_EXECUTIVE_SESSION_TTL_SECONDS = "3600"
+COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET_REF = "secret-manager:experience-gateway/mission-3/executive-session-cookie-current"
+COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_KEY_ID = "executive-session-cookie-current"
+NEXUS_HUMAN_SESSION_ASSERTION_SECRET_REF = "secret-manager:experience-gateway/mission-3/executive-session-current"
+NEXUS_HUMAN_SESSION_ASSERTION_KEY_ID = "executive-session-current"
+COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_ISSUER = "command-portal-experience-gateway"
+COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_AUDIENCE = "nexus-runtime"
+COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_TTL_SECONDS = "60"
+COMMAND_PORTAL_HUMAN_SESSION_SERVICE_BINDING_ID = "command-portal-experience-gateway"
+COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_CLIENT_ID = "nexus-web"
+COMMAND_PORTAL_REPLIT_AUTH_ISSUER = "https://replit.com/oidc"
+COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_ID = "registered-executive-session-policy"
+COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION = "1.0.0"
+COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST = "sha256:b1f6a2cdf2153ac48236867e5e1aeab794842256410f3f314fc2655008a2be78"
+
+[userenv.production]
+COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED = "true"

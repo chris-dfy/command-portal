@@ -1,0 +1,33 @@
+{
+  "impact_id": "NCR-IMPACT-post-m5-web-light-contrast-20260731",
+  "artifact_id": "nexus.experience.post-m5-web-light-contrast-hotfix",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0027@1",
+      "NCR-ENG-0008@1",
+      "NCR-ENG-0010@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:d64c1492d77a5f05a398e453b0483d7b2a49706f71e24b1ca07d98c469d6c0c4"
+  },
+  "disposition": "no_constitutional_change",
+  "rationale": "This additive Experience-only accessibility repair preserves all Runtime truth, capability, Authority, Evidence, and Mission boundaries. It deterministically rejects a persisted presentation accent when that foreground falls below 4.5:1 contrast against the resolved theme background, selects the first accessible theme fallback, and strengthens the canonical light-theme accent and success colors. No operational contract, state, capability claim, Authority path, production data, secret, or accepted Mission record changes.",
+  "evidence_references": [
+    "command:constitution Registry validate (valid=true; release NCR-1.0.0; digest sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa)",
+    "command:constitution basis validation (valid=true; resolution digest sha256:d64c1492d77a5f05a398e453b0483d7b2a49706f71e24b1ca07d98c469d6c0c4)",
+    "command:node --test tests/appearance.test.mjs tests/design-system.test.mjs (8 passed; 0 failed)",
+    "command:npm run build (TypeScript noEmit and Vite production build passed; 1632 modules transformed)",
+    "command:npm run verify:build (hashed assets present; secretValuesExposed=false)",
+    "path:src/appearance/accentContrast.js",
+    "path:src/appearance/useAppearanceSettings.ts",
+    "path:src/appearance/themes.ts",
+    "path:src/design-system/nexus-tokens.css",
+    "rollback:redeploy Experience commit d446059e35de886b413bfdddc18232f8905e6d66 and additively revert only this scoped contrast hotfix"
+  ],
+  "conflicts": [],
+  "recorded_by": "NEXUS Engineering",
+  "recorded_at": "2026-07-31T22:09:27Z"
+}

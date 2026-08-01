@@ -30,17 +30,94 @@ The Command Portal communicates only with the NEXUS Experience Gateway. The NEXU
 
 The NEXUS Experience Gateway performs request validation, response validation, schema validation, caching, bounded retry, timeout handling, health monitoring, connection lifecycle management, version negotiation, structured logging, and graceful degradation. It exposes only fixed routes explicitly registered for a client. For Runtime-governed interaction routes, it may assert a provisioned tenant and request principal with a short-lived signed token; it never assembles tenant Operational Context itself.
 
+For the non-production Registered Executive session, the Gateway also verifies
+an external human-authentication result, maps the stable opaque provider subject
+through a server-owned registration, signs a bounded browser session, and sends
+a distinct single-use human-session assertion to the Runtime. The Gateway may
+verify identity; only the Runtime admits and records the canonical session.
+
 ## Boundaries
 
-The gateway is not the NEXUS Runtime, Runtime API, Provider Router, or Provider Registry. It does not execute workflows, mutate runtime state, select providers, strengthen capability claims, or create proof or receipt records. Runtime endpoints, environment variables, deployment identities, and repository names remain unchanged.
+The gateway is not the NEXUS Runtime, Runtime API, Provider Router, or Provider Registry. It does not execute workflows, select providers, strengthen capability claims, or create Runtime proof or receipt records. Session verification and revocation use only their fixed Runtime endpoints; they do not admit a mission or action. Runtime endpoints, environment variables, deployment identities, and repository names outside the versioned Mission 3 contract remain unchanged.
 
 ## Security model
 
-Runtime tokens and the tenant-context assertion secret remain server-only. The browser never receives runtime tokens, provider credentials, internal routing, runtime secrets, authorization headers, tenant assertion tokens, or server configuration. Browser-supplied tenant identity fields are discarded. The gateway rejects arbitrary forwarding, unknown routes, unsafe queries, and mutation methods before contacting the NEXUS Runtime Gateway.
+Runtime tokens, cookie-signing secrets, context-assertion secrets, and
+human-session assertion secrets remain server-only. The browser never receives
+runtime tokens, provider credentials, internal routing, runtime secrets,
+authorization headers, assertion tokens, provider subjects, or server
+configuration. Browser-supplied identity, tenant, workspace, role, scope,
+policy, session-version, revocation, and Authority fields are rejected or
+ignored. The gateway rejects arbitrary forwarding, unknown routes, query
+parameters, oversized bodies, unsafe origins, and unallowlisted methods before
+contacting the NEXUS Runtime Gateway.
+
+The Replit path uses Agent-provisioned, server-side Replit Auth with
+authorization code, PKCE, state, nonce, bounded `max_age`, and verified
+`auth_time`. The interactive verifier is authoritative when explicitly enabled
+in both development and published deployments, pins issuer
+`https://replit.com/oidc`, derives the only valid audience from the
+provider-owned `REPL_ID`, and binds requests to the exact provider-owned
+development or published host. The strict JWT/JWKS fallback permits only its exact
+issuer and audience, advertised `RS256` or `PS256` with algorithm-specific RSA
+padding, a known key ID, valid signature and times, bounded lifetime, opaque
+subject, and verified authentication methods. Bare Replit user headers,
+wrong-host requests, stale provider authentication, and all client privilege
+claims are rejected.
+
+Until Replit Agent provisions Auth and the deployed interactive path passes its
+positive and forged-header/host negatives, provider state is
+`configured_not_verified`; local injected-verifier tests are not evidence of a
+live provider handshake.
+
+The provider subject and deterministic provider binding are never stored in
+browser-visible plaintext, a response, receipt, or log. Its deterministic
+server-side binding selects exactly one active registration. The provider
+cookie is authenticated-encrypted and configuration-bound; the Registered
+Executive cookie contains only a keyed registration fingerprint, so a
+provider-subject, issuer/audience, registration, or registry-version change
+invalidates the prior cookie without disclosing the binding.
+That registration, not the browser, fixes the principal ID, tenant, workspace,
+`executive` role, `executive_session.read` and
+`executive_session.revoke` scopes, policy binding, session version, revocation
+checkpoint, and maximum lifetime.
 
 ## Runtime relationship
 
-The NEXUS Runtime Gateway remains the authoritative request boundary for the NEXUS Runtime. It verifies the assertion signature, audience, tenant allowlist, lifetime, client binding, and single-use identifier before selecting a tenant profile. It then assembles the eight Runtime context domains and returns a minimized context summary. Runtime responses remain authoritative only after the Experience Gateway validates their envelope and compatibility.
+The NEXUS Runtime Gateway remains the authoritative request boundary for the
+NEXUS Runtime. Mission 1 context assertions and Mission 3 human-session
+assertions are different contracts, headers, keys, and replay domains. For the
+human session, the Runtime first authenticates the Gateway service bearer,
+then verifies the assertion signature, key ID, issuer, audience, service and
+client bindings, lifetime of at most 60 seconds, single-use `jti`, exact
+registration and policy, and non-Authority claims. Runtime responses remain
+authoritative only after the Experience Gateway validates the complete
+canonical session envelope.
+
+## Registered Executive lifecycle
+
+```text
+Replit Auth → server verification → server-owned registration
+            → signed HttpOnly session → single-use Runtime assertion
+            → canonical Runtime session + receipt
+```
+
+- `POST /api/executive-session/login` accepts only `{}`. It verifies the
+  provider identity and registration, then requires the Runtime verify
+  postcondition before setting the browser cookie.
+- `GET /api/executive-session` reads the HttpOnly cookie and returns only a
+  Runtime-validated canonical session or a sanitized absent/failure state. A
+  fresh single-use human-session assertion with the registered read scope is
+  required at the Runtime boundary.
+- `POST /api/executive-session/revoke` accepts only `{}` plus the in-memory
+  CSRF value, requires a fresh Runtime assertion, clears the local cookie, and
+  exposes no credential material.
+
+Human identity, Gateway service identity, tenant/workspace binding, session,
+policy, role/scopes, Decision, Mission, Authority, and action authorization are
+separate records or boundaries. An active Registered Executive session sets
+`authorityGranted=false`, `actionAuthorized=false`,
+`missionExecutionAdmitted=false`, and creates no Decision or Mission.
 
 ## Future client support
 

@@ -29,7 +29,7 @@ async function replayFetch(path: string): Promise<GatewayEnvelope> {
         cloudPrimary: false,
         localSourceOfTruth: true,
         defaultProvider: "mock_model",
-        conclave: "available_bounded_review",
+        conclave: "unavailable",
         actualTrainedSLMs: 0,
         secretValuesExposed: false
       },

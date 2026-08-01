@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { Activity, ClipboardCheck, FileCheck2, Network, RefreshCw, Route, ShieldAlert, ShieldCheck } from "lucide-react";
 import { DataPanel, EmptyRecord } from "./DataPanel";
+import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
 import { localNexusClient, operationalSessionClient, type OperationalSession } from "../lib/local-client";
+import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import type { CapabilityRegistryProjection } from "../lib/types";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
 import "./OperationsWorkspace.css";
 
 type RuntimeRecord = Record<string, unknown>;
+type MissionPlanPayload = { objective: string };
 
 const object = (value: unknown): RuntimeRecord => value && typeof value === "object" && !Array.isArray(value) ? value as RuntimeRecord : {};
 const records = (value: unknown, keys: string[]): RuntimeRecord[] => {
@@ -31,15 +42,19 @@ const missionId = (mission: RuntimeRecord) => text(mission.missionId ?? mission.
 const revisionLabel = (value: string) => /^[0-9a-f]{32,}$/i.test(value) ? value.slice(0, 12) : value;
 
 export function OperationsWorkspace({
+  onReplay,
   session,
   onSessionChange,
   runtimeCommit,
   programAlphaCommit,
+  capabilityRegistry,
 }: {
+  onReplay?: OpenOperationalReplay;
   session: OperationalSession;
   onSessionChange: (session: OperationalSession) => void;
   runtimeCommit?: string;
   programAlphaCommit?: string;
+  capabilityRegistry: CapabilityRegistryProjection | null;
 }) {
   const [readiness, setReadiness] = useState<RuntimeRecord | null>(null);
   const [missions, setMissions] = useState<RuntimeRecord[]>([]);
@@ -48,6 +63,7 @@ export function OperationsWorkspace({
   const [missionReceipts, setMissionReceipts] = useState<RuntimeRecord[]>([]);
   const [missionReplay, setMissionReplay] = useState<RuntimeRecord | null>(null);
   const [objective, setObjective] = useState("");
+  const [pendingPlan, setPendingPlan] = useState<PrivateDraftOperation<MissionPlanPayload> | null>(null);
   const [result, setResult] = useState<RuntimeRecord | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -118,35 +134,73 @@ export function OperationsWorkspace({
   const readinessCapabilities = records(readiness, ["capabilities", "items", "records"]);
   const deployedCommit = text(runtimeCommit, "Not supplied");
   const embeddedProgramAlphaCommit = text(programAlphaCommit, "Not supplied");
-  const conclaveCapability = readinessCapabilities.find((item) => text(item.capabilityId ?? item.capability_id ?? item.id, "") === "conclave");
-  const conclaveAvailable = text(conclaveCapability?.state ?? conclaveCapability?.status, "unavailable").toLowerCase() === "available";
-  const missionCreationAllowed = conclaveAvailable && session.scopes?.includes("operations:write") === true;
-  const missionCreationReason = conclaveAvailable
-    ? session.scopes?.includes("operations:write") ? "Runtime capability and hosted mutation scope are available." : "The hosted session lacks operations:write."
-    : text(conclaveCapability?.reason ?? conclaveCapability?.requiredNextAction, "Conclave capability readiness is unavailable.");
+  const missionCapability = readinessCapabilities.find((item) => (
+    text(item.capabilityId ?? item.capability_id ?? item.id, "") === "mission_executor"
+  ));
+  const missionCapabilityAvailable = (
+    missionCapability?.available === true
+    || text(missionCapability?.state ?? missionCapability?.status, "unavailable").toLowerCase() === "available"
+  );
+  const missionPlanAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "mission_executor",
+      method: "POST",
+      pathTemplate: "/missions/plan",
+    },
+    {
+      hosted: operationalSessionClient.mode() === "hosted",
+      authenticated: session.authenticated,
+      scopes: session.scopes,
+    },
+    "operations:write",
+  );
+  const missionCreationAllowed = missionPlanAction.available;
+  const missionCreationReason = missionPlanAction.reason;
+  const missionCapabilityReadinessNote = missionCapabilityAvailable
+    ? "Aggregate Mission capability readiness is available."
+    : text(
+      missionCapability?.reason ?? missionCapability?.requiredNextAction,
+      "Aggregate Mission capability readiness is unavailable; exact action availability remains authoritative for this control.",
+    );
   const selectedMission = missionDetail ?? missions.find((mission) => missionId(mission) === selectedMissionId) ?? null;
   const tasks = selectedMission && Array.isArray(selectedMission.steps) ? selectedMission.steps as RuntimeRecord[] : [];
   const replayId = missionReplay
     ? text(missionReplay.replayId ?? missionReplay.runId ?? missionReplay.run_id ?? missionReplay.id, "")
     : text(object(selectedMission?.replay).replayId ?? selectedMission?.replay_run_id, "Not recorded");
+  const selectedMissionIdentity = selectedMission ? missionId(selectedMission) : "";
+  const selectedReceiptId = missionReceipts.length
+    ? text(missionReceipts[0].receiptId ?? missionReceipts[0].receipt_id, "")
+    : "";
+  const plannedMissionId = result
+    ? text(result.missionId ?? object(result.mission).missionId ?? object(result.mission).mission_id, "")
+    : "";
 
   async function planMission() {
     if (!missionCreationAllowed) {
       setErrors([missionCreationReason]);
       return;
     }
-    if (!objective.trim()) {
+    if (!pendingPlan && !objective.trim()) {
       setErrors(["Enter an evidence-bound mission objective."]);
       return;
     }
+    const staged = pendingPlan ?? snapshotPrivateDraftOperation(
+      { objective: objective.trim() },
+      `mission-plan:${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingPlan) setObjective("");
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingPlan(operation);
     setBusy(true);
     setErrors([]);
     try {
-      const next = await localNexusClient.planMission(objective.trim());
+      const next = await localNexusClient.planMission(operation.payload.objective, operation.idempotencyKey);
+      setPendingPlan(clearPrivateDraftAfterSuccess());
       setResult(next);
-      setObjective("");
       await refresh();
     } catch (caught) {
+      setPendingPlan(retainPrivateDraftAfterFailure(operation));
       setErrors([caught instanceof Error ? caught.message : "Mission creation failed safely."]);
     } finally { setBusy(false); }
   }
@@ -189,11 +243,12 @@ export function OperationsWorkspace({
 
     {errors.length > 0 && <section className="operation-error span-2" role="alert"><ShieldAlert size={18} /><span>{[...new Set(errors)].join(" ")}</span></section>}
 
-    <DataPanel eyebrow="Mission Control" title="Create a canonical Conclave mission" icon={<Route size={18} />}>
-      <label className="operation-field"><span>Evidence-bound objective</span><textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the operational question NEXUS should investigate…" /></label>
-      <div className="operation-actions"><button onClick={() => void planMission()} disabled={busy || !objective.trim() || !missionCreationAllowed}><ClipboardCheck size={15} /> Start governed mission</button><button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} /> Refresh</button></div>
-      <p className="boundary-note">Mission creation gate: {missionCreationReason}</p>
-      {result && <p className="boundary-note">Runtime accepted mission {text(result.missionId ?? object(result.mission).missionId ?? object(result.mission).mission_id, "response recorded")}.</p>}
+    <DataPanel eyebrow="Mission Control" title="Plan a canonical Mission" icon={<Route size={18} />}>
+      <label className="operation-field"><span>Evidence-bound objective</span><textarea value={objective} onChange={(event) => { setObjective(event.target.value); setPendingPlan(null); }} placeholder="Describe the operational question NEXUS should investigate…" autoComplete="off" /></label>
+      <div className="operation-actions"><button onClick={() => void planMission()} disabled={busy || (!objective.trim() && !pendingPlan) || !missionCreationAllowed}><ClipboardCheck size={15} /> {pendingPlan ? "Retry exact Mission plan" : "Plan governed Mission"}</button><button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} /> Refresh</button></div>
+      <p className="boundary-note">Mission planning gate for <code>POST /missions/plan</code>: {missionCreationReason}</p>
+      <p className="boundary-note">Readiness context only: {missionCapabilityReadinessNote}</p>
+      {result && <><p className="boundary-note">Runtime accepted mission {plannedMissionId || "response recorded"}.</p><OperationalResultLineage missionId={plannedMissionId} onOpenReplay={onReplay} empty="The accepted Mission response did not include a discoverable Mission identity." /></>}
     </DataPanel>
 
     <DataPanel eyebrow="Mission portfolio" title="Runtime Mission Executor state" icon={<Network size={18} />}>
@@ -210,6 +265,7 @@ export function OperationsWorkspace({
 
     <DataPanel eyebrow="Operational Replay" title="Mission evolution reference" icon={<FileCheck2 size={18} />}>
       {missionReplay ? <div className="compact-records"><article><strong>{replayId}</strong><span>{text(missionReplay.status, "recorded")} · {text(missionReplay.contentDigest ?? missionReplay.content_digest, "digest unavailable")}</span><StatusPill value={text(missionReplay.status, "recorded")} /></article></div> : <EmptyRecord>The selected mission has no retrievable Replay reference.</EmptyRecord>}
+      {selectedMission && <OperationalResultLineage replayId={replayId === "Not recorded" ? undefined : replayId} receiptId={selectedReceiptId} missionId={selectedMissionIdentity} onOpenReplay={onReplay} />}
       <p className="boundary-note">Mission status, task graph, receipts, and Replay come from independent canonical Runtime routes. One unavailable source does not fabricate or erase another.</p>
     </DataPanel>
   </div>;

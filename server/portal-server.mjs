@@ -2,16 +2,89 @@ import { createReadStream, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { createSessionAuthority, requiredScope } from "./operational-auth.mjs";
+import {
+  createExecutiveRegistrationMapper,
+  createExecutiveSessionAuthority,
+  createHumanSessionAssertion,
+  createReplitAuthAdapter,
+  EXECUTIVE_SESSION_COOKIE_NAME,
+  EXECUTIVE_SESSION_POLICY_DIGEST,
+  EXECUTIVE_SESSION_POLICY_ID,
+  EXECUTIVE_SESSION_POLICY_VERSION,
+  EXECUTIVE_SCOPES,
+  ExecutiveSessionFailure,
+  HUMAN_SESSION_ASSERTION_CONTRACT,
+  HUMAN_SESSION_ASSERTION_HEADER,
+  MAX_EXECUTIVE_SESSION_LIFETIME_SECONDS,
+  MAX_HUMAN_ASSERTION_LIFETIME_SECONDS,
+  REGISTERED_EXECUTIVE_SESSION_CONTRACT,
+} from "./executive-session.mjs";
+import {
+  createExecutiveSessionRuntimeClient,
+  ExecutiveSessionRuntimeFailure,
+} from "./executive-session-runtime.mjs";
+import {
+  createReplitAuthIdentityVerifier,
+  REPLIT_AUTH_CANONICAL_ISSUER,
+} from "./replit-auth-provider.mjs";
+import {
+  createProviderSessionIdentityVerifier,
+  createReplitAuthInteractiveHandler,
+} from "./replit-auth-oidc.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DIST = join(ROOT, "dist");
 
 export const SUPPORTED_SCHEMA_VERSION = "1.0.0";
 export const SUPPORTED_RUNTIME_VERSION = "0.1.0";
+export const CAPABILITY_REGISTRY_SCHEMA_VERSION = "nexus.live-capability-registry@1.0.0";
+export const CAPABILITY_REGISTRY_RECORD_TYPE = "nexus_live_capability_registry_projection";
+export const CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE = "nexus_capability_registry_contract_identity";
+export const CAPABILITY_REGISTRY_SCHEMA_DIGEST = "sha256:52f825444f39d285afd1d3bac82ebdab4125f85feb381339314a39faa05fa166";
+export const CAPABILITY_REGISTRY_VALIDATOR_VERSION = "nexus.capability-registry-validator@1.0.0";
+const CAPABILITY_REGISTRY_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const JSON_GZIP_MINIMUM_BYTES = 64 * 1024;
+const CAPABILITY_REGISTRY_OWNER = "context_runtime";
+const CAPABILITY_REGISTRY_PROJECTION_OWNER = "runtime.state.RuntimeState.capability_registry_projection";
+const CAPABILITY_REGISTRY_RELEASE_ID = "NCR-1.0.0";
+const CAPABILITY_REGISTRY_RELEASE_DIGEST = "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa";
+const CAPABILITY_REGISTRY_RESOLUTION_DIGEST = "sha256:376331b2fdde7bbe38e6bad7d09d265666353166e78f71c7c2928e59793ec996";
+const CAPABILITY_REGISTRY_VERIFICATION_POLICY = "nexus.connector-verification-freshness@1.0.0";
+const CAPABILITY_REGISTRY_MAXIMUM_FUTURE_SKEW_SECONDS = 30;
+export const REPLIT_AUTH_PROVIDER_ISSUER = REPLIT_AUTH_CANONICAL_ISSUER;
+export const MISSION3_SESSION_CAPABILITIES = Object.freeze([
+  "executive_session.authenticate",
+  "executive_session.read",
+  "executive_session.revoke",
+]);
+export const MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE =
+  "capability_dependency_verification";
+export const MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID =
+  "context_runtime.local_api";
+export const MISSION3_SESSION_ESTABLISHMENT_RECEIPT_TYPE =
+  MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE;
+export const TRUST_BOOTSTRAP_CONTRACT = "nexus.runtime-experience-trust-bootstrap@1.0.0";
+export const CONTEXT_ASSERTION_CONTRACT = "nexus.context-assertion@2.0.0";
+export const CONTEXT_ASSERTION_ALGORITHM = "hmac-sha256";
 const CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime";
 const CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway";
+const CONTEXT_ASSERTION_KEY_ID = "context-assertion-current";
+const RUNTIME_CREDENTIAL_KEY_ID = "runtime-read-current";
+const TRUST_BINDING_ID = "runtime-experience-trust-bootstrap";
+const CONTEXT_ASSERTION_ROLES = Object.freeze(["observer"]);
+const HUMAN_SESSION_ASSERTION_ISSUER = "command-portal-experience-gateway";
+const HUMAN_SESSION_ASSERTION_AUDIENCE = "nexus-runtime";
+const HUMAN_SESSION_ASSERTION_KEY_ID = "executive-session-current";
+const HUMAN_SESSION_SERVICE_BINDING_ID = "command-portal-experience-gateway";
+const EXECUTIVE_SESSION_COOKIE_KEY_ID = "executive-session-cookie-current";
+const PROVIDER_SESSION_KEY_ID = "provider-session-current";
+const STABLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{2,191}$/;
+const HOST_PATTERN =
+  /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+const SECRET_REFERENCE_PATTERN = /^(?:env|secret-manager):[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/;
 
 export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/status": "/runtime/status",
@@ -26,11 +99,34 @@ export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/diagnostics": "/runtime/diagnostics",
   "/api/runtime/governance": "/runtime/governance",
   "/api/runtime/connectors": "/runtime/connectors",
+  "/api/runtime/capability-registry": "/runtime/capability-registry",
   "/api/runtime/realtime-voice": "/runtime/voice/realtime/status",
   "/api/runtime/conclave": "/runtime/conclave/status",
   "/api/runtime/eox": "/runtime/executive-operating-loop",
   "/api/runtime/replay": "/runtime/replay"
 });
+
+export const RUNTIME_BOOTSTRAP_ROUTE = "/api/runtime/bootstrap";
+export const RUNTIME_BOOTSTRAP_ROUTES = Object.freeze({
+  status: "/api/runtime/status",
+  health: "/api/runtime/health",
+  ready: "/api/runtime/ready",
+  version: "/api/runtime/version",
+  providers: "/api/runtime/providers",
+  capabilities: "/api/runtime/capabilities",
+  proofs: "/api/runtime/proofs",
+  receipts: "/api/runtime/receipts",
+  environment: "/api/runtime/environment",
+  diagnostics: "/api/runtime/diagnostics",
+  governance: "/api/runtime/governance",
+  connectors: "/api/runtime/connectors",
+  "capability-registry": "/api/runtime/capability-registry",
+  conclave: "/api/runtime/conclave",
+  eox: "/api/runtime/eox",
+});
+const RUNTIME_BOOTSTRAP_RECORD_TYPE = "nexus_experience_runtime_bootstrap";
+const RUNTIME_BOOTSTRAP_SCHEMA_VERSION = "1.0.0";
+const RUNTIME_BOOTSTRAP_CONCURRENCY = 3;
 
 const REPLAY_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,160}$/;
 const REPLAY_STAGES = new Set(["observation", "evidence", "representation", "conclave", "authority", "decision", "receipt"]);
@@ -66,6 +162,8 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/projects": { method: "POST", runtimePath: "/projects" },
   "/api/local/projects/artifact-types": { method: "GET", runtimePath: "/projects/artifact-types" },
   "/api/local/client-capabilities": { method: "GET", runtimePath: "/client-capabilities" },
+  "/api/local/governance/readiness": { method: "GET", runtimePath: "/governance/readiness" },
+  "/api/local/authority/readiness": { method: "GET", runtimePath: "/authority/readiness" },
   "/api/local/missions": { method: "GET", runtimePath: "/missions/history?limit=8" },
   "/api/local/missions/plan": { method: "POST", runtimePath: "/missions/plan" },
   "/api/local/conclave/workspaces": { method: "GET", runtimePath: "/conclave/workspaces" },
@@ -75,8 +173,6 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/approvals": { method: "GET", runtimePath: "/approvals?limit=12" },
   "/api/local/actions/dry-run": { method: "POST", runtimePath: "/actions/dry-run" },
   "/api/local/actions/execute": { method: "POST", runtimePath: "/actions/execute" },
-  "/api/local/connectors": { method: "GET", runtimePath: "/connectors" },
-  "/api/local/connectors/health": { method: "GET", runtimePath: "/connectors/health" },
   "/api/local/proofs": { method: "GET", runtimePath: "/proof/recent?limit=8" },
   "/api/local/receipts": { method: "GET", runtimePath: "/receipts?limit=12" },
   "/api/local/voice/status": { method: "GET", runtimePath: "/voice/status" },
@@ -87,6 +183,170 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/interactions/status": { method: "GET", runtimePath: "/runtime/interactions/status", target: "platform" },
   "/api/local/interactions": { method: "POST", runtimePath: "/runtime/interactions", target: "platform" }
 });
+
+const runtimeActionAlias = (
+  actionId,
+  runtimeMethod,
+  runtimePathTemplate,
+  {
+    runtimePath = runtimePathTemplate,
+    requiredSurfaces = ["api"],
+    forwarding = "canonical",
+    limitation = "",
+  } = {},
+) => Object.freeze({
+  actionId,
+  runtimeMethod,
+  runtimePath,
+  runtimePathTemplate,
+  requiredSurfaces: Object.freeze([...requiredSurfaces]),
+  forwarding,
+  limitation,
+});
+
+export const FIXED_RUNTIME_ACTION_ALIASES = Object.freeze({
+  "/api/runtime/status": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.status", "GET", "/runtime/status", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/health": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.health", "GET", "/health", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/ready": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.ready", "GET", "/ready", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/version": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.version", "GET", "/runtime/version", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/providers": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.providers", "GET", "/runtime/providers", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/capabilities": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.capabilities", "GET", "/runtime/capabilities", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/proofs": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.proofs", "GET", "/runtime/proofs", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/receipts": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.receipts", "GET", "/runtime/receipts", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/environment": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.environment", "GET", "/runtime/environment", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/diagnostics": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.diagnostics", "GET", "/runtime/diagnostics", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/governance": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.governance", "GET", "/runtime/governance", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/connectors": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.connectors", "GET", "/runtime/connectors", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/capability-registry": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.capability_registry", "GET", "/runtime/capability-registry", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/realtime-voice": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.voice_realtime_status", "GET", "/runtime/voice/realtime/status", { requiredSurfaces: ["api", "ui", "voice"] }) }),
+  "/api/runtime/conclave": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.conclave_status", "GET", "/runtime/conclave/status", { requiredSurfaces: ["api", "assistant", "ui"] }) }),
+  "/api/runtime/eox": Object.freeze({ GET: runtimeActionAlias("context.runtime.route.get.runtime.executive_operating_loop", "GET", "/runtime/executive-operating-loop", { requiredSurfaces: ["api", "ui"] }) }),
+  "/api/runtime/replay": Object.freeze({
+    GET: runtimeActionAlias(
+      "canonical.route.get.operational-replay",
+      "GET",
+      "/operational-replay",
+      {
+        runtimePath: "/runtime/replay",
+        forwarding: "unavailable_adapter",
+        limitation: "The legacy Runtime Replay alias is registered but unavailable; it never forwards.",
+      },
+    ),
+  }),
+  "/api/runtime/executive-briefing": Object.freeze({ POST: runtimeActionAlias("context.runtime.route.post.runtime.executive_operating_loop.briefing", "POST", "/runtime/executive-operating-loop/briefing", { requiredSurfaces: ["api", "assistant", "ui", "voice"] }) }),
+  "/api/runtime/conclave/reviews": Object.freeze({ POST: runtimeActionAlias("context.runtime.route.post.runtime.conclave.reviews", "POST", "/runtime/conclave/reviews", { requiredSurfaces: ["api", "assistant", "ui"] }) }),
+  "/api/runtime/interactions": Object.freeze({ POST: runtimeActionAlias("context.runtime.route.post.runtime.interactions", "POST", "/runtime/interactions", { requiredSurfaces: ["api", "assistant", "ui", "voice"] }) }),
+  "/api/runtime/realtime/call": Object.freeze({ POST: runtimeActionAlias("context.runtime.route.post.runtime.voice.realtime.call", "POST", "/runtime/voice/realtime/call", { requiredSurfaces: ["api", "voice"] }) }),
+  "/api/local/interactions/status": Object.freeze({
+    GET: runtimeActionAlias(
+      "context.runtime.route.get.runtime.interactions_status",
+      "GET",
+      "/runtime/interactions/status",
+      {
+        requiredSurfaces: ["api", "assistant", "ui", "voice"],
+        forwarding: "unavailable_adapter",
+        limitation: "The unsigned local interaction alias is not admitted; the signed Mission 1 Runtime boundary is required.",
+      },
+    ),
+  }),
+  "/api/local/interactions": Object.freeze({
+    POST: runtimeActionAlias(
+      "context.runtime.route.post.runtime.interactions",
+      "POST",
+      "/runtime/interactions",
+      {
+        requiredSurfaces: ["api", "assistant", "ui", "voice"],
+        forwarding: "unavailable_adapter",
+        limitation: "The unsigned local interaction alias is not admitted; use the signed Mission 1 /api/runtime/interactions boundary.",
+      },
+    ),
+  }),
+});
+
+function dynamicRuntimeActionAliases(method, pathname) {
+  const candidates = [];
+  const interaction = pathname.match(/^\/api\/runtime\/interactions\/([A-Z0-9-]+)\/(events|interrupt|resume|presentation-complete)$/);
+  if (interaction) {
+    const [, interactionId, operation] = interaction;
+    const definitions = {
+      events: ["GET", "context.runtime.route.get.runtime.interactions.events", "/runtime/interactions/{interaction_id}/events", ["api", "assistant", "ui", "voice"]],
+      interrupt: ["POST", "context.runtime.route.post.runtime.interactions.interrupt", "/runtime/interactions/{interaction_id}/interrupt", ["api", "assistant", "ui", "voice"]],
+      resume: ["POST", "context.runtime.route.post.runtime.interactions.resume", "/runtime/interactions/{interaction_id}/resume", ["api", "assistant", "ui", "voice"]],
+      "presentation-complete": ["POST", "context.runtime.route.post.runtime.interactions.presentation_complete", "/runtime/interactions/{interaction_id}/presentation-complete", ["api", "ui"]],
+    };
+    const [expectedMethod, actionId, template, requiredSurfaces] = definitions[operation];
+    if (method === expectedMethod) {
+      candidates.push(runtimeActionAlias(actionId, expectedMethod, template, {
+        runtimePath: `/runtime/interactions/${interactionId}/${operation}`,
+        requiredSurfaces,
+      }));
+    }
+  }
+  const localInteraction = pathname.match(/^\/api\/local\/interactions\/([A-Z0-9-]+)\/(events|interrupt|presentation-complete)$/);
+  if (localInteraction) {
+    const [, interactionId, operation] = localInteraction;
+    const definitions = {
+      events: ["GET", "context.runtime.route.get.runtime.interactions.events", "/runtime/interactions/{interaction_id}/events", ["api", "assistant", "ui", "voice"]],
+      interrupt: ["POST", "context.runtime.route.post.runtime.interactions.interrupt", "/runtime/interactions/{interaction_id}/interrupt", ["api", "assistant", "ui", "voice"]],
+      "presentation-complete": ["POST", "context.runtime.route.post.runtime.interactions.presentation_complete", "/runtime/interactions/{interaction_id}/presentation-complete", ["api", "ui"]],
+    };
+    const [expectedMethod, actionId, template, requiredSurfaces] = definitions[operation];
+    if (method === expectedMethod) {
+      candidates.push(runtimeActionAlias(actionId, expectedMethod, template, {
+        runtimePath: `/runtime/interactions/${interactionId}/${operation}`,
+        requiredSurfaces,
+        forwarding: "unavailable_adapter",
+        limitation: "The unsigned local interaction lifecycle alias is not admitted; use the signed Mission 1 Runtime boundary.",
+      }));
+    }
+  }
+  const replayDetail = pathname.match(/^\/api\/runtime\/replay\/([A-Za-z0-9_.:-]+)$/);
+  if (method === "GET" && replayDetail) {
+    candidates.push(runtimeActionAlias(
+      "canonical.route.get.operational-replay._replay_id",
+      "GET",
+      "/operational-replay/{replay_id}",
+      {
+        runtimePath: `/runtime/replay/${replayDetail[1]}`,
+        forwarding: "unavailable_adapter",
+        limitation: "The legacy Runtime Replay detail alias is registered but unavailable; it never forwards.",
+      },
+    ));
+  }
+  const replayEvents = pathname.match(/^\/api\/runtime\/replay\/([A-Za-z0-9_.:-]+)\/events$/);
+  if (method === "GET" && replayEvents) {
+    candidates.push(runtimeActionAlias(
+      "canonical.route.get.operational-replay._replay_id_.events",
+      "GET",
+      "/operational-replay/{replay_id}/events",
+      {
+        runtimePath: `/runtime/replay/${replayEvents[1]}/events`,
+        forwarding: "unavailable_adapter",
+        limitation: "The legacy Runtime Replay event alias is registered but unavailable; it never forwards.",
+      },
+    ));
+  }
+  const replayExplain = pathname.match(/^\/api\/runtime\/replay\/([A-Za-z0-9_.:-]+)\/stages\/(observation|evidence|representation|conclave|authority|decision|receipt)\/explain$/);
+  if (method === "GET" && replayExplain) {
+    candidates.push(runtimeActionAlias(
+      "canonical.route.get.operational-replay._replay_id_.stages._selector_.explain",
+      "GET",
+      "/operational-replay/{replay_id}/stages/{selector}/explain",
+      {
+        runtimePath: `/runtime/replay/${replayExplain[1]}/stages/${replayExplain[2]}/explain`,
+        forwarding: "unavailable_adapter",
+        limitation: "The legacy Runtime Replay explanation alias is registered but unavailable; it never forwards.",
+      },
+    ));
+  }
+  return candidates;
+}
+
+export function resolveGatewayRuntimeActionAlias(method, pathname) {
+  const fixed = FIXED_RUNTIME_ACTION_ALIASES[pathname]?.[method];
+  const candidates = [...(fixed ? [fixed] : []), ...dynamicRuntimeActionAliases(method, pathname)];
+  return candidates.length === 1 ? candidates[0] : null;
+}
 
 export const REPLAY_ROUTES = Object.freeze({
   "/api/replay/replay.json": "/replay.json",
@@ -161,7 +421,7 @@ const TRUTH = Object.freeze({
   cloudPrimary: false,
   localSourceOfTruth: true,
   defaultProvider: "mock_model",
-  conclave: "available_bounded_review",
+  conclave: "unavailable",
   actualTrainedSLMs: 0,
   secretValuesExposed: false
 });
@@ -229,22 +489,71 @@ function optionalSecret(value, name, minimum = 32) {
   return secret;
 }
 
+function stablePublicIdentifier(value, name) {
+  const identifier = String(value ?? "").trim();
+  if (!STABLE_ID_PATTERN.test(identifier)) throw new Error(`${name} must be a stable public identifier.`);
+  return identifier;
+}
+
+function stableSha256Digest(value, name) {
+  const digest = String(value ?? "").trim();
+  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
+    throw new Error(`${name} must be a SHA-256 digest.`);
+  }
+  return digest;
+}
+
+function optionalSecretReference(value, name) {
+  const reference = String(value ?? "").trim();
+  if (reference && !SECRET_REFERENCE_PATTERN.test(reference)) {
+    throw new Error(`${name} must be an opaque secret-provider reference.`);
+  }
+  return reference;
+}
+
+function registeredExecutives(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  let parsed;
+  try {
+    parsed = JSON.parse(String(value ?? ""));
+  } catch {
+    throw new Error("COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON must be valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON must contain a principal registry object.");
+  }
+  return parsed;
+}
+
 const encodeBase64Url = (value) => Buffer.from(value).toString("base64url");
 
-export function createTenantContextAssertion(config, claims, clientId, clock = () => Date.now()) {
+export function createTenantContextAssertion(config, _claims, clientId, clock = () => Date.now()) {
   if (!config.contextAssertionSecret) return "";
+  const issuer = config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER;
+  const audience = config.contextAssertionAudience ?? CONTEXT_ASSERTION_AUDIENCE;
+  const keyId = config.contextAssertionKeyId ?? CONTEXT_ASSERTION_KEY_ID;
+  const allowedClientIds = config.contextAssertionClientIds ?? ["nexus-web"];
+  if (!allowedClientIds.includes(clientId)) {
+    throw new Error("The Runtime client identity is not provisioned for this Experience Gateway.");
+  }
   const issuedAt = Math.floor(clock() / 1000);
   const payload = {
-    v: 1,
-    iss: CONTEXT_ASSERTION_ISSUER,
-    aud: CONTEXT_ASSERTION_AUDIENCE,
-    tid: claims?.tenantId ?? config.operationalTenantId,
-    sub: claims?.sub ?? config.contextAssertionPrincipalId,
-    roles: claims?.role ? [claims.role] : ["observer"],
+    v: 2,
+    contract: CONTEXT_ASSERTION_CONTRACT,
+    alg: CONTEXT_ASSERTION_ALGORITHM,
+    kid: keyId,
+    iss: issuer,
+    aud: audience,
+    tid: config.operationalTenantId ?? "nexicron",
+    wid: config.operationalWorkspaceId ?? "primary",
+    sub: issuer,
+    roles: [...CONTEXT_ASSERTION_ROLES],
     clientId,
     iat: issuedAt,
     exp: issuedAt + 60,
-    jti: randomUUID()
+    jti: randomUUID(),
+    trustBindingId: TRUST_BINDING_ID,
+    authorityGranted: false
   };
   const encodedPayload = encodeBase64Url(JSON.stringify(payload));
   const signature = createHmac("sha256", config.contextAssertionSecret).update(encodedPayload).digest("base64url");
@@ -257,6 +566,96 @@ export function loadConfig(overrides = {}) {
   ));
   const runtimeToken = String(overrides.runtimeToken ?? process.env.COMMAND_PORTAL_RUNTIME_READ_TOKEN ?? "");
   if (!runtimeToken) throw new Error("COMMAND_PORTAL_RUNTIME_READ_TOKEN is required and must remain server-only.");
+  const trustBootstrapRequired = enabled(
+    overrides.trustBootstrapRequired
+      ?? process.env.COMMAND_PORTAL_TRUST_BOOTSTRAP_REQUIRED
+  );
+  const runtimeTokenRef = optionalSecretReference(
+    overrides.runtimeTokenRef
+      ?? process.env.COMMAND_PORTAL_RUNTIME_READ_TOKEN_REF,
+    "COMMAND_PORTAL_RUNTIME_READ_TOKEN_REF"
+  );
+  const runtimeTokenKeyId = stablePublicIdentifier(
+    overrides.runtimeTokenKeyId
+      ?? process.env.COMMAND_PORTAL_RUNTIME_READ_TOKEN_KEY_ID
+      ?? RUNTIME_CREDENTIAL_KEY_ID,
+    "COMMAND_PORTAL_RUNTIME_READ_TOKEN_KEY_ID"
+  );
+  const contextAssertionSecret = optionalSecret(
+    overrides.contextAssertionSecret
+      ?? process.env.NEXUS_CONTEXT_ASSERTION_SECRET,
+    "NEXUS_CONTEXT_ASSERTION_SECRET"
+  );
+  const contextAssertionSecretRef = optionalSecretReference(
+    overrides.contextAssertionSecretRef
+      ?? process.env.NEXUS_CONTEXT_ASSERTION_SECRET_REF,
+    "NEXUS_CONTEXT_ASSERTION_SECRET_REF"
+  );
+  const contextAssertionIssuer = stablePublicIdentifier(
+    overrides.contextAssertionIssuer
+      ?? process.env.COMMAND_PORTAL_CONTEXT_ASSERTION_ISSUER
+      ?? CONTEXT_ASSERTION_ISSUER,
+    "COMMAND_PORTAL_CONTEXT_ASSERTION_ISSUER"
+  );
+  const contextAssertionAudience = stablePublicIdentifier(
+    overrides.contextAssertionAudience
+      ?? process.env.COMMAND_PORTAL_CONTEXT_ASSERTION_AUDIENCE
+      ?? CONTEXT_ASSERTION_AUDIENCE,
+    "COMMAND_PORTAL_CONTEXT_ASSERTION_AUDIENCE"
+  );
+  const contextAssertionKeyId = stablePublicIdentifier(
+    overrides.contextAssertionKeyId
+      ?? process.env.NEXUS_CONTEXT_ASSERTION_KEY_ID
+      ?? CONTEXT_ASSERTION_KEY_ID,
+    "NEXUS_CONTEXT_ASSERTION_KEY_ID"
+  );
+  const contextAssertionClientIds = String(
+    overrides.contextAssertionClientIds
+      ?? process.env.COMMAND_PORTAL_CONTEXT_ASSERTION_CLIENT_IDS
+      ?? "nexus-web"
+  ).split(",").map((item) => item.trim()).filter(Boolean);
+  if (
+    contextAssertionClientIds.length === 0
+    || new Set(contextAssertionClientIds).size !== contextAssertionClientIds.length
+    || contextAssertionClientIds.some((item) => !STABLE_ID_PATTERN.test(item))
+  ) {
+    throw new Error("COMMAND_PORTAL_CONTEXT_ASSERTION_CLIENT_IDS must contain unique stable public identifiers.");
+  }
+  const operationalTenantId = stablePublicIdentifier(
+    overrides.operationalTenantId
+      ?? process.env.COMMAND_PORTAL_TENANT_ID
+      ?? "nexicron",
+    "COMMAND_PORTAL_TENANT_ID"
+  );
+  const operationalWorkspaceId = stablePublicIdentifier(
+    overrides.operationalWorkspaceId
+      ?? process.env.COMMAND_PORTAL_WORKSPACE_ID
+      ?? "primary",
+    "COMMAND_PORTAL_WORKSPACE_ID"
+  );
+  if (contextAssertionSecret && contextAssertionSecret === runtimeToken) {
+    throw new Error("Runtime service authentication and context assertion material must be distinct by purpose.");
+  }
+  if (trustBootstrapRequired) {
+    requiredSecret(runtimeToken, "COMMAND_PORTAL_RUNTIME_READ_TOKEN", 32);
+    requiredSecret(contextAssertionSecret, "NEXUS_CONTEXT_ASSERTION_SECRET", 32);
+    if (!runtimeTokenRef || !contextAssertionSecretRef) {
+      throw new Error("Trust bootstrap requires both opaque secret-provider references.");
+    }
+    if (new URL(runtimeBaseUrl).protocol !== "https:") {
+      throw new Error("Trust bootstrap requires an HTTPS Runtime endpoint.");
+    }
+    if (
+      contextAssertionIssuer !== CONTEXT_ASSERTION_ISSUER
+      || contextAssertionAudience !== CONTEXT_ASSERTION_AUDIENCE
+      || contextAssertionKeyId !== CONTEXT_ASSERTION_KEY_ID
+      || runtimeTokenKeyId !== RUNTIME_CREDENTIAL_KEY_ID
+      || contextAssertionClientIds.length !== 1
+      || contextAssertionClientIds[0] !== "nexus-web"
+    ) {
+      throw new Error("Trust bootstrap public identities must match the registered Mission 1 binding.");
+    }
+  }
   const localApiBaseUrl = safeLocalApiUrl(String(
     overrides.localApiBaseUrl ?? process.env.COMMAND_PORTAL_LOCAL_API_BASE_URL ?? "http://127.0.0.1:8765"
   ));
@@ -275,9 +674,25 @@ export function loadConfig(overrides = {}) {
   const operationalApiBaseUrl = safeOperationalApiUrl(String(
     overrides.operationalApiBaseUrl ?? process.env.COMMAND_PORTAL_OPERATIONAL_API_BASE_URL ?? "https://nexus-operations.invalid"
   ));
+  const operationalRuntimeToken = operationalEnabled
+    ? requiredSecret(
+      overrides.operationalRuntimeToken
+        ?? process.env.COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN,
+      "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN",
+    )
+    : "";
+  const operationalSessionSecret = operationalEnabled
+    ? requiredSecret(
+      overrides.operationalSessionSecret
+        ?? process.env.COMMAND_PORTAL_SESSION_SECRET,
+      "COMMAND_PORTAL_SESSION_SECRET",
+      32,
+    )
+    : "";
   const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,actions:simulate,actions:execute,approvals:decide,evidence:write,knowledge:promote,edge:node_admission:request")
     .split(",").map((item) => item.trim()).filter(Boolean);
   const replitDeployment = enabled(overrides.replitDeployment ?? process.env.REPLIT_DEPLOYMENT);
+  const replitId = String(overrides.replitId ?? process.env.REPL_ID ?? "").trim();
   const operationalSessionMode = String(
     overrides.operationalSessionMode
       ?? process.env.COMMAND_PORTAL_SESSION_MODE
@@ -291,16 +706,331 @@ export function loadConfig(overrides = {}) {
     .split(",")
     .map((item) => item.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, ""))
     .filter(Boolean);
+  const replitDevDomain = String(
+    overrides.replitDevDomain ?? process.env.REPLIT_DEV_DOMAIN ?? "",
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "");
+  if (
+    replitDevDomain
+    && (
+      !HOST_PATTERN.test(replitDevDomain)
+      || !replitDevDomain.endsWith(".replit.dev")
+    )
+  ) {
+    throw new Error("REPLIT_DEV_DOMAIN must be an exact Replit development host.");
+  }
   if (operationalEnabled && operationalSessionMode === "automatic_private_workspace") {
     if (!replitDeployment || !operationalCookieSecure || replitDomains.length === 0) {
       throw new Error("Automatic hosted sessions require REPLIT_DEPLOYMENT=1, at least one REPLIT_DOMAINS binding, and Secure cookies.");
     }
+  }
+  const executiveSessionEnabled = enabled(
+    overrides.executiveSessionEnabled
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED,
+  );
+  const providerInteractiveAuthEnabled = enabled(
+    overrides.providerInteractiveAuthEnabled
+      ?? process.env.COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED,
+  );
+  if (
+    executiveSessionEnabled
+    && replitDeployment
+    && !providerInteractiveAuthEnabled
+  ) {
+    throw new Error(
+      "Published Registered Executive sessions require the attested interactive Replit Auth path.",
+    );
+  }
+  const executiveSessionCookieSecure = operationalCookieSecure;
+  const executiveSessionTtlSeconds = integer(
+    overrides.executiveSessionTtlSeconds
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_TTL_SECONDS,
+    MAX_EXECUTIVE_SESSION_LIFETIME_SECONDS,
+    300,
+  );
+  const humanSessionAssertionTtlSeconds = integer(
+    overrides.humanSessionAssertionTtlSeconds
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_TTL_SECONDS,
+    MAX_HUMAN_ASSERTION_LIFETIME_SECONDS,
+  );
+  if (
+    executiveSessionTtlSeconds > MAX_EXECUTIVE_SESSION_LIFETIME_SECONDS
+    || humanSessionAssertionTtlSeconds > MAX_HUMAN_ASSERTION_LIFETIME_SECONDS
+  ) {
+    throw new Error("Registered executive session or assertion lifetime exceeds the Mission 3 bound.");
+  }
+  const executiveSessionCookieSecret = executiveSessionEnabled
+    ? requiredSecret(
+      overrides.executiveSessionCookieSecret
+        ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET,
+      "COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET",
+      32,
+    )
+    : "";
+  const executiveSessionCookieSecretRef = optionalSecretReference(
+    overrides.executiveSessionCookieSecretRef
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET_REF,
+    "COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET_REF",
+  );
+  const executiveSessionCookieKeyId = stablePublicIdentifier(
+    overrides.executiveSessionCookieKeyId
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_KEY_ID
+      ?? EXECUTIVE_SESSION_COOKIE_KEY_ID,
+    "COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_KEY_ID",
+  );
+  const humanSessionAssertionSecret = executiveSessionEnabled
+    ? requiredSecret(
+      overrides.humanSessionAssertionSecret
+        ?? process.env.NEXUS_HUMAN_SESSION_ASSERTION_SECRET,
+      "NEXUS_HUMAN_SESSION_ASSERTION_SECRET",
+      32,
+    )
+    : "";
+  const humanSessionAssertionSecretRef = optionalSecretReference(
+    overrides.humanSessionAssertionSecretRef
+      ?? process.env.NEXUS_HUMAN_SESSION_ASSERTION_SECRET_REF,
+    "NEXUS_HUMAN_SESSION_ASSERTION_SECRET_REF",
+  );
+  const humanSessionAssertionKeyId = stablePublicIdentifier(
+    overrides.humanSessionAssertionKeyId
+      ?? process.env.NEXUS_HUMAN_SESSION_ASSERTION_KEY_ID
+      ?? HUMAN_SESSION_ASSERTION_KEY_ID,
+    "NEXUS_HUMAN_SESSION_ASSERTION_KEY_ID",
+  );
+  const humanSessionAssertionIssuer = stablePublicIdentifier(
+    overrides.humanSessionAssertionIssuer
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_ISSUER
+      ?? HUMAN_SESSION_ASSERTION_ISSUER,
+    "COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_ISSUER",
+  );
+  const humanSessionAssertionAudience = stablePublicIdentifier(
+    overrides.humanSessionAssertionAudience
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_AUDIENCE
+      ?? HUMAN_SESSION_ASSERTION_AUDIENCE,
+    "COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_AUDIENCE",
+  );
+  const humanSessionServiceBindingId = stablePublicIdentifier(
+    overrides.humanSessionServiceBindingId
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_SERVICE_BINDING_ID
+      ?? HUMAN_SESSION_SERVICE_BINDING_ID,
+    "COMMAND_PORTAL_HUMAN_SESSION_SERVICE_BINDING_ID",
+  );
+  const humanSessionAssertionClientId = stablePublicIdentifier(
+    overrides.humanSessionAssertionClientId
+      ?? process.env.COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_CLIENT_ID
+      ?? "nexus-web",
+    "COMMAND_PORTAL_HUMAN_SESSION_ASSERTION_CLIENT_ID",
+  );
+  if (
+    executiveSessionEnabled
+    && replitDeployment
+    && !STABLE_ID_PATTERN.test(replitId)
+  ) {
+    throw new Error(
+      "Managed Replit Auth requires a stable provider-owned REPL_ID.",
+    );
+  }
+  const replitAuthIssuer = executiveSessionEnabled || providerInteractiveAuthEnabled
+    ? stablePublicIdentifier(
+      overrides.replitAuthIssuer
+        ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_ISSUER
+        ?? REPLIT_AUTH_PROVIDER_ISSUER,
+      "COMMAND_PORTAL_REPLIT_AUTH_ISSUER",
+    )
+    : "";
+  const replitAuthAudience = executiveSessionEnabled || providerInteractiveAuthEnabled
+    ? stablePublicIdentifier(
+      overrides.replitAuthAudience
+        ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_AUDIENCE
+        ?? replitId,
+      "COMMAND_PORTAL_REPLIT_AUTH_AUDIENCE",
+    )
+    : "";
+  const replitAuthJwksUrl = String(
+    overrides.replitAuthJwksUrl
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_JWKS_URL
+      ?? "",
+  ).trim();
+  const replitAuthTokenHeader = String(
+    overrides.replitAuthTokenHeader
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_TOKEN_HEADER
+      ?? "x-replit-auth-token",
+  ).trim().toLowerCase();
+  const replitAuthClockSkewSeconds = integer(
+    overrides.replitAuthClockSkewSeconds
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_CLOCK_SKEW_SECONDS,
+    30,
+    0,
+  );
+  const replitAuthMaxTokenLifetimeSeconds = integer(
+    overrides.replitAuthMaxTokenLifetimeSeconds
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_MAX_TOKEN_LIFETIME_SECONDS,
+    3_600,
+    60,
+  );
+  const replitAuthJwksTimeoutMs = integer(
+    overrides.replitAuthJwksTimeoutMs
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_JWKS_TIMEOUT_MS,
+    5_000,
+    100,
+  );
+  const replitAuthJwksCacheSeconds = integer(
+    overrides.replitAuthJwksCacheSeconds
+      ?? process.env.COMMAND_PORTAL_REPLIT_AUTH_JWKS_CACHE_SECONDS,
+    300,
+    30,
+  );
+  const executiveSessionPolicyId = stablePublicIdentifier(
+    overrides.executiveSessionPolicyId
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_ID
+      ?? EXECUTIVE_SESSION_POLICY_ID,
+    "COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_ID",
+  );
+  const executiveSessionPolicyVersion = stablePublicIdentifier(
+    overrides.executiveSessionPolicyVersion
+      ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION
+      ?? EXECUTIVE_SESSION_POLICY_VERSION,
+    "COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION",
+  );
+  const executiveSessionPolicyDigest = executiveSessionEnabled
+    ? stableSha256Digest(
+      overrides.executiveSessionPolicyDigest
+        ?? process.env.COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST,
+      "COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST",
+    )
+    : "";
+  const providerSessionSecret = providerInteractiveAuthEnabled
+    ? requiredSecret(
+      overrides.providerSessionSecret
+        ?? process.env.COMMAND_PORTAL_PROVIDER_SESSION_SECRET,
+      "COMMAND_PORTAL_PROVIDER_SESSION_SECRET",
+      32,
+    )
+    : "";
+  const providerSessionSecretRef = optionalSecretReference(
+    overrides.providerSessionSecretRef
+      ?? process.env.COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF,
+    "COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF",
+  );
+  const providerSessionKeyId = stablePublicIdentifier(
+    overrides.providerSessionKeyId
+      ?? process.env.COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID
+      ?? PROVIDER_SESSION_KEY_ID,
+    "COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID",
+  );
+  const providerSessionTtlSeconds = integer(
+    overrides.providerSessionTtlSeconds
+      ?? process.env.COMMAND_PORTAL_PROVIDER_SESSION_TTL_SECONDS,
+    3_600,
+    60,
+  );
+  if (providerInteractiveAuthEnabled) {
+    if (!providerSessionSecretRef) {
+      throw new Error(
+        "Interactive Replit Auth requires a provider-session secret-manager reference.",
+      );
+    }
+    if (!STABLE_ID_PATTERN.test(replitId)) {
+      throw new Error("Interactive Replit Auth requires a stable provider-owned REPL_ID.");
+    }
+    if (
+      replitAuthIssuer !== REPLIT_AUTH_PROVIDER_ISSUER
+      || replitAuthAudience !== replitId
+    ) {
+      throw new Error("Interactive Replit Auth requires the managed provider issuer and REPL_ID audience.");
+    }
+    if (providerSessionTtlSeconds > 86_400) {
+      throw new Error("Interactive provider session lifetime exceeds the accepted bound.");
+    }
+    const purposeBoundSecrets = [
+        runtimeToken,
+        contextAssertionSecret,
+        providerSessionSecret,
+        ...(operationalRuntimeToken ? [operationalRuntimeToken] : []),
+        ...(operationalSessionSecret ? [operationalSessionSecret] : []),
+        ...(executiveSessionEnabled
+          ? [executiveSessionCookieSecret, humanSessionAssertionSecret]
+          : []),
+      ];
+    if (new Set(purposeBoundSecrets).size !== purposeBoundSecrets.length) {
+      throw new Error("The interactive provider session secret must be purpose-bound and distinct.");
+    }
+  }
+  let executiveRegistrations = executiveSessionEnabled
+    ? registeredExecutives(
+      overrides.executiveRegistrations
+        ?? process.env.COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON,
+    )
+    : [];
+  if (executiveSessionEnabled) {
+    if (
+      !trustBootstrapRequired
+      || !executiveSessionCookieSecretRef
+      || !humanSessionAssertionSecretRef
+      || humanSessionAssertionIssuer !== HUMAN_SESSION_ASSERTION_ISSUER
+      || humanSessionAssertionAudience !== HUMAN_SESSION_ASSERTION_AUDIENCE
+      || humanSessionAssertionKeyId !== HUMAN_SESSION_ASSERTION_KEY_ID
+      || humanSessionServiceBindingId !== HUMAN_SESSION_SERVICE_BINDING_ID
+      || humanSessionAssertionClientId !== "nexus-web"
+      || executiveSessionCookieKeyId !== EXECUTIVE_SESSION_COOKIE_KEY_ID
+      || executiveSessionPolicyId !== EXECUTIVE_SESSION_POLICY_ID
+      || executiveSessionPolicyVersion !== EXECUTIVE_SESSION_POLICY_VERSION
+      || executiveSessionPolicyDigest !== EXECUTIVE_SESSION_POLICY_DIGEST
+      || (
+        replitDeployment
+        && (
+          replitAuthIssuer !== REPLIT_AUTH_PROVIDER_ISSUER
+          || replitAuthAudience !== replitId
+        )
+      )
+    ) {
+      throw new Error("Mission 3 registered executive sessions require the exact accepted trust, key, issuer, audience, service, and secret-reference bindings.");
+    }
+    if (
+      new Set([
+        runtimeToken,
+        contextAssertionSecret,
+        executiveSessionCookieSecret,
+        humanSessionAssertionSecret,
+      ]).size !== 4
+    ) {
+      throw new Error("Runtime, context, executive-cookie, and human-assertion secrets must be purpose-bound and distinct.");
+    }
+    if (
+      !executiveSessionCookieSecure
+      || (replitDeployment && replitDomains.length === 0)
+    ) {
+      throw new Error("Registered executive sessions require Secure cookies; Replit deployments also require at least one REPLIT_DOMAINS binding.");
+    }
+    const registrationMapper = createExecutiveRegistrationMapper(executiveRegistrations);
+    const metadata = registrationMapper.publicMetadata();
+    if (
+      metadata.some((item) => (
+        item.providerIssuer !== replitAuthIssuer
+        || item.principalId === humanSessionServiceBindingId
+        || item.tenantId !== operationalTenantId
+        || item.workspaceId !== operationalWorkspaceId
+        || item.policyId !== executiveSessionPolicyId
+        || item.policyVersion !== executiveSessionPolicyVersion
+        || item.policyDigest !== executiveSessionPolicyDigest
+      ))
+    ) {
+      throw new Error("Executive registrations must match the verified provider issuer and server-owned tenant/workspace binding.");
+    }
+    executiveRegistrations = registrationMapper.document();
   }
   return Object.freeze({
     port: integer(overrides.port ?? process.env.PORT, 4173, 0),
     runtimeBaseUrl,
     runtimePublicUrl: new URL(runtimeBaseUrl).origin,
     runtimeToken,
+    runtimeTokenRef,
+    runtimeTokenKeyId,
+    trustBootstrapRequired,
     localCapabilitiesEnabled,
     localApiBaseUrl,
     platformRuntimeBaseUrl,
@@ -319,8 +1049,9 @@ export function loadConfig(overrides = {}) {
     localTimeoutMs: integer(overrides.localTimeoutMs ?? process.env.COMMAND_PORTAL_LOCAL_REQUEST_TIMEOUT_MS, 30_000),
     operationalEnabled,
     operationalApiBaseUrl,
-    operationalRuntimeToken: operationalEnabled ? requiredSecret(overrides.operationalRuntimeToken ?? process.env.COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN, "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN") : "",
-    operationalSessionSecret: operationalEnabled ? requiredSecret(overrides.operationalSessionSecret ?? process.env.COMMAND_PORTAL_SESSION_SECRET, "COMMAND_PORTAL_SESSION_SECRET", 32) : "disabled-session-secret-not-used",
+    operationalRuntimeToken,
+    operationalSessionSecret:
+      operationalSessionSecret || "disabled-session-secret-not-used",
     operationalSessionMode,
     operationalPrincipalType: operationalSessionMode === "automatic_private_workspace" ? "workspace_service" : "named_operator",
     operationalAccessBasis: operationalSessionMode === "automatic_private_workspace" ? "replit_private_deployment" : "operator_access_key",
@@ -328,23 +1059,198 @@ export function loadConfig(overrides = {}) {
       ? requiredSecret(overrides.operationalAccessKey ?? process.env.COMMAND_PORTAL_OPERATOR_ACCESS_KEY, "COMMAND_PORTAL_OPERATOR_ACCESS_KEY", 16)
       : "automatic-session-no-access-key",
     operationalUserId: String(overrides.operationalUserId ?? process.env.COMMAND_PORTAL_OPERATOR_USER_ID ?? "operator-alpha"),
-    operationalTenantId: String(overrides.operationalTenantId ?? process.env.COMMAND_PORTAL_TENANT_ID ?? "nexicron"),
-    operationalWorkspaceId: String(overrides.operationalWorkspaceId ?? process.env.COMMAND_PORTAL_WORKSPACE_ID ?? "primary"),
+    operationalTenantId,
+    operationalWorkspaceId,
     operationalRole: String(overrides.operationalRole ?? process.env.COMMAND_PORTAL_OPERATOR_ROLE ?? "admin"),
-    contextAssertionSecret: optionalSecret(overrides.contextAssertionSecret ?? process.env.NEXUS_CONTEXT_ASSERTION_SECRET, "NEXUS_CONTEXT_ASSERTION_SECRET"),
-    contextAssertionPrincipalId: String(overrides.contextAssertionPrincipalId ?? process.env.COMMAND_PORTAL_CONTEXT_PRINCIPAL_ID ?? "command-portal-observer"),
+    contextAssertionSecret,
+    contextAssertionSecretRef,
+    contextAssertionIssuer,
+    contextAssertionAudience,
+    contextAssertionKeyId,
+    contextAssertionClientIds,
     operationalScopes,
     operationalSessionTtlSeconds: integer(overrides.operationalSessionTtlSeconds ?? process.env.COMMAND_PORTAL_SESSION_TTL_SECONDS, 3600, 300),
     operationalCookieSecure,
     replitDeployment,
+    replitId,
     replitDomains,
+    replitDevDomain,
+    executiveSessionEnabled,
+    executiveSessionTtlSeconds,
+    executiveSessionCookieSecure,
+    executiveSessionCookieSecret,
+    executiveSessionCookieSecretRef,
+    executiveSessionCookieKeyId,
+    humanSessionAssertionSecret,
+    humanSessionAssertionSecretRef,
+    humanSessionAssertionKeyId,
+    humanSessionAssertionIssuer,
+    humanSessionAssertionAudience,
+    humanSessionAssertionTtlSeconds,
+    humanSessionServiceBindingId,
+    humanSessionAssertionClientId,
+    providerInteractiveAuthEnabled,
+    providerSessionSecret,
+    providerSessionSecretRef,
+    providerSessionKeyId,
+    providerSessionTtlSeconds,
+    replitAuthIssuer,
+    replitAuthAudience,
+    replitAuthJwksUrl,
+    replitAuthTokenHeader,
+    replitAuthClockSkewSeconds,
+    replitAuthMaxTokenLifetimeSeconds,
+    replitAuthJwksTimeoutMs,
+    replitAuthJwksCacheSeconds,
+    executiveSessionPolicyId,
+    executiveSessionPolicyVersion,
+    executiveSessionPolicyDigest,
+    executiveRegistrations,
     maxAttempts: integer(overrides.maxAttempts, 3),
     retryDelayMs: integer(overrides.retryDelayMs, 100, 0)
   });
 }
 
+export function publicTrustBootstrap(config) {
+  const runtimeCredentialReferenceConfigured = Boolean(config.runtimeTokenRef);
+  const assertionKeyReferenceConfigured = Boolean(config.contextAssertionSecretRef);
+  const runtimeCredentialMaterialConfigured = Boolean(config.runtimeToken);
+  const assertionKeyMaterialConfigured = Boolean(config.contextAssertionSecret);
+  const trustBootstrapRequired = Boolean(config.trustBootstrapRequired);
+  const secureRuntimeTransport = (() => {
+    try {
+      return new URL(config.runtimeBaseUrl).protocol === "https:";
+    } catch {
+      return false;
+    }
+  })();
+  const publicBindingsValid = (
+    (config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER) === CONTEXT_ASSERTION_ISSUER
+    && (config.contextAssertionAudience ?? CONTEXT_ASSERTION_AUDIENCE) === CONTEXT_ASSERTION_AUDIENCE
+    && (config.contextAssertionKeyId ?? CONTEXT_ASSERTION_KEY_ID) === CONTEXT_ASSERTION_KEY_ID
+    && (config.runtimeTokenKeyId ?? RUNTIME_CREDENTIAL_KEY_ID) === RUNTIME_CREDENTIAL_KEY_ID
+    && (config.contextAssertionClientIds ?? ["nexus-web"]).length === 1
+    && (config.contextAssertionClientIds ?? ["nexus-web"])[0] === "nexus-web"
+    && STABLE_ID_PATTERN.test(String(config.operationalTenantId ?? ""))
+    && STABLE_ID_PATTERN.test(String(config.operationalWorkspaceId ?? ""))
+  );
+  const provisioningReady = trustBootstrapRequired
+    && secureRuntimeTransport
+    && publicBindingsValid
+    && runtimeCredentialReferenceConfigured
+    && assertionKeyReferenceConfigured
+    && runtimeCredentialMaterialConfigured
+    && assertionKeyMaterialConfigured;
+  const state = !trustBootstrapRequired
+    ? "disabled"
+    : (!secureRuntimeTransport || !publicBindingsValid)
+      ? "invalid"
+      : provisioningReady
+        ? "configured_not_verified"
+        : "awaiting_operator_provisioning";
+  return {
+    contractVersion: TRUST_BOOTSTRAP_CONTRACT,
+    contextAssertionContract: CONTEXT_ASSERTION_CONTRACT,
+    algorithm: CONTEXT_ASSERTION_ALGORITHM,
+    state,
+    experienceGatewayPrincipalId: config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER,
+    assertionIssuer: config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER,
+    assertionAudience: config.contextAssertionAudience ?? CONTEXT_ASSERTION_AUDIENCE,
+    allowedClientIds: [...(config.contextAssertionClientIds ?? ["nexus-web"])],
+    currentKeyId: config.contextAssertionKeyId ?? CONTEXT_ASSERTION_KEY_ID,
+    runtimeCredentialKeyId: config.runtimeTokenKeyId ?? RUNTIME_CREDENTIAL_KEY_ID,
+    runtimeCredentialReferenceConfigured,
+    assertionKeyReferenceConfigured,
+    runtimeCredentialMaterialConfigured,
+    assertionKeyMaterialConfigured,
+    secureRuntimeTransport,
+    publicBindingsValid,
+    tenantBindingConfigured: STABLE_ID_PATTERN.test(String(config.operationalTenantId ?? "")),
+    workspaceBindingConfigured: STABLE_ID_PATTERN.test(String(config.operationalWorkspaceId ?? "")),
+    assertionSubjectId: CONTEXT_ASSERTION_ISSUER,
+    assertionRoles: [...CONTEXT_ASSERTION_ROLES],
+    maxAssertionLifetimeSeconds: 60,
+    replayProtection: "runtime_process_local_single_use",
+    replayProtectionDurable: false,
+    canonicalAuthorityOwner: "contracts.authority",
+    canonicalAuthorityGrantContract: "nexus.authority-grant@1.1.0",
+    canonicalDecisionContract: "nexus.authority-decision@1.1.0",
+    authenticationGrantsAuthority: false,
+    provisioningContractGrantsAuthority: false,
+    targetEnvironmentVerified: false,
+    provisioningReady,
+    trustBootstrapRequired,
+    secretValuesExposed: false,
+    limitations: [
+      "The Experience Gateway identity is a service principal, not a verified human operator",
+      "Service authentication does not grant canonical Authority",
+      "Target-environment trust requires a separate sanitized live handshake receipt"
+    ]
+  };
+}
+
+export function publicExecutiveSessionTrust(config) {
+  const enabled = Boolean(config.executiveSessionEnabled);
+  return {
+    contractVersion: REGISTERED_EXECUTIVE_SESSION_CONTRACT,
+    assertionContract: HUMAN_SESSION_ASSERTION_CONTRACT,
+    state: !enabled ? "disabled" : "configured_not_verified",
+    provider: "replit-auth",
+    providerIssuerConfigured: Boolean(config.replitAuthIssuer),
+    providerAudienceConfigured: Boolean(config.replitAuthAudience),
+    providerJwksConfigured: Boolean(config.replitAuthJwksUrl),
+    agentProvisionedVerifierSupported: true,
+    registrationCount: enabled
+      ? config.executiveRegistrations.principals.length
+      : 0,
+    cookieKeyId: config.executiveSessionCookieKeyId,
+    assertionKeyId: config.humanSessionAssertionKeyId,
+    assertionIssuer: config.humanSessionAssertionIssuer,
+    assertionAudience: config.humanSessionAssertionAudience,
+    serviceBindingId: config.humanSessionServiceBindingId,
+    clientId: config.humanSessionAssertionClientId,
+    policyId: config.executiveSessionPolicyId,
+    policyVersion: config.executiveSessionPolicyVersion,
+    policyDigest: config.executiveSessionPolicyDigest || null,
+    policyBindingVerified: enabled,
+    exactRoles: ["executive"],
+    exactScopes: [...EXECUTIVE_SCOPES],
+    maxSessionLifetimeSeconds: MAX_EXECUTIVE_SESSION_LIFETIME_SECONDS,
+    maxAssertionLifetimeSeconds: MAX_HUMAN_ASSERTION_LIFETIME_SECONDS,
+    cookieSecretReferenceConfigured: Boolean(config.executiveSessionCookieSecretRef),
+    assertionSecretReferenceConfigured: Boolean(config.humanSessionAssertionSecretRef),
+    providerSubjectStoredOrExposed: false,
+    providerSubjectBindingAlgorithm: "sha256",
+    identitySelectsTenantOrWorkspace: false,
+    authenticationGrantsAuthority: false,
+    sessionCreatesDecision: false,
+    sessionCreatesMission: false,
+    sessionAuthorizesAction: false,
+    targetEnvironmentVerified: false,
+    secretValuesExposed: false,
+    limitations: enabled
+      ? [
+        "Replit Auth must be provisioned by Replit Agent and verified by one non-production human login.",
+        "Configured identity and session state do not establish Decision, Mission, or Authority.",
+        "Target-environment admission requires a separate sanitized Runtime handshake receipt.",
+      ]
+      : [
+        "Registered executive sessions are disabled.",
+        "The Mission 1 service principal remains distinct and does not establish a human identity.",
+      ],
+  };
+}
+
 class GatewayFailure extends Error {
-  constructor(code, message, state, status, retryable = false, details = undefined) {
+  constructor(
+    code,
+    message,
+    state,
+    status,
+    retryable = false,
+    details = undefined,
+    retryAfterMs = 0,
+  ) {
     super(message);
     this.name = "GatewayFailure";
     this.code = code;
@@ -352,11 +1258,22 @@ class GatewayFailure extends Error {
     this.status = status;
     this.retryable = retryable;
     this.details = details;
+    this.retryAfterMs = Number.isSafeInteger(retryAfterMs) && retryAfterMs > 0
+      ? Math.min(retryAfterMs, 120_000)
+      : 0;
   }
 }
 
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 const nowIso = () => new Date().toISOString();
+
+function boundedRetryAfterMs(value) {
+  const normalized = String(value ?? "").trim();
+  if (!/^\d+$/.test(normalized)) return 0;
+  const seconds = Number(normalized);
+  if (!Number.isFinite(seconds)) return 120_000;
+  return Math.min(seconds * 1_000, 120_000);
+}
 
 function structuredLog(event, fields = {}) {
   console.log(JSON.stringify({ timestamp: nowIso(), event, ...fields }));
@@ -413,23 +1330,71 @@ function gatewayMetadata(config, tracker, route, state, entry, additions = {}) {
     lastSuccessfulRefresh: tracker.lastSuccessfulRefresh,
     cache: cacheMetadata(entry, false),
     readOnly: true,
+    trustBootstrap: publicTrustBootstrap(config),
+    executiveSessionTrust: publicExecutiveSessionTrust(config),
     secretValuesExposed: false,
     ...additions
   };
 }
 
+function acceptsGzip(header) {
+  const codings = String(header ?? "")
+    .split(",")
+    .map((entry) => {
+      const [coding, ...parameters] = entry.trim().toLowerCase().split(";");
+      const quality = parameters
+        .map((parameter) => parameter.trim())
+        .find((parameter) => parameter.startsWith("q="));
+      return [coding, quality === undefined ? 1 : Number(quality.slice(2))];
+    });
+  const acceptableQuality = (quality) => Number.isFinite(quality) && quality > 0 && quality <= 1;
+  const gzip = codings.find(([coding]) => coding === "gzip");
+  if (gzip) return acceptableQuality(gzip[1]);
+  const wildcard = codings.find(([coding]) => coding === "*");
+  return Boolean(wildcard && acceptableQuality(wildcard[1]));
+}
+
+function mergeVary(existing, addition) {
+  const values = String(existing ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!values.some((value) => value.toLowerCase() === addition.toLowerCase())) {
+    values.push(addition);
+  }
+  return values.join(", ");
+}
+
 function sendJson(response, status, body, extraHeaders = {}) {
   const raw = Buffer.from(JSON.stringify(body));
+  const representationVaries = raw.byteLength >= JSON_GZIP_MINIMUM_BYTES;
+  const compressed = representationVaries && acceptsGzip(response.req?.headers["accept-encoding"]);
+  const payload = compressed ? gzipSync(raw) : raw;
+  const providedVary = Object.entries(extraHeaders)
+    .find(([name]) => name.toLowerCase() === "vary")?.[1];
+  const normalizedExtraHeaders = Object.fromEntries(
+    Object.entries(extraHeaders).filter(([name]) => ![
+      "content-length",
+      "content-encoding",
+      "vary",
+    ].includes(name.toLowerCase())),
+  );
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": raw.byteLength,
+    "Content-Length": payload.byteLength,
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
-    ...extraHeaders
+    ...(
+      representationVaries
+        ? { Vary: mergeVary(providedVary, "Accept-Encoding") }
+        : (providedVary === undefined ? {} : { Vary: providedVary })
+    ),
+    ...(compressed ? { "Content-Encoding": "gzip" } : {}),
+    ...normalizedExtraHeaders,
   });
-  response.end(raw);
+  response.end(payload);
 }
 
 function localEnvelope(config, route, data, additions = {}) {
@@ -497,6 +1462,67 @@ function operationalFailure(config, route, code, message, status = "Unavailable"
   };
 }
 
+function executiveSessionEnvelope(config, route, session, additions = {}) {
+  return {
+    ok: true,
+    session,
+    executiveSession: {
+      mode: "registered_executive_nonproduction",
+      route,
+      enabled: config.executiveSessionEnabled,
+      provider: "replit-auth",
+      identityOwner: "server_owned_registration",
+      runtimeOwner: "NEXUS Runtime",
+      serviceIdentityDistinct: true,
+      tenantWorkspaceServerSelected: true,
+      authenticationGrantsAuthority: false,
+      sessionCreatesDecision: false,
+      sessionCreatesMission: false,
+      sessionAuthorizesAction: false,
+      productionMultiTenantReady: false,
+      secretValuesExposed: false,
+      ...additions,
+    },
+    truth: TRUTH,
+  };
+}
+
+function executiveSessionFailureEnvelope(config, route, error, session = undefined) {
+  const connectionState = error.status === 503
+    ? "Unavailable"
+    : error.status === 504
+      ? "Timed Out"
+      : error.status >= 500
+        ? "Unknown"
+        : "Unauthorized";
+  return {
+    ok: false,
+    ...(session ? { session } : {}),
+    executiveSession: {
+      mode: "registered_executive_nonproduction",
+      route,
+      enabled: config.executiveSessionEnabled,
+      provider: "replit-auth",
+      identityOwner: "server_owned_registration",
+      runtimeOwner: "NEXUS Runtime",
+      serviceIdentityDistinct: true,
+      tenantWorkspaceServerSelected: true,
+      authenticationGrantsAuthority: false,
+      sessionCreatesDecision: false,
+      sessionCreatesMission: false,
+      sessionAuthorizesAction: false,
+      productionMultiTenantReady: false,
+      connectionState,
+      secretValuesExposed: false,
+    },
+    truth: TRUTH,
+    error: {
+      code: error.code ?? "executive_session_failed",
+      message: error.message ?? "The registered executive session failed safely.",
+    },
+  };
+}
+
 function resolveLocalCapability(pathname, method) {
   if (pathname === "/api/local/runtime-coordination/nodes") {
     return method === "GET"
@@ -535,11 +1561,12 @@ function resolveLocalCapability(pathname, method) {
   if (direct) return direct.method === method ? direct : { methodMismatch: true, allowed: direct.method };
   const match = pathname.match(/^\/api\/local\/projects\/([A-Za-z0-9_.:-]{1,160})\/(sources|evidence|scope|estimate|planning-model|artifacts|compile)$/);
   if (!match) {
-    const conclaveWorkspace = pathname.match(/^\/api\/local\/conclave\/workspaces\/([A-Za-z0-9_.:-]{1,160})$/);
+    const conclaveWorkspace = pathname.match(/^\/api\/local\/conclave\/workspaces\/([A-Za-z0-9_.:-]{1,160})(?:\/(run))?$/);
     if (conclaveWorkspace) {
-      return method === "GET"
-        ? { method, runtimePath: `/conclave/workspaces/${conclaveWorkspace[1]}` }
-        : { methodMismatch: true, allowed: "GET" };
+      const expectedMethod = conclaveWorkspace[2] === "run" ? "POST" : "GET";
+      return method === expectedMethod
+        ? { method, runtimePath: `/conclave/workspaces/${conclaveWorkspace[1]}${conclaveWorkspace[2] ? "/run" : ""}` }
+        : { methodMismatch: true, allowed: expectedMethod };
     }
     const conclaveEvidence = pathname.match(/^\/api\/local\/conclave\/workspaces\/([A-Za-z0-9_.:-]{1,160})\/tasks\/([A-Za-z0-9_.:-]{1,160})\/evidence$/);
     if (conclaveEvidence) {
@@ -586,6 +1613,14 @@ export const CANONICAL_OPERATIONAL_ROUTES = Object.freeze({
   "/api/operations/voice-operator/history": Object.freeze({ GET: "/voice-operator/history" }),
   "/api/operations/voice-operator/route-transcript": Object.freeze({ POST: "/voice-operator/route-transcript" }),
   "/api/operations/missions": Object.freeze({ GET: "/missions" }),
+  "/api/operations/missions/plan": Object.freeze({ POST: "/missions/plan" }),
+  "/api/operations/work-sessions": Object.freeze({ GET: "/work-sessions" }),
+  "/api/operations/work-sessions/plan": Object.freeze({ POST: "/work-sessions/plan" }),
+  "/api/operations/work-sessions/start": Object.freeze({ POST: "/work-sessions/start" }),
+  "/api/operations/approvals": Object.freeze({ GET: "/approvals" }),
+  "/api/operations/actions/dry-run": Object.freeze({ POST: "/actions/dry-run" }),
+  "/api/operations/actions/execute": Object.freeze({ POST: "/actions/execute" }),
+  "/api/operations/proofs": Object.freeze({ GET: "/proof/recent" }),
   "/api/operations/conclave/workspaces": Object.freeze({ GET: "/conclave/workspaces", POST: "/conclave/workspaces" }),
   "/api/operations/operational-replay": Object.freeze({ GET: "/operational-replay" }),
   "/api/operations/operational-replay/failures": Object.freeze({ GET: "/operational-replay/failures" }),
@@ -605,6 +1640,129 @@ export const CANONICAL_OPERATIONAL_ROUTES = Object.freeze({
   "/api/operations/runtime-coordination/admissions": Object.freeze({ GET: "/runtime-coordination/admissions", POST: "/runtime-coordination/admissions" }),
 });
 
+const DYNAMIC_CANONICAL_RUNTIME_TEMPLATES = Object.freeze([
+  ["GET", "/projects/{project_id}/sources"],
+  ["GET", "/projects/{project_id}/evidence"],
+  ["GET", "/projects/{project_id}/scope"],
+  ["GET", "/projects/{project_id}/estimate"],
+  ["GET", "/projects/{project_id}/planning-model"],
+  ["GET", "/projects/{project_id}/artifacts"],
+  ["POST", "/projects/{project_id}/compile"],
+  ["GET", "/conclave/workspaces/{mission_id}"],
+  ["POST", "/conclave/workspaces/{mission_id}/run"],
+  ["POST", "/conclave/workspaces/{mission_id}/tasks/{task_id}/evidence"],
+  ["POST", "/missions/{mission_id}/execute-step"],
+  ["POST", "/approvals/{approval_id}/approve"],
+  ["POST", "/approvals/{approval_id}/deny"],
+  ["GET", "/work-sessions/{session_id}"],
+  ["POST", "/work-sessions/{session_id}/step"],
+  ["POST", "/work-sessions/{session_id}/continue"],
+  ["POST", "/work-sessions/{session_id}/pause"],
+  ["POST", "/work-sessions/{session_id}/cancel"],
+  ["GET", "/work-sessions/{session_id}/receipt"],
+  ["GET", "/operational-replay/{replay_id}"],
+  ["GET", "/operational-replay/{replay_id}/events"],
+  ["GET", "/operational-replay/{replay_id}/stages/{selector}"],
+  ["GET", "/operational-replay/{replay_id}/stages/{selector}/explain"],
+  ["GET", "/operational-replay/missions/{mission_id}"],
+  ["GET", "/operational-replay/receipts/{receipt_id}"],
+  ["GET", "/receipts/missions/{mission_id}"],
+  ["GET", "/receipts/{receipt_id}"],
+  ["GET", "/receipts/{receipt_id}/proofs"],
+  ["POST", "/knowledge/acquisitions/{mission_id}/promotion-candidates"],
+  ["GET", "/knowledge/acquisitions/{mission_id}"],
+  ["GET", "/knowledge/promotion-candidates/{candidate_id}"],
+  ["GET", "/knowledge/store/{record_id}"],
+  ["GET", "/knowledge/store/{record_id}/versions"],
+  ["GET", "/knowledge/receipts/{receipt_id}"],
+  ["GET", "/mission-store/{mission_id}"],
+  ["GET", "/missions/{mission_id}"],
+  ["GET", "/executive-authority/canonical-execution"],
+  ["POST", "/executive-authority/canonical-execution/missions"],
+  ["GET", "/executive-authority/canonical-execution/missions/{mission_id}"],
+  ["POST", "/executive-authority/canonical-execution/missions/{mission_id}/actions"],
+  ["GET", "/runtime/baselines/{baseline_id}"],
+  ["GET", "/runtime-coordination/nodes/{node_id}"],
+  ["GET", "/runtime-coordination/admissions/{admission_id}"],
+  ["POST", "/runtime-coordination/admissions/{admission_id}/cancel"],
+  ["POST", "/runtime-coordination/admissions/{admission_id}/challenge/reissue"],
+  ["GET", "/runtime-coordination/admissions/{admission_id}/receipt"],
+  ["GET", "/runtime-coordination/admissions/{admission_id}/replay"],
+]);
+
+function rootRuntimeActionTemplates() {
+  const fixed = [];
+  for (const routes of Object.values(CANONICAL_OPERATIONAL_ROUTES)) {
+    for (const [method, runtimePath] of Object.entries(routes)) {
+      fixed.push([method, runtimePath]);
+    }
+  }
+  for (const route of Object.values(LOCAL_CAPABILITY_ROUTES)) {
+    fixed.push([route.method, route.runtimePath.split("?", 1)[0]]);
+  }
+  fixed.push(["POST", "/conclave/workspaces"]);
+  const unique = new Map(
+    [...fixed, ...DYNAMIC_CANONICAL_RUNTIME_TEMPLATES]
+      .map(([method, template]) => [`${method} ${template}`, [method, template]]),
+  );
+  return Object.freeze([...unique.values()].map((entry) => Object.freeze(entry)));
+}
+
+export const ROOT_RUNTIME_ACTION_TEMPLATES = rootRuntimeActionTemplates();
+
+function runtimeTemplatePattern(template) {
+  const escaped = template.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(/\\\{[A-Za-z][A-Za-z0-9_]*\\\}/g, "[^/]+")}$`);
+}
+
+function canonicalActionSlug(method, template) {
+  return `${method}.${template.replace(/^\/+|\/+$/g, "").replaceAll("/", ".")}`
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^[._-]+|[._-]+$/g, "") || "unknown";
+}
+
+export function resolveCanonicalCapabilityActionAlias(resolved) {
+  if (!resolved?.method || !resolved?.runtimePath) return null;
+  const path = resolved.runtimePath.split("?", 1)[0];
+  let matches = ROOT_RUNTIME_ACTION_TEMPLATES.filter(
+    ([method, template]) => method === resolved.method && runtimeTemplatePattern(template).test(path),
+  );
+  if (matches.length > 1) {
+    const specificity = ([, template]) => {
+      const segments = template.split("/").filter(Boolean);
+      const literals = segments.filter((segment) => !segment.startsWith("{"));
+      return [literals.length, literals.join("/").length, -segments.length];
+    };
+    const compare = (left, right) => {
+      for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) return left[index] - right[index];
+      }
+      return 0;
+    };
+    const best = matches.reduce((value, item) => (
+      compare(specificity(item), specificity(value)) > 0 ? item : value
+    ));
+    const bestSpecificity = specificity(best);
+    matches = matches.filter((item) => compare(specificity(item), bestSpecificity) === 0);
+  }
+  if (matches.length !== 1) return null;
+  const [method, template] = matches[0];
+  return runtimeActionAlias(
+    `canonical.route.${canonicalActionSlug(method, template)}`,
+    method,
+    template,
+    {
+      runtimePath: resolved.runtimePath,
+      requiredSurfaces: template.startsWith(
+        "/executive-authority/canonical-execution"
+      )
+        ? ["api", "ui"]
+        : ["api"],
+    },
+  );
+}
+
 function operationalMethod(route, method) {
   const runtimePath = route?.[method];
   if (runtimePath) return { method, runtimePath, canonicalHosted: true };
@@ -615,7 +1773,7 @@ function operationalMethod(route, method) {
 function operationalIdentifier(raw) {
   let identifier;
   try { identifier = decodeURIComponent(raw); } catch { return null; }
-  return OPERATIONAL_RECORD_ID_PATTERN.test(identifier) ? encodeURIComponent(identifier) : null;
+  return OPERATIONAL_RECORD_ID_PATTERN.test(identifier) ? identifier : null;
 }
 
 export function resolveOperationalCapability(pathname, method) {
@@ -693,6 +1851,12 @@ export function resolveOperationalCapability(pathname, method) {
     if (!missionId || !taskId) return null;
     return operationalMethod({ POST: `/conclave/workspaces/${missionId}/tasks/${taskId}/evidence` }, method);
   }
+  const conclaveRun = pathname.match(/^\/api\/operations\/conclave\/workspaces\/([^/]+)\/run$/);
+  if (conclaveRun) {
+    const missionId = operationalIdentifier(conclaveRun[1]);
+    if (!missionId) return null;
+    return operationalMethod({ POST: `/conclave/workspaces/${missionId}/run` }, method);
+  }
   const conclaveWorkspace = pathname.match(/^\/api\/operations\/conclave\/workspaces\/([^/]+)$/);
   if (conclaveWorkspace) {
     const missionId = operationalIdentifier(conclaveWorkspace[1]);
@@ -741,11 +1905,33 @@ export function resolveOperationalCapability(pathname, method) {
     if (!missionId) return null;
     return operationalMethod({ GET: `/mission-store/${missionId}` }, method);
   }
+  const missionStep = pathname.match(/^\/api\/operations\/missions\/([^/]+)\/execute-step$/);
+  if (missionStep) {
+    const missionId = operationalIdentifier(missionStep[1]);
+    if (!missionId) return null;
+    return operationalMethod({ POST: `/missions/${missionId}/execute-step` }, method);
+  }
   const missionDetail = pathname.match(/^\/api\/operations\/missions\/([^/]+)$/);
   if (missionDetail && missionDetail[1] !== "plan") {
     const missionId = operationalIdentifier(missionDetail[1]);
     if (!missionId) return null;
     return operationalMethod({ GET: `/missions/${missionId}` }, method);
+  }
+  const workSession = pathname.match(/^\/api\/operations\/work-sessions\/([^/]+)(?:\/(step|continue|pause|cancel|receipt))?$/);
+  if (workSession) {
+    const sessionId = operationalIdentifier(workSession[1]);
+    if (!sessionId) return null;
+    const action = workSession[2] ?? "read";
+    const expectedMethod = ["read", "receipt"].includes(action) ? "GET" : "POST";
+    return operationalMethod({
+      [expectedMethod]: `/work-sessions/${sessionId}${action === "read" ? "" : `/${action}`}`,
+    }, method);
+  }
+  const approval = pathname.match(/^\/api\/operations\/approvals\/([^/]+)\/(approve|deny)$/);
+  if (approval) {
+    const approvalId = operationalIdentifier(approval[1]);
+    if (!approvalId) return null;
+    return operationalMethod({ POST: `/approvals/${approvalId}/${approval[2]}` }, method);
   }
   const baseline = pathname.match(/^\/api\/operations\/runtime\/baselines\/([^/]+)$/);
   if (baseline) {
@@ -815,23 +2001,24 @@ function strictKeys(payload, allowed) {
   if (unknown.length) throw new GatewayFailure("request_invalid", `Unsupported request field: ${unknown[0]}.`, "Unknown", 400);
 }
 
-function rejectUntrustedOperationalFields(value, trail = []) {
+function rejectUntrustedOperationalFields(value, trail = [], allowedPaths = new Set()) {
   if (Array.isArray(value)) {
-    value.forEach((item, index) => rejectUntrustedOperationalFields(item, [...trail, String(index)]));
+    value.forEach((item, index) => rejectUntrustedOperationalFields(item, [...trail, String(index)], allowedPaths));
     return;
   }
   if (!value || typeof value !== "object") return;
   for (const [key, item] of Object.entries(value)) {
     const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (UNTRUSTED_OPERATIONAL_FIELDS.has(normalized)) {
+    const fieldPath = [...trail, key].join(".");
+    if (UNTRUSTED_OPERATIONAL_FIELDS.has(normalized) && !allowedPaths.has(fieldPath)) {
       throw new GatewayFailure(
         "untrusted_identity_field",
-        `Request field ${[...trail, key].join(".")} cannot select or strengthen Runtime identity, approval, or Authority.`,
+        `Request field ${fieldPath} cannot select or strengthen Runtime identity, approval, or Authority.`,
         "Unauthorized",
         403,
       );
     }
-    rejectUntrustedOperationalFields(item, [...trail, key]);
+    rejectUntrustedOperationalFields(item, [...trail, key], allowedPaths);
   }
 }
 
@@ -968,17 +2155,70 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
     };
   }
   if (runtimePath === "/conclave/workspaces") {
-    strictKeys(payload, new Set(["proposal"]));
-    return { proposal: boundedText(payload.proposal, "proposal", 8_000) };
+    strictKeys(payload, new Set(["proposal", "predecessor"]));
+    const proposal = boundedText(payload.proposal, "proposal", 8_000);
+    if (payload.predecessor === undefined) return { proposal };
+    const rawPredecessor = payload.predecessor;
+    if (!rawPredecessor || typeof rawPredecessor !== "object" || Array.isArray(rawPredecessor)) {
+      throw new GatewayFailure("request_invalid", "predecessor must be an object.", "Unknown", 400);
+    }
+    strictKeys(rawPredecessor, new Set(["missionId", "workspaceId", "workspaceVersion"]));
+    const predecessor = {
+      missionId: boundedText(rawPredecessor.missionId, "predecessor.missionId", 160),
+      workspaceId: boundedText(rawPredecessor.workspaceId, "predecessor.workspaceId", 160),
+      workspaceVersion: boundedText(rawPredecessor.workspaceVersion, "predecessor.workspaceVersion", 71),
+    };
+    if (
+      !OPERATIONAL_RECORD_ID_PATTERN.test(predecessor.missionId)
+      || !OPERATIONAL_RECORD_ID_PATTERN.test(predecessor.workspaceId)
+    ) {
+      throw new GatewayFailure(
+        "request_invalid",
+        "predecessor Mission or workspace identity is invalid.",
+        "Unknown",
+        400,
+      );
+    }
+    if (!/^sha256:[a-f0-9]{64}$/.test(predecessor.workspaceVersion)) {
+      throw new GatewayFailure(
+        "request_invalid",
+        "predecessor.workspaceVersion must be an exact sha256 digest.",
+        "Unknown",
+        400,
+      );
+    }
+    return { proposal, predecessor };
+  }
+  if (/^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/run$/.test(runtimePath)) {
+    strictKeys(payload, new Set(["expectedWorkspaceVersion"]));
+    const expectedWorkspaceVersion = boundedText(
+      payload.expectedWorkspaceVersion,
+      "expectedWorkspaceVersion",
+      71,
+    );
+    if (!/^sha256:[a-f0-9]{64}$/.test(expectedWorkspaceVersion)) {
+      throw new GatewayFailure(
+        "request_invalid",
+        "expectedWorkspaceVersion must be an exact sha256 workspace version.",
+        "Unknown",
+        400,
+      );
+    }
+    return { expectedWorkspaceVersion };
   }
   if (/^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/tasks\/[A-Za-z0-9_.:-]+\/evidence$/.test(runtimePath)) {
     strictKeys(payload, new Set([
-      "origin", "sourceClassification", "collector", "confidence", "claim",
-      "supportingArtifacts", "relationships", "operationalContext", "completeTask",
+      "origin", "sourceClassification", "confidence", "claim",
+      "supportingArtifacts", "relationships", "operationalContext",
     ]));
     const sourceClassification = boundedText(payload.sourceClassification, "sourceClassification", 80);
-    if (!["model_native", "platform_knowledge", "tenant_knowledge", "retrieved_evidence", "live_external_source", "runtime_evidence"].includes(sourceClassification)) {
-      throw new GatewayFailure("request_invalid", "sourceClassification is not registered.", "Unknown", 400);
+    if (!["tenant_knowledge", "retrieved_evidence"].includes(sourceClassification)) {
+      throw new GatewayFailure(
+        "request_invalid",
+        "Conclave operator Evidence must be classified as tenant_knowledge or retrieved_evidence.",
+        "Unknown",
+        400,
+      );
     }
     const confidence = Number(payload.confidence);
     if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
@@ -999,13 +2239,11 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
     return {
       origin: boundedText(payload.origin, "origin", 2_000),
       sourceClassification,
-      collector: boundedText(payload.collector, "collector", 240, false),
       confidence,
       claim: boundedText(payload.claim, "claim", 8_000),
       supportingArtifacts,
       relationships,
       operationalContext,
-      completeTask: payload.completeTask === true,
     };
   }
   if (runtimePath === "/runtime-coordination/admissions") {
@@ -1306,7 +2544,312 @@ async function handleSessionApi(request, response, config, sessionAuthority) {
   return sendJson(response, 404, operationalFailure(config, url.pathname, "route_not_allowlisted", "This session route is not allowlisted."));
 }
 
-async function handleOperationalApi(request, response, config, operationalFetch, sessionAuthority) {
+function executiveSessionError(error) {
+  if (
+    error instanceof ExecutiveSessionFailure
+    || error instanceof ExecutiveSessionRuntimeFailure
+  ) {
+    return error;
+  }
+  if (error instanceof GatewayFailure) {
+    return new ExecutiveSessionFailure(
+      error.code,
+      error.message,
+      error.status,
+    );
+  }
+  return new ExecutiveSessionFailure(
+    "executive_session_gateway_error",
+    "The registered executive session failed safely.",
+    500,
+  );
+}
+
+function sessionAccess(authority, claims) {
+  return {
+    csrfToken: authority.csrfToken(claims),
+    cookieHttpOnly: true,
+    cookieSameSite: "Strict",
+    providerTokenRetained: false,
+    providerSubjectRetained: false,
+    authorityGranted: false,
+    actionAuthorized: false,
+    secretValuesExposed: false,
+  };
+}
+
+async function handleExecutiveSessionApi(
+  request,
+  response,
+  config,
+  providerAdapter,
+  registrationMapper,
+  authority,
+  runtimeClient,
+) {
+  const url = new URL(request.url, "http://portal.invalid");
+  if (
+    !requestOriginAllowed(
+      request,
+      config,
+      request.method === "POST",
+    )
+  ) {
+    const error = new ExecutiveSessionFailure(
+      "origin_denied",
+      "Request origin is not allowed.",
+      403,
+    );
+    return sendJson(
+      response,
+      error.status,
+      executiveSessionFailureEnvelope(config, url.pathname, error),
+    );
+  }
+  if (!config.executiveSessionEnabled) {
+    const error = new ExecutiveSessionFailure(
+      "executive_session_disabled",
+      "Registered executive sessions are not enabled.",
+      503,
+    );
+    return sendJson(
+      response,
+      error.status,
+      executiveSessionFailureEnvelope(config, url.pathname, error),
+    );
+  }
+  if (url.search) {
+    const error = new ExecutiveSessionFailure(
+      "query_not_allowed",
+      "Registered executive session routes do not accept query parameters.",
+      400,
+    );
+    return sendJson(
+      response,
+      error.status,
+      executiveSessionFailureEnvelope(config, url.pathname, error),
+    );
+  }
+  if (
+    url.pathname === "/api/executive-session/login"
+    && request.method === "POST"
+  ) {
+    try {
+      const payload = await readJsonBody(request, 1_024);
+      strictKeys(payload, new Set());
+      const identity = await providerAdapter.verify(request);
+      const registration = registrationMapper.resolve(identity);
+      const issued = authority.issue(identity, registration);
+      const session = await runtimeClient.verify(issued.claims);
+      structuredLog("registered_executive_session_started", {
+        sessionId: issued.claims.sid,
+        registrationId: issued.claims.registrationId,
+        principalId: issued.claims.principalId,
+        provider: issued.claims.provider,
+        providerIssuer: issued.claims.providerIssuer,
+        tenantId: issued.claims.tenantId,
+        workspaceId: issued.claims.workspaceId,
+        role: issued.claims.role,
+        authorityGranted: false,
+        actionAuthorized: false,
+      });
+      const body = executiveSessionEnvelope(
+        config,
+        url.pathname,
+        session,
+        {
+          runtimeVerified: true,
+          lifecycleState: "active",
+        },
+      );
+      body.sessionAccess = sessionAccess(authority, issued.claims);
+      return sendJson(response, 201, body, {
+        "Set-Cookie": issued.cookie,
+      });
+    } catch (caught) {
+      const error = executiveSessionError(caught);
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(config, url.pathname, error),
+      );
+    }
+  }
+  if (
+    url.pathname === "/api/executive-session"
+    && request.method === "GET"
+  ) {
+    const claims = authority.authenticate(request);
+    if (!claims) {
+      const hadCookie = String(request.headers.cookie ?? "")
+        .split(";")
+        .some(
+          (item) =>
+            item.trim().startsWith(`${EXECUTIVE_SESSION_COOKIE_NAME}=`),
+        );
+      return sendJson(
+        response,
+        200,
+        executiveSessionEnvelope(
+          config,
+          url.pathname,
+          {
+            authenticated: false,
+            runtimeVerified: false,
+            authorityGranted: false,
+            actionAuthorized: false,
+            secretValuesExposed: false,
+          },
+          { runtimeVerified: false, lifecycleState: "absent" },
+        ),
+        hadCookie ? { "Set-Cookie": authority.clearCookie() } : {},
+      );
+    }
+    try {
+      const session = await runtimeClient.get(claims);
+      const body = executiveSessionEnvelope(
+        config,
+        url.pathname,
+        session,
+        {
+          runtimeVerified: true,
+          lifecycleState: "active",
+        },
+      );
+      body.sessionAccess = sessionAccess(authority, claims);
+      return sendJson(response, 200, body);
+    } catch (caught) {
+      const error = executiveSessionError(caught);
+      const terminalSessionFailure = [
+        "session_expired",
+        "session_revoked",
+        "session_not_found",
+        "executive_session_invalid",
+      ].includes(error.code);
+      if (terminalSessionFailure) {
+        authority.revoke(claims);
+      }
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(
+          config,
+          url.pathname,
+          error,
+          authority.publicSession(claims, false),
+        ),
+        terminalSessionFailure
+          ? { "Set-Cookie": authority.clearCookie() }
+          : {},
+      );
+    }
+  }
+  if (
+    url.pathname === "/api/executive-session/revoke"
+    && request.method === "POST"
+  ) {
+    const claims = authority.authenticate(request);
+    if (!claims) {
+      const error = new ExecutiveSessionFailure(
+        "executive_session_required",
+        "A verified registered executive session is required.",
+        401,
+      );
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(config, url.pathname, error),
+      );
+    }
+    if (!authority.csrfValid(request, claims)) {
+      const error = new ExecutiveSessionFailure(
+        "csrf_invalid",
+        "Session verification failed.",
+        403,
+      );
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(config, url.pathname, error),
+      );
+    }
+    try {
+      const payload = await readJsonBody(request, 1_024);
+      strictKeys(payload, new Set());
+      const session = await runtimeClient.revoke(claims);
+      authority.revoke(claims);
+      structuredLog("registered_executive_session_revoked", {
+        sessionId: claims.sid,
+        registrationId: claims.registrationId,
+        principalId: claims.principalId,
+        tenantId: claims.tenantId,
+        workspaceId: claims.workspaceId,
+        authorityGranted: false,
+        actionAuthorized: false,
+      });
+      return sendJson(
+        response,
+        200,
+        executiveSessionEnvelope(
+          config,
+          url.pathname,
+          session,
+          { runtimeVerified: true, lifecycleState: "revoked" },
+        ),
+        { "Set-Cookie": authority.clearCookie() },
+      );
+    } catch (caught) {
+      authority.revoke(claims);
+      const error = executiveSessionError(caught);
+      return sendJson(
+        response,
+        error.status,
+        executiveSessionFailureEnvelope(
+          config,
+          url.pathname,
+          error,
+          {
+            authenticated: false,
+            runtimeVerified: false,
+            authorityGranted: false,
+            actionAuthorized: false,
+            secretValuesExposed: false,
+          },
+        ),
+        { "Set-Cookie": authority.clearCookie() },
+      );
+    }
+  }
+  const allowed = url.pathname === "/api/executive-session"
+    ? "GET"
+    : url.pathname === "/api/executive-session/login"
+      || url.pathname === "/api/executive-session/revoke"
+      ? "POST"
+      : "";
+  const error = new ExecutiveSessionFailure(
+    allowed ? "method_not_allowed" : "route_not_allowlisted",
+    allowed
+      ? "Method is not allowed for this registered executive session route."
+      : "This registered executive session route is not allowlisted.",
+    allowed ? 405 : 404,
+  );
+  return sendJson(
+    response,
+    error.status,
+    executiveSessionFailureEnvelope(config, url.pathname, error),
+    allowed ? { Allow: allowed } : {},
+  );
+}
+
+async function handleOperationalApi(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  operationalFetch,
+  sessionAuthority,
+  actionAdmission,
+) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config, request.method === "POST")) return sendJson(response, 403, operationalFailure(config, url.pathname, "origin_denied", "Request origin is not allowed."));
   if (!config.operationalEnabled) return sendJson(response, 503, operationalFailure(config, url.pathname, "operational_gateway_disabled", "Hosted operational mode is not enabled."));
@@ -1316,6 +2859,26 @@ async function handleOperationalApi(request, response, config, operationalFetch,
   const resolved = resolveOperationalCapability(url.pathname, request.method);
   if (!resolved) return sendJson(response, 404, operationalFailure(config, url.pathname, "route_not_allowlisted", "This hosted operation is not allowlisted."));
   if (resolved.methodMismatch) return sendJson(response, 405, operationalFailure(config, url.pathname, "method_not_allowed", "Method is not allowed for this hosted operation."), { Allow: resolved.allowed });
+  const alias = resolveCanonicalCapabilityActionAlias(resolved);
+  const admission = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!admission.allowed) {
+    return sendJson(
+      response,
+      admission.status,
+      operationalFailure(
+        config,
+        url.pathname,
+        admission.code,
+        admission.message,
+        admission.state,
+      ),
+    );
+  }
   const scope = requiredScope(resolved.runtimePath, resolved.method);
   if (!claims.scopes.includes(scope)) return sendJson(response, 403, operationalFailure(config, url.pathname, "scope_denied", `Session lacks required scope: ${scope}.`, "Unauthorized"));
   if (resolved.method === "POST") {
@@ -1324,8 +2887,28 @@ async function handleOperationalApi(request, response, config, operationalFetch,
   }
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
-    if (resolved.method === "POST") rejectUntrustedOperationalFields(rawPayload);
-    const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
+    let payload;
+    if (
+      resolved.method === "POST"
+      && resolved.runtimePath === "/conclave/workspaces"
+      && rawPayload?.predecessor !== undefined
+    ) {
+      payload = validateLocalPayload(
+        resolved.runtimePath,
+        rawPayload,
+        config.localMaxRequestBytes,
+      );
+      rejectUntrustedOperationalFields(
+        rawPayload,
+        [],
+        new Set(["predecessor.missionId", "predecessor.workspaceId"]),
+      );
+    } else {
+      if (resolved.method === "POST") rejectUntrustedOperationalFields(rawPayload);
+      payload = resolved.method === "POST"
+        ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes)
+        : undefined;
+    }
     if (resolved.method === "POST" && payload?.idempotencyKey && payload.idempotencyKey !== request.headers["idempotency-key"]) {
       throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match the request body.", "Unknown", 400);
     }
@@ -1338,7 +2921,427 @@ async function handleOperationalApi(request, response, config, operationalFetch,
   }
 }
 
-async function handleLocalApi(request, response, config, localFetch) {
+function resolveCanonicalExecutionRoute(pathname, method) {
+  if (pathname === "/api/canonical-execution") {
+    return method === "GET"
+      ? { method, runtimePath: "/executive-authority/canonical-execution" }
+      : { methodMismatch: true, allowed: "GET" };
+  }
+  if (pathname === "/api/canonical-execution/missions") {
+    return method === "POST"
+      ? {
+        method,
+        runtimePath: "/executive-authority/canonical-execution/missions",
+      }
+      : { methodMismatch: true, allowed: "POST" };
+  }
+  const match = pathname.match(
+    /^\/api\/canonical-execution\/missions\/([^/]+)(\/actions)?$/,
+  );
+  if (!match) return null;
+  const missionId = operationalIdentifier(match[1]);
+  if (!missionId) return null;
+  const actions = match[2] === "/actions";
+  const expectedMethod = actions ? "POST" : "GET";
+  if (method !== expectedMethod) {
+    return { methodMismatch: true, allowed: expectedMethod };
+  }
+  return {
+    method,
+    runtimePath: (
+      `/executive-authority/canonical-execution/missions/${missionId}`
+      + (actions ? "/actions" : "")
+    ),
+  };
+}
+
+function validateCanonicalExecutionPayload(runtimePath, payload) {
+  rejectUntrustedOperationalFields(payload);
+  if (runtimePath === "/executive-authority/canonical-execution/missions") {
+    strictKeys(
+      payload,
+      new Set(["objective", "authorizationAcknowledged"]),
+    );
+    if (
+      payload.objective !==
+        "Prove one governed reversible non-production repository fixture Action."
+      || payload.authorizationAcknowledged !== true
+    ) {
+      throw new GatewayFailure(
+        "canonical_execution_mission_scope_invalid",
+        "Only the exact admitted Mission 4 objective may be authorized.",
+        "Unauthorized",
+        400,
+      );
+    }
+    return payload;
+  }
+  strictKeys(
+    payload,
+    payload?.action === "repository.edit"
+      ? new Set(["action", "path", "expectedSha256", "content"])
+      : new Set([
+        "action",
+        "path",
+        "expectedSha256",
+        "restoreSha256",
+      ]),
+  );
+  if (
+    !["repository.edit", "repository.restore"].includes(payload?.action)
+    || payload.path !== "mission-fixture/nexus/m4/canonical-execution.json"
+    || !/^sha256:[0-9a-f]{64}$/.test(String(payload.expectedSha256 ?? ""))
+    || (
+      payload.action === "repository.edit"
+      && (
+        typeof payload.content !== "string"
+        || Buffer.byteLength(payload.content, "utf8") < 1
+        || Buffer.byteLength(payload.content, "utf8") > 4_096
+      )
+    )
+    || (
+      payload.action === "repository.restore"
+      && !/^sha256:[0-9a-f]{64}$/.test(
+        String(payload.restoreSha256 ?? ""),
+      )
+    )
+  ) {
+    throw new GatewayFailure(
+      "canonical_execution_action_invalid",
+      "The Action does not match the exact Mission 4 fixture contract.",
+      "Unauthorized",
+      400,
+    );
+  }
+  return payload;
+}
+
+async function handleCanonicalExecutionApi(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  operationalFetch,
+  executiveSessionAuthority,
+  actionAdmission,
+  clock,
+) {
+  const url = new URL(request.url, "http://portal.invalid");
+  if (
+    !requestOriginAllowed(
+      request,
+      config,
+      request.method === "POST",
+    )
+  ) {
+    return sendJson(
+      response,
+      403,
+      operationalFailure(
+        config,
+        url.pathname,
+        "origin_denied",
+        "Request origin is not allowed.",
+        "Unauthorized",
+      ),
+    );
+  }
+  if (!config.operationalEnabled || !config.executiveSessionEnabled) {
+    return sendJson(
+      response,
+      503,
+      operationalFailure(
+        config,
+        url.pathname,
+        "canonical_execution_unconfigured",
+        "Mission 4 requires both hosted operational transport and Registered Executive sessions.",
+        "Unavailable",
+      ),
+    );
+  }
+  if (url.search) {
+    return sendJson(
+      response,
+      400,
+      operationalFailure(
+        config,
+        url.pathname,
+        "query_not_allowed",
+        "Canonical execution routes do not accept query parameters.",
+      ),
+    );
+  }
+  const resolved = resolveCanonicalExecutionRoute(
+    url.pathname,
+    request.method,
+  );
+  if (!resolved) {
+    return sendJson(
+      response,
+      404,
+      operationalFailure(
+        config,
+        url.pathname,
+        "route_not_allowlisted",
+        "This canonical execution route is not allowlisted.",
+      ),
+    );
+  }
+  if (resolved.methodMismatch) {
+    return sendJson(
+      response,
+      405,
+      operationalFailure(
+        config,
+        url.pathname,
+        "method_not_allowed",
+        "Method is not allowed for this canonical execution route.",
+      ),
+      { Allow: resolved.allowed },
+    );
+  }
+  const claims = executiveSessionAuthority.authenticate(request);
+  if (!claims) {
+    return sendJson(
+      response,
+      401,
+      operationalFailure(
+        config,
+        url.pathname,
+        "registered_executive_session_required",
+        "A current Registered Executive session is required.",
+        "Unauthorized",
+      ),
+    );
+  }
+  if (
+    request.method === "POST"
+    && !executiveSessionAuthority.csrfValid(request, claims)
+  ) {
+    return sendJson(
+      response,
+      403,
+      operationalFailure(
+        config,
+        url.pathname,
+        "csrf_invalid",
+        "Registered Executive CSRF verification failed.",
+        "Unauthorized",
+      ),
+    );
+  }
+  const requestKey = String(request.headers["idempotency-key"] ?? "");
+  if (
+    request.method === "POST"
+    && !IDEMPOTENCY_KEY_PATTERN.test(requestKey)
+  ) {
+    return sendJson(
+      response,
+      400,
+      operationalFailure(
+        config,
+        url.pathname,
+        "idempotency_key_required",
+        "A valid Idempotency-Key is required.",
+      ),
+    );
+  }
+  const alias = resolveCanonicalCapabilityActionAlias(resolved);
+  const admission = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!admission.allowed) {
+    return sendJson(
+      response,
+      admission.status,
+      operationalFailure(
+        config,
+        url.pathname,
+        admission.code,
+        admission.message,
+        admission.state,
+      ),
+    );
+  }
+  let payload;
+  try {
+    payload = request.method === "POST"
+      ? validateCanonicalExecutionPayload(
+        resolved.runtimePath,
+        await readJsonBody(request, 8_192),
+      )
+      : undefined;
+  } catch (caught) {
+    const failure = caught instanceof GatewayFailure
+      ? caught
+      : new GatewayFailure(
+        "canonical_execution_request_invalid",
+        "The canonical execution request was invalid.",
+        "Unknown",
+        400,
+      );
+    return sendJson(
+      response,
+      failure.status,
+      operationalFailure(
+        config,
+        url.pathname,
+        failure.code,
+        failure.message,
+        failure.state,
+      ),
+    );
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  try {
+    const assertion = createHumanSessionAssertion(config, claims, clock);
+    let upstream;
+    try {
+      upstream = await operationalFetch(
+        `${config.operationalApiBaseUrl}${resolved.runtimePath}`,
+        {
+          method: resolved.method,
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${config.operationalRuntimeToken}`,
+            "X-NEXUS-Service-Authorization": (
+              `Bearer ${config.runtimeToken}`
+            ),
+            "X-NEXUS-Human-Session-ID": claims.sid,
+            [HUMAN_SESSION_ASSERTION_HEADER]: assertion,
+            ...(resolved.method === "POST"
+              ? {
+                "Content-Type": "application/json",
+                "Idempotency-Key": requestKey,
+              }
+              : {}),
+          },
+          ...(resolved.method === "POST"
+            ? { body: JSON.stringify(payload) }
+            : {}),
+          signal: controller.signal,
+          redirect: "error",
+        },
+      );
+    } catch (caught) {
+      if (caught?.name === "AbortError" || controller.signal.aborted) {
+        throw new GatewayFailure(
+          "canonical_execution_timed_out",
+          "Canonical execution timed out before a verified result.",
+          "Timed Out",
+          504,
+          true,
+        );
+      }
+      throw new GatewayFailure(
+        "canonical_execution_runtime_unavailable",
+        "The non-production canonical execution Runtime is unavailable.",
+        "Unavailable",
+        503,
+        true,
+      );
+    }
+    const raw = Buffer.from(await upstream.arrayBuffer());
+    if (raw.byteLength > config.localMaxResponseBytes) {
+      throw new GatewayFailure(
+        "canonical_execution_response_too_large",
+        "Canonical execution response exceeded the bounded size.",
+        "Unknown",
+        502,
+      );
+    }
+    let upstreamBody;
+    try {
+      upstreamBody = JSON.parse(raw.toString("utf8"));
+    } catch {
+      throw new GatewayFailure(
+        "canonical_execution_response_invalid",
+        "Canonical execution returned invalid JSON.",
+        "Unknown",
+        502,
+      );
+    }
+    if (
+      !upstreamBody
+      || typeof upstreamBody !== "object"
+      || Array.isArray(upstreamBody)
+      || upstreamBody.secretValuesExposed !== false
+    ) {
+      throw new GatewayFailure(
+        "canonical_execution_response_invalid",
+        "Canonical execution returned an invalid truth-bound response.",
+        "Unknown",
+        502,
+      );
+    }
+    const sanitized = sanitizeOperationalResponse(upstreamBody);
+    if (JSON.stringify(sanitized) !== JSON.stringify(upstreamBody)) {
+      throw new GatewayFailure(
+        "canonical_execution_sensitive_field_rejected",
+        "Canonical execution response contained a prohibited sensitive field.",
+        "Unauthorized",
+        502,
+      );
+    }
+    structuredLog("canonical_execution_gateway_result", {
+      route: url.pathname,
+      runtimePath: resolved.runtimePath,
+      method: resolved.method,
+      status: upstream.status,
+      sessionId: claims.sid,
+      principalId: claims.principalId,
+      tenantId: claims.tenantId,
+      workspaceId: claims.workspaceId,
+      authorityGranted: false,
+      secretValuesExposed: false,
+    });
+    return sendJson(response, upstream.status, {
+      ok: upstream.ok,
+      recordType: "nexus_canonical_execution_gateway_response",
+      route: url.pathname,
+      data: sanitized,
+      registeredExecutiveSessionVerified: true,
+      authorityGranted: false,
+      secretValuesExposed: false,
+      truth: TRUTH,
+    });
+  } catch (caught) {
+    const failure = caught instanceof GatewayFailure
+      ? caught
+      : new GatewayFailure(
+        "canonical_execution_gateway_error",
+        "Canonical execution failed safely.",
+        "Unknown",
+        500,
+      );
+    return sendJson(
+      response,
+      failure.status,
+      operationalFailure(
+        config,
+        url.pathname,
+        failure.code,
+        failure.message,
+        failure.state,
+      ),
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function handleLocalApi(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  localFetch,
+  actionAdmission,
+) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config)) return sendJson(response, 403, localFailure(config, url.pathname, "origin_denied", "Request origin is not allowed."));
   if (!config.localCapabilitiesEnabled) return sendJson(response, 503, localFailure(config, url.pathname, "local_capabilities_disabled", "Local capability mode is not enabled."));
@@ -1350,12 +3353,36 @@ async function handleLocalApi(request, response, config, localFetch) {
   const resolved = resolveLocalCapability(url.pathname, request.method);
   if (!resolved) return sendJson(response, 404, localFailure(config, url.pathname, "route_not_allowlisted", "This local capability route is not allowlisted."));
   if (resolved.methodMismatch) return sendJson(response, 405, localFailure(config, url.pathname, "method_not_allowed", "Method is not allowed for this local capability."), { Allow: `${resolved.allowed}, OPTIONS` });
+  const alias = url.pathname.startsWith("/api/local/interactions")
+    ? resolveGatewayRuntimeActionAlias(request.method, url.pathname)
+    : resolveCanonicalCapabilityActionAlias(resolved);
+  const decision = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!decision.allowed) {
+    return sendJson(
+      response,
+      decision.status,
+      localFailure(config, url.pathname, decision.code, decision.message, decision.state),
+    );
+  }
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
     const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
-    if (resolved.method === "POST" && /^\/runtime-coordination\/admissions(?:\/[^/]+\/(?:cancel|challenge\/reissue))?$/.test(resolved.runtimePath)) {
+    if (
+      resolved.method === "POST"
+      && (
+        /^\/runtime-coordination\/admissions(?:\/[^/]+\/(?:cancel|challenge\/reissue))?$/.test(resolved.runtimePath)
+        || resolved.runtimePath === "/conclave/workspaces"
+        || /^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/run$/.test(resolved.runtimePath)
+        || /^\/conclave\/workspaces\/[A-Za-z0-9_.:-]+\/tasks\/[A-Za-z0-9_.:-]+\/evidence$/.test(resolved.runtimePath)
+      )
+    ) {
       const requestKey = String(request.headers["idempotency-key"] ?? "");
-      if (!IDEMPOTENCY_KEY_PATTERN.test(requestKey)) throw new GatewayFailure("idempotency_key_required", "A valid Idempotency-Key is required for admission mutations.", "Unknown", 400);
+      if (!IDEMPOTENCY_KEY_PATTERN.test(requestKey)) throw new GatewayFailure("idempotency_key_required", "A valid Idempotency-Key is required for this governed mutation.", "Unknown", 400);
       if (payload?.idempotencyKey && payload.idempotencyKey !== requestKey) throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match the request body.", "Unknown", 400);
     }
     const data = await fetchLocalCapability(resolved, payload, request, config, localFetch);
@@ -1368,7 +3395,7 @@ async function handleLocalApi(request, response, config, localFetch) {
   }
 }
 
-async function handleReplayApi(request, response, config, replayFetch) {
+async function handleReplayApi(request, response, config) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
   if (!config.replayEnabled) return sendJson(response, 503, { ok: false, error: { code: "replay_gateway_disabled", message: "Runtime-owned Operational Replay is not configured for this deployment." }, truth: TRUTH });
@@ -1380,50 +3407,850 @@ async function handleReplayApi(request, response, config, replayFetch) {
   if (request.method !== "GET") return sendJson(response, 405, { ok: false, error: { code: "method_not_allowed", message: "Operational Replay is a passive read-only surface." }, truth: TRUTH }, { Allow: "GET, OPTIONS" });
   const replayPath = REPLAY_ROUTES[url.pathname];
   if (!replayPath) return sendJson(response, 404, { ok: false, error: { code: "route_not_allowlisted", message: "This Operational Replay route is not allowlisted." }, truth: TRUTH });
+  return sendJson(response, 503, {
+    ok: false,
+    data: null,
+    error: {
+      code: "canonical_action_unavailable",
+      message: "The legacy Replay export proxy is registered as unavailable until it is represented by one current Runtime-owned canonical action.",
+    },
+    truth: TRUTH,
+  });
+}
 
-  const controller = new AbortController();
-  const streaming = replayPath === "/events";
-  const timer = streaming ? null : setTimeout(() => controller.abort(), config.localTimeoutMs);
-  response.on("close", () => controller.abort());
-  try {
-    const upstream = await replayFetch(`${config.replayBaseUrl}${replayPath}`, {
-      method: "GET",
-      headers: { Accept: streaming ? "text/event-stream" : "application/json, application/pdf, application/zip" },
-      signal: controller.signal,
-      redirect: "error",
-      cache: "no-store"
-    });
-    if (!upstream.ok || !upstream.body) {
-      return sendJson(response, upstream.status === 404 ? 404 : 503, { ok: false, error: { code: "replay_unavailable", message: `Operational Replay returned status ${upstream.status}.` }, truth: TRUTH });
-    }
-    const declaredLength = Number(upstream.headers.get("content-length") ?? 0);
-    if (!streaming && declaredLength > config.replayMaxResponseBytes) {
-      return sendJson(response, 502, { ok: false, error: { code: "replay_response_too_large", message: "Operational Replay response exceeded the gateway size limit." }, truth: TRUTH });
-    }
-    const headers = {
-      "Content-Type": upstream.headers.get("content-type") ?? (streaming ? "text/event-stream; charset=utf-8" : "application/octet-stream"),
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-      ...(streaming ? { Connection: "keep-alive", "X-Accel-Buffering": "no" } : {}),
-      ...(upstream.headers.get("content-disposition") ? { "Content-Disposition": upstream.headers.get("content-disposition") } : {}),
-      ...(!streaming && declaredLength ? { "Content-Length": declaredLength } : {})
-    };
-    response.writeHead(200, headers);
-    let received = 0;
-    for await (const chunk of upstream.body) {
-      received += chunk.byteLength;
-      if (!streaming && received > config.replayMaxResponseBytes) throw new GatewayFailure("replay_response_too_large", "Operational Replay response exceeded the gateway size limit.", "Unknown", 502);
-      response.write(Buffer.from(chunk));
-    }
-    structuredLog("experience_gateway_operational_replay", { route: url.pathname, replayPath, streaming, status: 200 });
-    return response.end();
-  } catch (error) {
-    if (response.headersSent) return response.end();
-    const timedOut = error?.name === "AbortError" && !response.destroyed;
-    return sendJson(response, timedOut ? 504 : 503, { ok: false, error: { code: timedOut ? "replay_timed_out" : "replay_unavailable", message: timedOut ? "Operational Replay timed out." : "Operational Replay is unavailable." }, truth: TRUTH });
-  } finally {
-    if (timer) clearTimeout(timer);
+const CAPABILITY_CLASSIFICATION_VOCABULARY = Object.freeze([
+  "live_verified",
+  "live_degraded",
+  "configured_unverified",
+  "staged",
+  "simulated",
+  "unavailable",
+]);
+const CAPABILITY_CLASSIFICATIONS = new Set(CAPABILITY_CLASSIFICATION_VOCABULARY);
+const EXECUTIVE_CONTINUITY_CLASSIFICATIONS = new Set([
+  "hard_blocking",
+  "safely_remediable",
+  "non_blocking_degraded",
+  "operator_action_required",
+]);
+const EXECUTIVE_CONTINUITY_VOCABULARY = Object.freeze([
+  "hard_blocking",
+  "safely_remediable",
+  "non_blocking_degraded",
+  "operator_action_required",
+]);
+const CONNECTOR_CONFIGURATIONS = new Set(["configured", "unconfigured", "invalid", "unknown"]);
+const CONNECTOR_REACHABILITY_STATES = new Set(["reachable", "unreachable", "unknown"]);
+const CONNECTOR_VERIFICATION_STATES = new Set(["verified", "failed", "unverified", "expired"]);
+const CONNECTOR_HEALTH_STATES = new Set(["healthy", "degraded", "unhealthy", "unknown"]);
+const CONNECTOR_OPERATIONAL_STATES = new Set(["available", "degraded", "unavailable"]);
+const CONNECTOR_FRESHNESS_STATES = new Set(["current", "stale", "never"]);
+const NON_OPERATIONAL_CLASSIFICATIONS = new Set([
+  "configured_unverified",
+  "staged",
+  "simulated",
+  "unavailable",
+]);
+const SHA256_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const ROOT_REVISION_PATTERN = /^[0-9a-f]{40}$/;
+const PRINCIPLE_ENTRY_PATTERN = /^NCR-[A-Z]+-[0-9]{4}@[0-9]+$/;
+
+const objectRecord = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
+const validIdentifier = (value) => typeof value === "string" && value.length > 0 && value.length <= 191;
+const validStringArray = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
+const validTimestamp = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value));
+const sameStringArray = (value, expected) => (
+  Array.isArray(value)
+  && value.length === expected.length
+  && value.every((item, index) => item === expected[index])
+);
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  if (objectRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
   }
+  return JSON.stringify(value);
+}
+
+function canonicalProjectionDigest(projection) {
+  const digestBasis = Object.fromEntries(
+    Object.entries(projection).filter(([key]) => key !== "projectionDigest"),
+  );
+  return `sha256:${createHash("sha256").update(canonicalJson(digestBasis), "utf8").digest("hex")}`;
+}
+
+function receiptIdentity(reference) {
+  if (typeof reference !== "string" || !reference) return null;
+  return reference.startsWith("connector-receipt:")
+    ? reference.slice("connector-receipt:".length)
+    : reference;
+}
+
+function duplicateIdentity(records, key) {
+  const identities = records.map((item) => item[key]);
+  return new Set(identities).size !== identities.length;
+}
+
+function validateCapabilityRegistryProjection(
+  value,
+  clock = () => Date.now(),
+) {
+  const projection = objectRecord(value);
+  const invalid = (message) => {
+    throw new GatewayFailure("capability_registry_response_invalid", message, "Unknown", 502);
+  };
+  if (!projection) invalid("Capability Registry projection was not a JSON object.");
+  if (projection.recordType !== CAPABILITY_REGISTRY_RECORD_TYPE) invalid("Capability Registry record type is invalid.");
+  if (projection.schemaVersion !== CAPABILITY_REGISTRY_SCHEMA_VERSION) invalid("Capability Registry schema version is incompatible.");
+  const contractIdentity = objectRecord(projection.capabilityRegistryContract);
+  const sourceIdentity = objectRecord(projection.sourceIdentity);
+  if (
+    !contractIdentity
+    || contractIdentity.recordType !== CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE
+    || contractIdentity.schemaVersion !== CAPABILITY_REGISTRY_SCHEMA_VERSION
+    || contractIdentity.schemaDigest !== CAPABILITY_REGISTRY_SCHEMA_DIGEST
+    || contractIdentity.validatorVersion !== CAPABILITY_REGISTRY_VALIDATOR_VERSION
+  ) {
+    invalid("Capability Registry contract fingerprint is incompatible.");
+  }
+  if (
+    !sourceIdentity
+    || typeof sourceIdentity.rootRevision !== "string"
+    || !ROOT_REVISION_PATTERN.test(sourceIdentity.rootRevision)
+    || sourceIdentity.rootRevisionVerified !== true
+    || typeof sourceIdentity.runtimeRevision !== "string"
+    || !ROOT_REVISION_PATTERN.test(sourceIdentity.runtimeRevision)
+    || sourceIdentity.runtimeRevisionVerified !== true
+    || !["local_git_worktree", "program_alpha_source_attestation"].includes(sourceIdentity.verificationMethod)
+    || typeof sourceIdentity.sourceTreeDigest !== "string"
+    || !/^sha256:[0-9a-f]{64}$/.test(sourceIdentity.sourceTreeDigest)
+    || sourceIdentity.sourceTreeClean !== true
+    || sourceIdentity.environmentRevisionMatched !== true
+  ) {
+    invalid("Capability Registry root or Runtime source identity is unverified.");
+  }
+  if (projection.owner !== CAPABILITY_REGISTRY_OWNER || projection.projectionOwner !== CAPABILITY_REGISTRY_PROJECTION_OWNER) {
+    invalid("Capability Registry is not the Runtime-owned canonical projection.");
+  }
+  if (!validIdentifier(projection.generatedAt) || Number.isNaN(Date.parse(projection.generatedAt))) {
+    invalid("Capability Registry generation timestamp is invalid.");
+  }
+  const constitutionalBasis = objectRecord(projection.constitutionalBasis);
+  const verificationPolicy = objectRecord(projection.verificationPolicy);
+  if (!constitutionalBasis || !verificationPolicy) {
+    invalid("Capability Registry constitutional or verification policy basis is missing.");
+  }
+  const principleEntryIds = constitutionalBasis.principleEntryIds;
+  if (
+    constitutionalBasis.registryId !== "NCR"
+    || constitutionalBasis.releaseId !== CAPABILITY_REGISTRY_RELEASE_ID
+    || constitutionalBasis.releaseDigest !== CAPABILITY_REGISTRY_RELEASE_DIGEST
+    || constitutionalBasis.resolverVersion !== "1.0.0"
+    || constitutionalBasis.resolutionDigest !== CAPABILITY_REGISTRY_RESOLUTION_DIGEST
+    || !Array.isArray(principleEntryIds)
+    || principleEntryIds.length !== 48
+    || new Set(principleEntryIds).size !== principleEntryIds.length
+    || principleEntryIds.some((item) => typeof item !== "string" || !PRINCIPLE_ENTRY_PATTERN.test(item))
+  ) {
+    invalid("Capability Registry constitutional basis does not match the active pinned release.");
+  }
+  if (
+    verificationPolicy.policyId !== CAPABILITY_REGISTRY_VERIFICATION_POLICY
+    || verificationPolicy.maxAgeSeconds !== 300
+    || !validTimestamp(verificationPolicy.evaluatedAt)
+    || Date.parse(verificationPolicy.evaluatedAt) !== Date.parse(projection.generatedAt)
+    || verificationPolicy.staleVerificationEstablishesAvailability !== false
+    || verificationPolicy.networkFailureRewritesConfiguration !== false
+  ) {
+    invalid("Capability Registry verification policy is invalid.");
+  }
+  const consumerNow = Number(clock());
+  const evaluatedAt = Date.parse(verificationPolicy.evaluatedAt);
+  const projectionAgeSeconds = (consumerNow - evaluatedAt) / 1000;
+  if (
+    !Number.isFinite(consumerNow)
+    || !Number.isFinite(projectionAgeSeconds)
+    || projectionAgeSeconds < -CAPABILITY_REGISTRY_MAXIMUM_FUTURE_SKEW_SECONDS
+  ) {
+    invalid("Capability Registry verification is not current at the consuming Gateway.");
+  }
+  if (projectionAgeSeconds >= verificationPolicy.maxAgeSeconds) {
+    throw new GatewayFailure(
+      "capability_registry_verification_stale",
+      "The Runtime-owned Capability Registry verification has expired.",
+      "Unavailable",
+      503,
+    );
+  }
+  if (!sameStringArray(projection.classificationVocabulary, CAPABILITY_CLASSIFICATION_VOCABULARY)) {
+    invalid("Capability Registry classification vocabulary is invalid.");
+  }
+  const scope = objectRecord(projection.scope);
+  if (
+    !scope
+    || !validIdentifier(scope.tenantId)
+    || !validIdentifier(scope.workspaceId)
+    || scope.derivedByRuntime !== true
+  ) {
+    invalid("Capability Registry scope was not derived by the Runtime.");
+  }
+  if (!objectRecord(projection.inventory)) invalid("Capability Registry inventory is missing.");
+  const authority = objectRecord(projection.authority);
+  if (
+    !authority
+    || authority.authorityGranted !== false
+    || authority.executionAuthorityIntroduced !== false
+    || authority.healthyCapabilityImpliesAuthority !== false
+    || projection.authorityGranted !== false
+    || projection.capabilityHealthGrantsAuthority !== false
+    || projection.availabilityIndependent !== true
+    || projection.noExecutionAuthorityIntroduced !== true
+    || typeof projection.mission3Admitted !== "boolean"
+  ) {
+    invalid("Capability Registry must explicitly state that it grants no execution Authority.");
+  }
+  if (!objectRecord(projection.summary)) invalid("Capability Registry summary is missing.");
+  if (!Array.isArray(projection.capabilities) || !Array.isArray(projection.connectors) || !Array.isArray(projection.actions)) {
+    invalid("Capability Registry collections are invalid.");
+  }
+  if (!Array.isArray(projection.verificationReceipts) || !validStringArray(projection.limitations)) {
+    invalid("Capability Registry receipt or limitation collections are invalid.");
+  }
+  if (projection.secretValuesExposed !== false) invalid("Capability Registry secret-exposure boundary is invalid.");
+  if (!SHA256_DIGEST_PATTERN.test(projection.projectionDigest) || projection.projectionDigest !== canonicalProjectionDigest(projection)) {
+    invalid("Capability Registry projection digest does not verify.");
+  }
+
+  const capabilities = projection.capabilities.map(objectRecord);
+  const connectors = projection.connectors.map(objectRecord);
+  const actions = projection.actions.map(objectRecord);
+  const receipts = projection.verificationReceipts.map(objectRecord);
+  if ([...capabilities, ...connectors, ...actions].some((item) => !item)) {
+    invalid("Capability Registry contains a non-object record.");
+  }
+  if (receipts.some((item) => !item)) invalid("Capability Registry contains a non-object verification receipt.");
+  if (
+    projection.capabilityCount !== capabilities.length
+    || projection.connectorCount !== connectors.length
+    || projection.actionCount !== actions.length
+    || projection.receiptCount !== receipts.length
+    || projection.summary.capabilityCount !== capabilities.length
+    || projection.summary.connectorCount !== connectors.length
+    || projection.summary.actionCount !== actions.length
+    || projection.summary.verificationReceiptCount !== receipts.length
+  ) {
+    invalid("Capability Registry collection counts are inconsistent.");
+  }
+  if (capabilities.some((item) => (
+    !validIdentifier(item.capabilityId)
+    || !CAPABILITY_CLASSIFICATIONS.has(item.classification)
+    || typeof item.operationalAvailability !== "boolean"
+    || item.authorityGranted !== false
+    || item.availabilityIndependent !== true
+    || !validStringArray(item.evidenceRefs)
+    || !validStringArray(item.receiptRefs)
+    || !validStringArray(item.limitations)
+    || typeof item.requiredNextAction !== "string"
+    || (NON_OPERATIONAL_CLASSIFICATIONS.has(item.classification) && item.operationalAvailability !== false)
+  ))) {
+    invalid("Capability Registry contains an invalid capability identity or classification.");
+  }
+  if (connectors.some((item) => (
+    !validIdentifier(item.connectorId)
+    || !CAPABILITY_CLASSIFICATIONS.has(item.classification)
+    || item.registration !== "registered"
+    || !CONNECTOR_CONFIGURATIONS.has(item.configuration)
+    || !CONNECTOR_REACHABILITY_STATES.has(item.reachability)
+    || !CONNECTOR_VERIFICATION_STATES.has(item.verification)
+    || !CONNECTOR_HEALTH_STATES.has(item.health)
+    || !CONNECTOR_OPERATIONAL_STATES.has(item.operationalAvailability)
+    || typeof item.authorizationRequirement !== "string"
+    || (item.lastSuccessfulVerification !== null && !validTimestamp(item.lastSuccessfulVerification))
+    || typeof item.verificationFresh !== "boolean"
+    || !objectRecord(item.freshness)
+    || !validStringArray(item.evidenceReferences)
+    || !validStringArray(item.receiptReferences)
+    || !validStringArray(item.limitations)
+    || typeof item.requiredNextAction !== "string"
+    || item.authorityGranted !== false
+  ))) {
+    invalid("Capability Registry contains an invalid connector record.");
+  }
+  if (actions.some((item) => (
+    !validIdentifier(item.actionId)
+    || !validIdentifier(item.capabilityId)
+    || !validIdentifier(item.handlerId)
+    || !validIdentifier(item.operationId)
+    || !validIdentifier(item.inputSchemaId)
+    || (item.fixedTarget !== undefined && !validIdentifier(item.fixedTarget))
+    || !CAPABILITY_CLASSIFICATIONS.has(item.classification)
+    || typeof item.operationalAvailability !== "boolean"
+    || typeof item.invocable !== "boolean"
+    || item.authorityGranted !== false
+    || item.dispatchAuthorized === true
+    || item.dispatchAvailable === true
+    || !validStringArray(item.invocationSurfaces)
+    || !validStringArray(item.invocationPaths)
+    || !validStringArray(item.receiptRefs)
+    || typeof item.authorizationRequirement !== "string"
+    || !validStringArray(item.limitations)
+    || typeof item.requiredNextAction !== "string"
+    || (NON_OPERATIONAL_CLASSIFICATIONS.has(item.classification) && (
+      item.operationalAvailability !== false || item.invocable !== false
+    ))
+    || (item.invocable === true && item.operationalAvailability !== true)
+  ))) {
+    invalid("Capability Registry contains an invalid action record.");
+  }
+  if (
+    duplicateIdentity(capabilities, "capabilityId")
+    || duplicateIdentity(connectors, "connectorId")
+    || duplicateIdentity(actions, "actionId")
+  ) {
+    invalid("Capability Registry contains a duplicate canonical identity.");
+  }
+  if (duplicateIdentity(receipts, "receiptId")) {
+    invalid("Capability Registry contains a duplicate verification receipt identity.");
+  }
+  if (receipts.some((item) => (
+    !validIdentifier(item.receiptId)
+    || !validIdentifier(item.receiptType)
+    || !validIdentifier(item.connectorId)
+    || !validTimestamp(item.verifiedAt)
+    || typeof item.successful !== "boolean"
+    || !validStringArray(item.evidenceRefs)
+    || item.sanitized !== true
+    || item.secretValuesExposed !== false
+  ))) {
+    invalid("Capability Registry contains an invalid or unsanitized verification receipt.");
+  }
+  const receiptById = new Map(receipts.map((item) => [item.receiptId, item]));
+  const currentSuccessfulReceipt = (reference, connectorId = null) => {
+    const receipt = receiptById.get(receiptIdentity(reference));
+    if (!receipt || receipt.successful !== true) return false;
+    if (connectorId !== null && receipt.connectorId !== connectorId) return false;
+    const ageSeconds = (evaluatedAt - Date.parse(receipt.verifiedAt)) / 1000;
+    return Number.isFinite(ageSeconds)
+      && ageSeconds >= -1
+      && ageSeconds < verificationPolicy.maxAgeSeconds;
+  };
+  const successfulReferencedReceipt = (record, references, requireConnectorMatch = true) => {
+    const successfulAt = Date.parse(record.lastSuccessfulVerification);
+    return references.some((reference) => {
+      const receipt = receiptById.get(receiptIdentity(reference));
+      return receipt
+        && receipt.successful === true
+        && (!requireConnectorMatch || receipt.connectorId === record.connectorId)
+        && Date.parse(receipt.verifiedAt) === successfulAt;
+    });
+  };
+  for (const capability of capabilities) {
+    if (capability.classification === "live_verified" && (
+      capability.operationalAvailability !== true
+      || !capability.receiptRefs.some((reference) => currentSuccessfulReceipt(reference))
+    )) {
+      invalid("A live capability lacks a current successful verification receipt.");
+    }
+  }
+  for (const connector of connectors) {
+    const freshness = connector.freshness;
+    if (
+      !CONNECTOR_FRESHNESS_STATES.has(freshness.state)
+      || freshness.policySeconds !== verificationPolicy.maxAgeSeconds
+      || (
+        freshness.ageSeconds !== null
+        && (!Number.isInteger(freshness.ageSeconds) || freshness.ageSeconds < 0)
+      )
+    ) {
+      invalid("Capability Registry contains an invalid connector freshness state.");
+    }
+    if (freshness.state === "never") {
+      if (
+        freshness.ageSeconds !== null
+        || connector.lastSuccessfulVerification !== null
+        || connector.verificationFresh !== false
+      ) {
+        invalid("A never-verified connector claimed successful verification freshness.");
+      }
+    } else {
+      const lastSuccessfulAt = Date.parse(connector.lastSuccessfulVerification);
+      const measuredAge = (evaluatedAt - lastSuccessfulAt) / 1000;
+      if (
+        !Number.isFinite(lastSuccessfulAt)
+        || measuredAge < -1
+        || Math.abs(Math.max(0, Math.floor(measuredAge)) - freshness.ageSeconds) > 1
+        || !successfulReferencedReceipt(connector, connector.receiptReferences)
+      ) {
+        invalid("Connector freshness is not backed by its current successful verification receipt.");
+      }
+      if (freshness.state === "current" && (
+        freshness.ageSeconds >= verificationPolicy.maxAgeSeconds
+        || connector.verificationFresh !== true
+      )) {
+        invalid("A current connector verification is stale or marked not fresh.");
+      }
+      if (freshness.state === "stale" && (
+        freshness.ageSeconds < verificationPolicy.maxAgeSeconds
+        || connector.verificationFresh !== false
+        || connector.verification !== "expired"
+      )) {
+        invalid("A stale connector verification did not expire fail closed.");
+      }
+    }
+    if (connector.classification === "live_verified" && (
+      connector.configuration !== "configured"
+      || connector.reachability !== "reachable"
+      || connector.verification !== "verified"
+      || connector.health !== "healthy"
+      || connector.operationalAvailability !== "available"
+      || connector.freshness.state !== "current"
+      || connector.verificationFresh !== true
+    )) {
+      invalid("A live connector lacks current successful verification evidence.");
+    }
+    if (connector.classification === "live_degraded" && (
+      connector.operationalAvailability !== "degraded"
+      || connector.freshness.state !== "current"
+      || connector.verificationFresh !== true
+    )) {
+      invalid("A degraded connector lacks a current last-known-good verification.");
+    }
+    if (NON_OPERATIONAL_CLASSIFICATIONS.has(connector.classification) && connector.operationalAvailability !== "unavailable") {
+      invalid("A non-live connector claimed operational availability.");
+    }
+  }
+  for (const action of actions) {
+    if (
+      action.classification === "live_verified"
+      && !action.receiptRefs.some((reference) => currentSuccessfulReceipt(
+        reference,
+        typeof action.connectorId === "string" ? action.connectorId : null,
+      ))
+    ) {
+      invalid("A live action lacks a current successful verification receipt.");
+    }
+  }
+
+  const executiveContinuity = objectRecord(projection.executiveContinuity);
+  if (
+    !executiveContinuity
+    || !sameStringArray(
+      executiveContinuity.impedimentClassificationVocabulary,
+      EXECUTIVE_CONTINUITY_VOCABULARY,
+    )
+    || !Array.isArray(executiveContinuity.impediments)
+    || !Array.isArray(executiveContinuity.remediationActions)
+    || executiveContinuity.duplicateIdentitiesRejected !== true
+    || executiveContinuity.dispatchAvailable !== false
+    || executiveContinuity.authorityGranted !== false
+  ) {
+    invalid("Executive Continuity impediments are missing.");
+  }
+  const impediments = executiveContinuity.impediments.map(objectRecord);
+  const remediationActions = executiveContinuity.remediationActions.map(objectRecord);
+  if (impediments.some((item) => (
+    !item
+    || !validIdentifier(item.impedimentId)
+    || !EXECUTIVE_CONTINUITY_CLASSIFICATIONS.has(item.classification)
+    || typeof item.limitation !== "string"
+    || typeof item.requiredNextAction !== "string"
+    || (
+      item.remediationAction !== undefined
+      && item.remediationAction !== null
+      && !objectRecord(item.remediationAction)
+    )
+  ))) {
+    invalid("Executive Continuity contains an invalid impediment record.");
+  }
+  if (remediationActions.some((item) => (
+    !item
+    || !validIdentifier(item.remediationActionId)
+    || !["staged", "unavailable"].includes(item.classification)
+    || item.operationalAvailability !== false
+    || item.invocable !== false
+    || item.dispatchAvailable !== false
+    || item.authorityGranted !== false
+  ))) {
+    invalid("Executive Continuity contains an invalid remediation action.");
+  }
+  if (
+    executiveContinuity.impedimentCount !== impediments.length
+    || executiveContinuity.remediationActionCount !== remediationActions.length
+    || duplicateIdentity(impediments, "impedimentId")
+    || duplicateIdentity(remediationActions, "remediationActionId")
+  ) {
+    invalid("Executive Continuity contains inconsistent or duplicate identities.");
+  }
+  if (impediments.some((item) => {
+    const remediation = item.remediationAction;
+    if (remediation === undefined || remediation === null) return false;
+    return (
+      !["staged", "unavailable"].includes(remediation.classification)
+      || remediation.invocable !== false
+      || remediation.authorityGranted !== false
+      || remediation.dispatchAvailable === true
+    );
+  })) {
+    invalid("Executive Continuity remediation actions must remain staged or unavailable and non-invocable.");
+  }
+  if (
+    projection.mission3Admitted
+    !== deriveMission3Admission(projection, clock)
+  ) {
+    invalid("Capability Registry mission3Admitted does not match the per-capability session-establishment evidence.");
+  }
+  return projection;
+}
+
+export function deriveMission3Admission(
+  projection,
+  clock = () => Date.now(),
+) {
+  const verificationPolicy = objectRecord(projection?.verificationPolicy);
+  if (!verificationPolicy || verificationPolicy.maxAgeSeconds !== 300) return false;
+  const evaluatedAt = Date.parse(String(verificationPolicy.evaluatedAt ?? ""));
+  if (!Number.isFinite(evaluatedAt)) return false;
+  const consumerNow = Number(clock());
+  const projectionAgeSeconds = (consumerNow - evaluatedAt) / 1000;
+  if (
+    !Number.isFinite(consumerNow)
+    || !Number.isFinite(projectionAgeSeconds)
+    || projectionAgeSeconds < -CAPABILITY_REGISTRY_MAXIMUM_FUTURE_SKEW_SECONDS
+    || projectionAgeSeconds >= verificationPolicy.maxAgeSeconds
+  ) {
+    return false;
+  }
+  const capabilities = Array.isArray(projection.capabilities) ? projection.capabilities.map(objectRecord) : [];
+  const actions = Array.isArray(projection.actions) ? projection.actions.map(objectRecord) : [];
+  const receipts = Array.isArray(projection.verificationReceipts)
+    ? projection.verificationReceipts.map(objectRecord).filter(Boolean)
+    : [];
+  if (capabilities.some((item) => !item) || actions.some((item) => !item)) return false;
+  const receiptById = new Map(receipts.map((item) => [item.receiptId, item]));
+  if (receiptById.size !== receipts.length) return false;
+  const dependencyReceipt = (references, verifiedAtMs, capabilityId) => {
+    if (!Array.isArray(references)) return null;
+    const matches = new Map();
+    for (const reference of references) {
+      const receipt = receiptById.get(receiptIdentity(reference));
+      if (
+        !receipt
+        || receipt.successful !== true
+        || receipt.sanitized !== true
+        || receipt.secretValuesExposed !== false
+        || receipt.receiptType !== MISSION3_CAPABILITY_DEPENDENCY_RECEIPT_TYPE
+        || receipt.connectorId !== MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID
+        || !Array.isArray(receipt.evidenceRefs)
+        || !receipt.evidenceRefs.includes(`capability:${capabilityId}`)
+      ) {
+        continue;
+      }
+      const receiptVerifiedAt = Date.parse(String(receipt.verifiedAt ?? ""));
+      if (!Number.isFinite(receiptVerifiedAt) || receiptVerifiedAt !== verifiedAtMs) {
+        continue;
+      }
+      const ageSeconds = (evaluatedAt - receiptVerifiedAt) / 1000;
+      if (ageSeconds >= -1 && ageSeconds < verificationPolicy.maxAgeSeconds) {
+        matches.set(receipt.receiptId, receipt);
+      }
+    }
+    return matches.size === 1 ? [...matches.values()][0] : null;
+  };
+  const dependencyReceiptIds = new Set();
+  for (const capabilityId of MISSION3_SESSION_CAPABILITIES) {
+    const matches = capabilities.filter((item) => item.capabilityId === capabilityId);
+    if (matches.length !== 1) return false;
+    const capability = matches[0];
+    const lastSuccessfulVerification = capability.lastSuccessfulVerification;
+    const verifiedAtMs = Date.parse(String(lastSuccessfulVerification ?? ""));
+    if (
+      capability.classification !== "live_verified"
+      || capability.operationalAvailability !== true
+      || capability.verification !== "verified"
+      || capability.verificationFresh !== true
+      || capability.authorityGranted !== false
+      || typeof lastSuccessfulVerification !== "string"
+      || !Number.isFinite(verifiedAtMs)
+    ) {
+      return false;
+    }
+    const evidenceAgeSeconds = (evaluatedAt - verifiedAtMs) / 1000;
+    if (evidenceAgeSeconds < -1 || evidenceAgeSeconds >= verificationPolicy.maxAgeSeconds) return false;
+    const receipt = dependencyReceipt(
+      capability.receiptRefs,
+      verifiedAtMs,
+      capabilityId,
+    );
+    if (!receipt || dependencyReceiptIds.has(receipt.receiptId)) return false;
+    dependencyReceiptIds.add(receipt.receiptId);
+    const capabilityActions = actions.filter((item) => item.capabilityId === capabilityId);
+    if (capabilityActions.length === 0) return false;
+    for (const action of capabilityActions) {
+      if (
+        action.classification !== "live_verified"
+        || action.operationalAvailability !== true
+        || action.invocable !== true
+        || action.authorityGranted !== false
+        || action.connectorId !== MISSION3_CAPABILITY_DEPENDENCY_CONNECTOR_ID
+        || Date.parse(String(action.lastSuccessfulVerification ?? "")) !== verifiedAtMs
+        || !Array.isArray(action.receiptRefs)
+        || !action.receiptRefs.some(
+          (reference) => receiptIdentity(reference) === receipt.receiptId,
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  return dependencyReceiptIds.size === MISSION3_SESSION_CAPABILITIES.length;
+}
+
+const INVOCABLE_ACTION_CLASSIFICATIONS = new Set(["live_verified", "live_degraded"]);
+
+function unavailableRuntimeActionAdmission(alias, code, message) {
+  return {
+    allowed: false,
+    actionId: alias?.actionId ?? null,
+    code,
+    message,
+    status: 503,
+    state: "Unavailable",
+  };
+}
+
+function decideAdmittedRuntimeAction(alias, projection) {
+  if (!alias) {
+    return unavailableRuntimeActionAdmission(
+      null,
+      "canonical_action_alias_unresolved",
+      "The Gateway route does not resolve to one exact canonical Runtime action identity.",
+    );
+  }
+  if (alias.forwarding !== "canonical") {
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "canonical_action_unavailable",
+      alias.limitation || "The canonical Runtime action is unavailable.",
+    );
+  }
+  if (!projection) {
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "capability_registry_verification_required",
+      "A current Runtime-owned Capability Registry projection is required before this action can be invoked.",
+    );
+  }
+  const matches = projection.actions.filter((action) => action.actionId === alias.actionId);
+  if (matches.length !== 1) {
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "canonical_action_identity_invalid",
+      "The Gateway alias did not resolve to exactly one canonical Runtime action record.",
+    );
+  }
+  const action = matches[0];
+  const canonicalAdapterAction = alias.actionId.startsWith("canonical.route.");
+  const expectedInvocationPaths = alias.requiredSurfaces.map((surface) => (
+    surface === "api" || !canonicalAdapterAction
+      ? `${surface}:${alias.runtimeMethod} ${alias.runtimePathTemplate}`
+      : `${surface}:canonical-adapter:${alias.actionId}`
+  ));
+  if (
+    action.method !== alias.runtimeMethod
+    || action.pathTemplate !== alias.runtimePathTemplate
+    || !Array.isArray(action.invocationSurfaces)
+    || alias.requiredSurfaces.some((surface) => !action.invocationSurfaces.includes(surface))
+    || expectedInvocationPaths.some((path) => !action.invocationPaths.includes(path))
+  ) {
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "canonical_action_contract_mismatch",
+      "The canonical Runtime action no longer matches the fixed Gateway alias contract.",
+    );
+  }
+  if (
+    !INVOCABLE_ACTION_CLASSIFICATIONS.has(action.classification)
+    || action.invocable !== true
+    || action.operationalAvailability !== true
+    || action.authorityGranted !== false
+  ) {
+    const limitations = [
+      action.requiredNextAction,
+      ...(Array.isArray(action.limitations) ? action.limitations : []),
+    ].filter((item) => typeof item === "string" && item.trim());
+    return unavailableRuntimeActionAdmission(
+      alias,
+      "canonical_action_unavailable",
+      [...new Set(limitations)].join(" ") || `Canonical action ${alias.actionId} is ${action.classification}.`,
+    );
+  }
+  return {
+    allowed: true,
+    actionId: action.actionId,
+    classification: action.classification,
+  };
+}
+
+function createRuntimeActionAdmissionState(config, clock = () => Date.now()) {
+  let projection = null;
+  let expiresAt = 0;
+  let refreshPromise = null;
+  let refreshFailure = null;
+  let refreshRetryAt = 0;
+  const refreshFailureCooldownMs = Math.max(
+    250,
+    Math.min(Number(config.retryDelayMs) * 2 || 0, 1_000),
+  );
+
+  const clear = () => {
+    projection = null;
+    expiresAt = 0;
+  };
+  const adoptValidated = (candidate) => {
+    const scope = candidate.scope;
+    if (
+      scope.tenantId !== config.operationalTenantId
+      || scope.workspaceId !== config.operationalWorkspaceId
+    ) {
+      clear();
+      throw new GatewayFailure(
+        "capability_registry_scope_mismatch",
+        "The Runtime-owned Capability Registry scope does not match the Experience Gateway tenant and workspace binding.",
+        "Unauthorized",
+        502,
+      );
+    }
+    const evaluatedAt = Date.parse(candidate.verificationPolicy.evaluatedAt);
+    expiresAt = evaluatedAt + (candidate.verificationPolicy.maxAgeSeconds * 1000);
+    if (!Number.isFinite(expiresAt) || expiresAt <= clock()) {
+      clear();
+      throw new GatewayFailure(
+        "capability_registry_verification_stale",
+        "The Runtime-owned Capability Registry verification has expired.",
+        "Unavailable",
+        503,
+      );
+    }
+    projection = candidate;
+    refreshFailure = null;
+    refreshRetryAt = 0;
+    return candidate;
+  };
+  const observe = (value) => adoptValidated(
+    validateCapabilityRegistryProjection(value, clock),
+  );
+  const decide = (alias) => {
+    if (!alias || alias.forwarding !== "canonical") {
+      return decideAdmittedRuntimeAction(alias, projection);
+    }
+    if (!projection || expiresAt <= clock()) {
+      clear();
+      return unavailableRuntimeActionAdmission(
+        alias,
+        "capability_registry_verification_required",
+        "A current Runtime-owned Capability Registry projection is required before this action can be invoked.",
+      );
+    }
+    return decideAdmittedRuntimeAction(alias, projection);
+  };
+  const refresh = async (loadProjection) => {
+    if (refreshPromise) return refreshPromise;
+    if (refreshFailure && refreshRetryAt > clock()) {
+      throw refreshFailure;
+    }
+    refreshFailure = null;
+    refreshRetryAt = 0;
+    const pending = (async () => {
+      try {
+        return observe(await loadProjection());
+      } catch (error) {
+        clear();
+        refreshFailure = error;
+        const retryAfterMs = error instanceof GatewayFailure
+          ? error.retryAfterMs
+          : 0;
+        refreshRetryAt = Number(clock()) + Math.max(
+          refreshFailureCooldownMs,
+          retryAfterMs,
+        );
+        throw error;
+      }
+    })();
+    refreshPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (refreshPromise === pending) refreshPromise = null;
+    }
+  };
+  return Object.freeze({
+    adoptValidated,
+    clear,
+    decide,
+    observe,
+    refresh,
+    snapshot: () => projection,
+  });
+}
+
+async function ensureRuntimeActionAdmission(alias, config, runtimeFetch, actionAdmission) {
+  let decision = actionAdmission.decide(alias);
+  if (
+    decision.allowed
+    || decision.code !== "capability_registry_verification_required"
+  ) {
+    return decision;
+  }
+  try {
+    const loadProjection = async () => {
+      const envelope = await fetchRuntime(
+        "/runtime/capability-registry",
+        config,
+        runtimeFetch,
+      );
+      return envelope.data;
+    };
+    if (typeof actionAdmission.refresh === "function") {
+      await actionAdmission.refresh(loadProjection);
+    } else {
+      actionAdmission.observe(await loadProjection());
+    }
+  } catch (error) {
+    actionAdmission.clear();
+    const failure = error instanceof GatewayFailure
+      ? error
+      : new GatewayFailure(
+        "capability_registry_verification_required",
+        "A current Runtime-owned Capability Registry projection is required before this action can be invoked.",
+        "Unavailable",
+        503,
+      );
+    return {
+      allowed: false,
+      actionId: alias?.actionId ?? null,
+      code: failure.code,
+      message: failure.message,
+      status: failure.status,
+      state: failure.state,
+    };
+  }
+  decision = actionAdmission.decide(alias);
+  return decision;
+}
+
+function actionAdmissionFailure(config, tracker, route, decision) {
+  return failureEnvelope(
+    config,
+    tracker,
+    route,
+    new GatewayFailure(
+      decision.code,
+      decision.message,
+      decision.state,
+      decision.status,
+    ),
+  );
 }
 
 function validateRuntimeEnvelope(body) {
@@ -1447,15 +4274,71 @@ function validateRuntimeEnvelope(body) {
   return body;
 }
 
-async function fetchRuntime(runtimePath, config, runtimeFetch) {
+function validateRuntimeReadResponse(
+  body,
+  runtimePath,
+  clock = () => Date.now(),
+) {
+  if (runtimePath !== "/runtime/capability-registry") return validateRuntimeEnvelope(body);
+  const sanitized = sanitizeOperationalResponse(body);
+  if (sanitized?.recordType === CAPABILITY_REGISTRY_RECORD_TYPE) {
+    const projection = validateCapabilityRegistryProjection(sanitized, clock);
+    return {
+      status: "ok",
+      timestamp: projection.generatedAt,
+      schemaVersion: SUPPORTED_SCHEMA_VERSION,
+      runtimeVersion: SUPPORTED_RUNTIME_VERSION,
+      proofIds: [],
+      limitations: projection.limitations,
+      data: projection,
+    };
+  }
+  const envelope = validateRuntimeEnvelope(sanitized);
+  validateCapabilityRegistryProjection(envelope.data, clock);
+  return envelope;
+}
+
+function validateDegradedReadinessEnvelope(body) {
+  const data = body?.data;
+  if (
+    body?.status !== "not_ready"
+    || !data
+    || typeof data !== "object"
+    || Array.isArray(data)
+    || data.processReady !== true
+    || data.platformContractReady !== false
+  ) {
+    throw new GatewayFailure(
+      "runtime_readiness_response_invalid",
+      "Runtime returned an invalid process-ready degraded readiness response.",
+      "Unknown",
+      502,
+    );
+  }
+  return body;
+}
+
+async function fetchRuntime(
+  runtimePath,
+  config,
+  runtimeFetch,
+  clock = () => Date.now(),
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  const maximumResponseBytes = runtimePath === "/runtime/capability-registry"
+    ? CAPABILITY_REGISTRY_MAX_RESPONSE_BYTES
+    : config.maxResponseBytes;
   try {
     let response;
     try {
       response = await runtimeFetch(`${config.runtimeBaseUrl}${runtimePath}`, {
         method: "GET",
-        headers: { Accept: "application/json", Authorization: `Bearer ${config.runtimeToken}` },
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "gzip",
+          Authorization: `Bearer ${config.runtimeToken}`,
+        },
         signal: controller.signal,
         redirect: "error"
       });
@@ -1468,27 +4351,39 @@ async function fetchRuntime(runtimePath, config, runtimeFetch) {
     if (response.status === 401 || response.status === 403) {
       throw new GatewayFailure("runtime_unauthorized", "Runtime rejected the server credential.", "Unauthorized", 502);
     }
-    if (!response.ok) {
-      throw new GatewayFailure("runtime_unavailable", `Runtime returned status ${response.status}.`, "Unavailable", 503, response.status >= 500 || response.status === 429);
+    const processReadyDegraded = runtimePath === "/ready" && response.status === 503;
+    if (!response.ok && !processReadyDegraded) {
+      throw new GatewayFailure(
+        "runtime_unavailable",
+        `Runtime returned status ${response.status}.`,
+        "Unavailable",
+        503,
+        response.status >= 500 || response.status === 429,
+        undefined,
+        boundedRetryAfterMs(response.headers.get("retry-after")),
+      );
     }
     const declaredLength = Number(response.headers.get("content-length") ?? 0);
-    if (declaredLength > config.maxResponseBytes) {
+    if (declaredLength > maximumResponseBytes) {
       throw new GatewayFailure("runtime_response_too_large", "Runtime response exceeded the gateway size limit.", "Unknown", 502);
     }
     const raw = Buffer.from(await response.arrayBuffer());
-    if (raw.byteLength > config.maxResponseBytes) {
+    if (raw.byteLength > maximumResponseBytes) {
       throw new GatewayFailure("runtime_response_too_large", "Runtime response exceeded the gateway size limit.", "Unknown", 502);
     }
     let body;
     try { body = JSON.parse(raw.toString("utf8")); }
     catch { throw new GatewayFailure("runtime_response_invalid", "Runtime returned invalid JSON.", "Unknown", 502); }
-    return validateRuntimeEnvelope(body);
+    const validated = validateRuntimeReadResponse(body, runtimePath, clock);
+    return processReadyDegraded
+      ? validateDegradedReadinessEnvelope(validated)
+      : validated;
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, clock) {
+async function handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, actionAdmission, clock) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config, config.operationalEnabled)) return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("origin_denied", "Request origin is not allowed.", "Unknown", 403)));
   const runtimePath = resolveRuntimeMutation(url.pathname);
@@ -1505,6 +4400,37 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
   }
   if (config.operationalEnabled && expectedMethod === "POST" && !sessionAuthority.csrfValid(request, claims)) {
     return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("csrf_invalid", "CSRF verification failed.", "Unauthorized", 403)));
+  }
+  const alias = resolveGatewayRuntimeActionAlias(expectedMethod, url.pathname);
+  if (!alias || alias.runtimePath !== runtimePath) {
+    return sendJson(
+      response,
+      503,
+      failureEnvelope(
+        config,
+        tracker,
+        url.pathname,
+        new GatewayFailure(
+          "canonical_action_alias_unresolved",
+          "The Gateway route does not resolve to one exact canonical Runtime action identity.",
+          "Unavailable",
+          503,
+        ),
+      ),
+    );
+  }
+  const admission = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!admission.allowed) {
+    return sendJson(
+      response,
+      admission.status,
+      actionAdmissionFailure(config, tracker, url.pathname, admission),
+    );
   }
   if (expectedMethod === "GET") {
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), config.timeoutMs);
@@ -1599,7 +4525,7 @@ async function handleRuntimeMutation(request, response, config, runtimeFetch, tr
   } finally { clearTimeout(timer); }
 }
 
-async function handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, clock) {
+async function handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, actionAdmission, clock) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config, config.operationalEnabled)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
   if (url.search) return sendJson(response, 400, { ok: false, error: { code: "query_not_allowed", message: "Realtime session routes do not accept browser query parameters." }, truth: TRUTH });
@@ -1617,6 +4543,21 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
   }
   if (config.operationalEnabled && !sessionAuthority.csrfValid(request, claims)) {
     return sendJson(response, 403, { ok: false, error: { code: "csrf_invalid", message: "CSRF verification failed." }, truth: TRUTH });
+  }
+  const alias = resolveGatewayRuntimeActionAlias("POST", url.pathname);
+  const admission = await ensureRuntimeActionAdmission(
+    alias,
+    config,
+    runtimeFetch,
+    actionAdmission,
+  );
+  if (!admission.allowed) {
+    return sendJson(response, admission.status, {
+      ok: false,
+      data: null,
+      error: { code: admission.code, message: admission.message },
+      truth: TRUTH,
+    });
   }
 
   let offer;
@@ -1684,14 +4625,26 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
   }
 }
 
-async function fetchWithRetry(runtimePath, config, runtimeFetch) {
+async function fetchWithRetry(
+  runtimePath,
+  config,
+  runtimeFetch,
+  clock = () => Date.now(),
+) {
   let failure;
   for (let attempt = 1; attempt <= config.maxAttempts; attempt += 1) {
     try {
-      return { body: await fetchRuntime(runtimePath, config, runtimeFetch), attempts: attempt };
+      return {
+        body: await fetchRuntime(runtimePath, config, runtimeFetch, clock),
+        attempts: attempt,
+      };
     } catch (error) {
       failure = error instanceof GatewayFailure ? error : new GatewayFailure("runtime_unknown", "Runtime request failed.", "Unknown", 502);
-      if (!failure.retryable || attempt === config.maxAttempts) break;
+      if (
+        !failure.retryable
+        || failure.retryAfterMs > 0
+        || attempt === config.maxAttempts
+      ) break;
       structuredLog("runtime_retry", { state: "Retrying", attempt, runtimePath });
       await delay(config.retryDelayMs);
     }
@@ -1700,6 +4653,12 @@ async function fetchWithRetry(runtimePath, config, runtimeFetch) {
 }
 
 function successfulEnvelope(config, tracker, route, body, entry, cached, stale, attempts) {
+  const processReadyDegraded = (
+    route === "/api/runtime/ready"
+    && body.status === "not_ready"
+    && body?.data?.processReady === true
+  );
+  const degraded = stale || processReadyDegraded;
   return {
     ok: true,
     data: body.data,
@@ -1711,10 +4670,14 @@ function successfulEnvelope(config, tracker, route, body, entry, cached, stale, 
       proofIds: body.proofIds,
       limitations: body.limitations
     },
-    gateway: gatewayMetadata(config, tracker, route, stale ? "Degraded" : "Healthy", entry, {
+    gateway: gatewayMetadata(config, tracker, route, degraded ? "Degraded" : "Healthy", entry, {
       attempts,
       cache: cacheMetadata(entry, cached, stale),
-      warning: stale ? "Runtime refresh failed; displaying the last validated response." : null
+      warning: stale
+        ? "Runtime refresh failed; displaying the last validated response."
+        : processReadyDegraded
+          ? "The Runtime process is reachable, but its readiness contract reports not_ready."
+          : null
     }),
     truth: TRUTH
   };
@@ -1731,7 +4694,16 @@ function failureEnvelope(config, tracker, route, failure) {
   };
 }
 
-async function readThroughGateway(route, runtimePath, request, config, runtimeFetch, cache, tracker) {
+async function readThroughGateway(
+  route,
+  runtimePath,
+  request,
+  config,
+  runtimeFetch,
+  cache,
+  tracker,
+  clock = () => Date.now(),
+) {
   const cacheable = CACHEABLE_ROUTES.has(route);
   const invalidate = /no-cache|no-store/i.test(String(request.headers["cache-control"] ?? "")) || String(request.headers.pragma ?? "").toLowerCase() === "no-cache";
   if (invalidate) cache.delete(route);
@@ -1741,7 +4713,12 @@ async function readThroughGateway(route, runtimePath, request, config, runtimeFe
   }
 
   try {
-    const { body, attempts } = await fetchWithRetry(runtimePath, config, runtimeFetch);
+    const { body, attempts } = await fetchWithRetry(
+      runtimePath,
+      config,
+      runtimeFetch,
+      clock,
+    );
     const refreshedAt = Date.now();
     const entry = { body, refreshedAt, expiresAt: refreshedAt + config.cacheTtlMs };
     if (cacheable) cache.set(route, entry);
@@ -1758,7 +4735,214 @@ async function readThroughGateway(route, runtimePath, request, config, runtimeFe
   }
 }
 
-async function handleApi(request, response, config, runtimeFetch, cache, tracker) {
+async function settledMapWithConcurrency(items, concurrency, task) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      try {
+        results[index] = {
+          status: "fulfilled",
+          value: await task(items[index], index),
+        };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+function runtimeBootstrapEnvelope(data, registryAdmitted) {
+  const routeKeys = Object.keys(RUNTIME_BOOTSTRAP_ROUTES);
+  const failedRoutes = routeKeys.filter((route) => data[route]?.ok !== true);
+  return {
+    recordType: RUNTIME_BOOTSTRAP_RECORD_TYPE,
+    schemaVersion: RUNTIME_BOOTSTRAP_SCHEMA_VERSION,
+    routeCount: routeKeys.length,
+    registryAdmitted,
+    data,
+    failedRoutes,
+    readOnly: true,
+    secretValuesExposed: false,
+    truth: TRUTH,
+  };
+}
+
+function registryBootstrapFailure(config, tracker, route, result) {
+  const envelope = result?.body;
+  return new GatewayFailure(
+    envelope?.error?.code ?? "capability_registry_verification_required",
+    envelope?.error?.message
+      ?? "A current Runtime-owned Capability Registry projection is required before this route can be read.",
+    envelope?.gateway?.connectionState ?? "Unknown",
+    Number(result?.status) || 502,
+  );
+}
+
+async function handleRuntimeBootstrap(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  cache,
+  tracker,
+  actionAdmission,
+  clock = () => Date.now(),
+) {
+  if (!requestOriginAllowed(request, config)) {
+    return sendJson(response, 403, {
+      ...runtimeBootstrapEnvelope({}, false),
+      error: { code: "origin_denied", message: "Request origin is not allowed." },
+    });
+  }
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, { Allow: "GET, OPTIONS", "Cache-Control": "no-store" });
+    return response.end();
+  }
+  if (request.method !== "GET") {
+    return sendJson(response, 405, {
+      ...runtimeBootstrapEnvelope({}, false),
+      error: { code: "method_not_allowed", message: "The Runtime bootstrap is read-only." },
+    }, { Allow: "GET, OPTIONS" });
+  }
+  const url = new URL(request.url, "http://portal.invalid");
+  if (url.pathname !== RUNTIME_BOOTSTRAP_ROUTE) {
+    return sendJson(response, 404, {
+      ...runtimeBootstrapEnvelope({}, false),
+      error: { code: "route_not_allowlisted", message: "This Runtime bootstrap route is not allowlisted." },
+    });
+  }
+  if (url.search) {
+    return sendJson(response, 400, {
+      ...runtimeBootstrapEnvelope({}, false),
+      error: { code: "query_not_allowed", message: "The Runtime bootstrap does not accept query parameters." },
+    });
+  }
+
+  const registryRoute = "capability-registry";
+  const registryGatewayPath = RUNTIME_BOOTSTRAP_ROUTES[registryRoute];
+  const registryRuntimePath = RUNTIME_ROUTES[registryGatewayPath];
+  let registryResult = await readThroughGateway(
+    registryGatewayPath,
+    registryRuntimePath,
+    request,
+    config,
+    runtimeFetch,
+    cache,
+    tracker,
+    clock,
+  );
+  let admittedProjection = null;
+  if (registryResult.status === 200 && registryResult.body.ok && registryResult.body.data) {
+    try {
+      admittedProjection = actionAdmission.adoptValidated(registryResult.body.data);
+    } catch (error) {
+      actionAdmission.clear();
+      const failure = error instanceof GatewayFailure
+        ? error
+        : new GatewayFailure(
+          "capability_registry_response_invalid",
+          "The Runtime-owned Capability Registry projection failed Gateway admission validation.",
+          "Unknown",
+          502,
+        );
+      registryResult = {
+        status: failure.status,
+        body: failureEnvelope(config, tracker, registryGatewayPath, failure),
+      };
+    }
+  }
+
+  const data = { [registryRoute]: registryResult.body };
+  const childRoutes = Object.entries(RUNTIME_BOOTSTRAP_ROUTES)
+    .filter(([route]) => route !== registryRoute);
+  if (!admittedProjection) {
+    actionAdmission.clear();
+    const failure = registryBootstrapFailure(
+      config,
+      tracker,
+      registryGatewayPath,
+      registryResult,
+    );
+    for (const [route, gatewayPath] of childRoutes) {
+      data[route] = failureEnvelope(config, tracker, gatewayPath, failure);
+    }
+    structuredLog("experience_gateway_bootstrap", {
+      registryAdmitted: false,
+      routeCount: Object.keys(RUNTIME_BOOTSTRAP_ROUTES).length,
+      failedRouteCount: Object.keys(RUNTIME_BOOTSTRAP_ROUTES).length,
+    });
+    return sendJson(response, 200, runtimeBootstrapEnvelope(data, false));
+  }
+
+  const settled = await settledMapWithConcurrency(
+    childRoutes,
+    RUNTIME_BOOTSTRAP_CONCURRENCY,
+    async ([route, gatewayPath]) => {
+      const runtimePath = RUNTIME_ROUTES[gatewayPath];
+      const alias = resolveGatewayRuntimeActionAlias("GET", gatewayPath);
+      if (!runtimePath || !alias || alias.runtimePath !== runtimePath) {
+        const decision = decideAdmittedRuntimeAction(null, admittedProjection);
+        return [route, actionAdmissionFailure(config, tracker, gatewayPath, decision)];
+      }
+      const decision = decideAdmittedRuntimeAction(alias, admittedProjection);
+      if (!decision.allowed) {
+        return [route, actionAdmissionFailure(config, tracker, gatewayPath, decision)];
+      }
+      const result = await readThroughGateway(
+        gatewayPath,
+        runtimePath,
+        request,
+        config,
+        runtimeFetch,
+        cache,
+        tracker,
+        clock,
+      );
+      return [route, result.body];
+    },
+  );
+  settled.forEach((result, index) => {
+    const [route, gatewayPath] = childRoutes[index];
+    if (result.status === "fulfilled") {
+      data[result.value[0]] = result.value[1];
+      return;
+    }
+    const failure = result.reason instanceof GatewayFailure
+      ? result.reason
+      : new GatewayFailure(
+        "gateway_error",
+        "The Experience Gateway could not complete this bounded bootstrap read.",
+        "Unknown",
+        500,
+      );
+    data[route] = failureEnvelope(config, tracker, gatewayPath, failure);
+  });
+  const body = runtimeBootstrapEnvelope(data, true);
+  structuredLog("experience_gateway_bootstrap", {
+    registryAdmitted: true,
+    routeCount: body.routeCount,
+    failedRouteCount: body.failedRoutes.length,
+    upstreamConcurrency: RUNTIME_BOOTSTRAP_CONCURRENCY,
+  });
+  return sendJson(response, 200, body);
+}
+
+async function handleApi(
+  request,
+  response,
+  config,
+  runtimeFetch,
+  cache,
+  tracker,
+  actionAdmission,
+  clock = () => Date.now(),
+) {
   if (!requestOriginAllowed(request, config)) {
     return sendJson(response, 403, failureEnvelope(config, tracker, "origin", new GatewayFailure("origin_denied", "Request origin is not allowed.", "Unknown", 403)));
   }
@@ -1777,7 +4961,69 @@ async function handleApi(request, response, config, runtimeFetch, cache, tracker
   if (!runtimePath) {
     return sendJson(response, 404, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("route_not_allowlisted", "This Experience Gateway route is not allowlisted.", "Unknown", 404)));
   }
-  const result = await readThroughGateway(url.pathname, runtimePath, request, config, runtimeFetch, cache, tracker);
+  const alias = resolveGatewayRuntimeActionAlias("GET", url.pathname);
+  if (!alias || alias.runtimePath !== runtimePath) {
+    return sendJson(
+      response,
+      503,
+      failureEnvelope(
+        config,
+        tracker,
+        url.pathname,
+        new GatewayFailure(
+          "canonical_action_alias_unresolved",
+          "The Gateway route does not resolve to one exact canonical Runtime action identity.",
+          "Unavailable",
+          503,
+        ),
+      ),
+    );
+  }
+  if (runtimePath !== "/runtime/capability-registry") {
+    const admission = await ensureRuntimeActionAdmission(
+      alias,
+      config,
+      runtimeFetch,
+      actionAdmission,
+    );
+    if (!admission.allowed) {
+      return sendJson(
+        response,
+        admission.status,
+        actionAdmissionFailure(config, tracker, url.pathname, admission),
+      );
+    }
+  }
+  const result = await readThroughGateway(
+    url.pathname,
+    runtimePath,
+    request,
+    config,
+    runtimeFetch,
+    cache,
+    tracker,
+    clock,
+  );
+  if (runtimePath === "/runtime/capability-registry") {
+    if (result.status === 200 && result.body.ok && result.body.data) {
+      try {
+        actionAdmission.adoptValidated(result.body.data);
+      } catch (error) {
+        actionAdmission.clear();
+        const failure = error instanceof GatewayFailure
+          ? error
+          : new GatewayFailure(
+            "capability_registry_response_invalid",
+            "The Runtime-owned Capability Registry projection failed Gateway admission validation.",
+            "Unavailable",
+            502,
+          );
+        return sendJson(response, failure.status, failureEnvelope(config, tracker, url.pathname, failure));
+      }
+    } else {
+      actionAdmission.clear();
+    }
+  }
   structuredLog("experience_gateway_request", { route: url.pathname, runtimePath, status: result.status, connectionState: result.body.gateway.connectionState });
   return sendJson(response, result.status, result.body);
 }
@@ -1827,39 +5073,223 @@ export function createPortalServer(options = {}) {
   const runtimeFetch = options.runtimeFetch ?? globalThis.fetch;
   const localFetch = options.localFetch ?? globalThis.fetch;
   const operationalFetch = options.operationalFetch ?? globalThis.fetch;
-  const replayFetch = options.replayFetch ?? globalThis.fetch;
   const sessionAuthority = createSessionAuthority(config, options.clock);
+  const executiveRegistrationMapper = config.executiveSessionEnabled
+    ? createExecutiveRegistrationMapper(config.executiveRegistrations)
+    : null;
+  const providerInteractiveAuth = config.providerInteractiveAuthEnabled
+    ? createReplitAuthInteractiveHandler(config, {
+      clock: options.clock,
+      oidc: options.providerInteractiveOidc,
+    })
+    : null;
+  const executiveProviderAdapter = config.executiveSessionEnabled
+    ? createReplitAuthAdapter(config, {
+      fetchImpl: options.providerFetch ?? globalThis.fetch,
+      clock: options.clock,
+      providerIdentityVerifier: options.providerIdentityVerifier
+        ?? (providerInteractiveAuth
+          ? createProviderSessionIdentityVerifier(
+            config,
+            providerInteractiveAuth.sessionService,
+          )
+          : config.replitDeployment
+            ? createReplitAuthIdentityVerifier(config, {
+              clock: options.clock,
+            })
+            : undefined),
+    })
+    : null;
+  const executiveSessionAuthority = config.executiveSessionEnabled
+    ? createExecutiveSessionAuthority(config, options.clock)
+    : null;
+  const executiveSessionRuntimeClient = config.executiveSessionEnabled
+    ? createExecutiveSessionRuntimeClient(config, {
+      runtimeFetch,
+      clock: options.clock,
+    })
+    : null;
+  const actionAdmission = options.actionAdmission
+    ?? createRuntimeActionAdmissionState(
+      config,
+      options.clock ?? (() => Date.now()),
+    );
   const cache = new Map();
   const tracker = { lastSuccessfulConnection: null, lastSuccessfulRefresh: null };
   const server = createServer((request, response) => {
-    if (request.url?.startsWith("/api/session")) {
+    if (request.url?.startsWith("/api/auth")) {
+      if (!providerInteractiveAuth) {
+        return sendJson(response, 404, {
+          ok: false,
+          error: {
+            code: "route_not_allowlisted",
+            message: "Interactive provider authentication is not enabled.",
+          },
+          truth: TRUTH,
+        });
+      }
+      const authPath = new URL(
+        request.url,
+        "http://portal.invalid",
+      ).pathname;
+      if (
+        authPath === "/api/auth/logout"
+        && executiveSessionAuthority?.authenticate(request)
+      ) {
+        return sendJson(response, 409, {
+          ok: false,
+          error: {
+            code: "executive_session_revocation_required",
+            message:
+              "Revoke the active Registered Executive session before provider sign-out.",
+          },
+          providerLogoutCompleted: false,
+          executiveSessionRevoked: false,
+          authorityGranted: false,
+          actionAuthorized: false,
+          secretValuesExposed: false,
+          truth: TRUTH,
+        });
+      }
+      providerInteractiveAuth
+        .handle(request, response)
+        .catch(() => sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "provider_auth_gateway_error",
+            message: "Interactive provider authentication failed safely.",
+          },
+          truth: TRUTH,
+        }));
+    } else if (request.url?.startsWith("/api/canonical-execution")) {
+      handleCanonicalExecutionApi(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        operationalFetch,
+        executiveSessionAuthority,
+        actionAdmission,
+        options.clock ?? (() => Date.now()),
+      )
+        .catch(() => sendJson(
+          response,
+          500,
+          operationalFailure(
+            config,
+            request.url,
+            "canonical_execution_gateway_error",
+            "Canonical execution failed safely.",
+            "Unknown",
+          ),
+        ));
+    } else if (request.url?.startsWith("/api/executive-session")) {
+      handleExecutiveSessionApi(
+        request,
+        response,
+        config,
+        executiveProviderAdapter,
+        executiveRegistrationMapper,
+        executiveSessionAuthority,
+        executiveSessionRuntimeClient,
+      )
+        .catch(() => {
+          const error = new ExecutiveSessionFailure(
+            "executive_session_gateway_error",
+            "The registered executive session failed safely.",
+            500,
+          );
+          sendJson(
+            response,
+            error.status,
+            executiveSessionFailureEnvelope(
+              config,
+              request.url,
+              error,
+            ),
+          );
+        });
+    } else if (request.url?.startsWith("/api/session")) {
       handleSessionApi(request, response, config, sessionAuthority)
         .catch(() => sendJson(response, 500, operationalFailure(config, request.url, "session_gateway_error", "The session request failed safely.", "Unknown")));
     } else if (request.url?.startsWith("/api/operations")) {
-      handleOperationalApi(request, response, config, operationalFetch, sessionAuthority)
+      handleOperationalApi(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        operationalFetch,
+        sessionAuthority,
+        actionAdmission,
+      )
         .catch(() => sendJson(response, 500, operationalFailure(config, request.url, "operational_gateway_error", "The hosted operation failed safely.", "Unknown")));
+    } else if (request.url?.startsWith(RUNTIME_BOOTSTRAP_ROUTE)) {
+      handleRuntimeBootstrap(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        cache,
+        tracker,
+        actionAdmission,
+        options.clock,
+      )
+        .catch(() => sendJson(response, 500, {
+          ...runtimeBootstrapEnvelope({}, false),
+          error: {
+            code: "gateway_bootstrap_error",
+            message: "The Experience Gateway could not complete the bounded Runtime bootstrap.",
+          },
+        }));
     } else if (request.url?.startsWith("/api/runtime/realtime/call")) {
-      handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, options.clock)
+      handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, actionAdmission, options.clock)
         .catch(() => sendJson(response, 500, { ok: false, error: { code: "realtime_gateway_error", message: "Realtime session creation failed safely." }, truth: TRUTH }));
     } else if (request.url?.startsWith("/api/runtime/executive-briefing") || request.url === "/api/runtime/conclave/reviews" || request.url === "/api/runtime/interactions" || request.url?.startsWith("/api/runtime/interactions/")) {
-      handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, options.clock)
+      handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, actionAdmission, options.clock)
         .catch((error) => {
           const failure = error instanceof GatewayFailure ? error : new GatewayFailure("gateway_error", "The bounded Runtime request failed safely.", "Unknown", 500);
           sendJson(response, failure.status, failureEnvelope(config, tracker, request.url, failure));
         });
     } else if (request.url?.startsWith("/api/runtime")) {
-      handleApi(request, response, config, runtimeFetch, cache, tracker)
+      handleApi(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        cache,
+        tracker,
+        actionAdmission,
+        options.clock,
+      )
         .catch(() => sendJson(response, 500, failureEnvelope(config, tracker, request.url, new GatewayFailure("gateway_error", "The Experience Gateway could not complete the read request.", "Unknown", 500))));
     } else if (request.url?.startsWith("/api/local")) {
-      handleLocalApi(request, response, config, localFetch)
+      handleLocalApi(
+        request,
+        response,
+        config,
+        runtimeFetch,
+        localFetch,
+        actionAdmission,
+      )
         .catch(() => sendJson(response, 500, localFailure(config, request.url, "local_gateway_error", "The local capability request failed safely.", "Unknown")));
     } else if (request.url?.startsWith("/api/replay")) {
-      handleReplayApi(request, response, config, replayFetch)
+      handleReplayApi(request, response, config)
         .catch(() => sendJson(response, 500, { ok: false, error: { code: "replay_gateway_error", message: "Operational Replay failed safely." }, truth: TRUTH }));
     } else {
       serveStatic(request, response);
     }
   });
-  server.experienceGateway = { cache, tracker, config, sessionAuthority };
+  server.experienceGateway = {
+    cache,
+    tracker,
+    config,
+    sessionAuthority,
+    providerInteractiveAuth,
+    executiveRegistrationMapper,
+    executiveProviderAdapter,
+    executiveSessionAuthority,
+    executiveSessionRuntimeClient,
+    actionAdmission,
+  };
   return server;
 }

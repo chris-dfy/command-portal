@@ -4,20 +4,22 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22.18"
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "dev:server": "PORT=4175 node --watch server/index.mjs",
     "build": "tsc --noEmit && vite build",
     "start": "node server/index.mjs",
-    "test": "node --test",
+    "test": "node --import ./tests/_sanitize-env.mjs --test",
     "verify:build": "node tests/verify-build-assets.mjs",
-    "check": "npm run build && npm run test && npm run verify:build"
+    "verify:engines": "node tests/verify-engines.mjs",
+    "check": "npm run verify:engines && npm run build && npm run test && npm run verify:build"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.3",
     "lucide-react": "^0.468.0",
+    "openid-client": "^6.8.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "vite": "^8.1.4"

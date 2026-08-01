@@ -23,6 +23,17 @@ import {
   Waypoints,
 } from "lucide-react";
 import { localNexusClient } from "../lib/local-client";
+import {
+  compactReplayReference,
+  positiveHostedReplayFacts,
+  presentHostedReplayStage,
+} from "../lib/operational-replay-presentation";
+import {
+  classifyOperationalReplayLoad,
+  matchesOperationalReplayExplanation,
+  matchesOperationalReplayStage,
+} from "../lib/operational-replay-selection";
+import type { OperationalReplayTarget } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
 
 type RuntimeRecord = Record<string, unknown>;
@@ -213,11 +224,19 @@ function safeStageExport(stage: ReplayStage) {
   };
 }
 
-export function OperationalReplay({ requestedMissionId }: { requestedMissionId?: string }) {
+export function OperationalReplay({ requestedTarget }: { requestedTarget?: OperationalReplayTarget }) {
   const [sessions, setSessions] = useState<ReplaySession[]>([]);
   const sessionsRef = useRef<ReplaySession[]>([]);
   const [sourceState, setSourceState] = useState<SourceState>("loading");
   const [selectedReplayId, setSelectedReplayId] = useState("");
+  const selectedReplayIdRef = useRef("");
+  const replayLoadSequenceRef = useRef(0);
+  const replayListSequenceRef = useRef(0);
+  const replayStageSequenceRef = useRef(0);
+  const explanationSequenceRef = useRef(0);
+  const targetLoadSequenceRef = useRef(0);
+  const currentStageIdRef = useRef("");
+  const stageButtonsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const [detail, setDetail] = useState<RuntimeRecord | null>(null);
   const [stages, setStages] = useState<ReplayStage[]>([]);
   const stagesRef = useRef<ReplayStage[]>([]);
@@ -233,23 +252,37 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
   const [speed, setSpeed] = useState<Speed>(1);
   const [explanation, setExplanation] = useState("");
   const [explainState, setExplainState] = useState<"idle" | "loading" | "available" | "unavailable">("idle");
-  const [notice, setNotice] = useState("");
+  const [sourceNotice, setSourceNotice] = useState("");
+  const [detailNotice, setDetailNotice] = useState("");
+
+  const selectReplay = useCallback((replayId: string) => {
+    selectedReplayIdRef.current = replayId;
+    setSelectedReplayId(replayId);
+  }, []);
 
   const refreshList = useCallback(async () => {
+    const requestSequence = ++replayListSequenceRef.current;
     const [replaysResult, failuresResult] = await Promise.allSettled([
       localNexusClient.operationalReplays(),
       localNexusClient.operationalReplayFailures(),
     ]);
+    if (requestSequence !== replayListSequenceRef.current) return;
     if (replaysResult.status === "fulfilled") {
-      const next = sessionsFrom(replaysResult.value);
+      const listed = sessionsFrom(replaysResult.value);
+      const selected = selectedReplayIdRef.current;
+      const retained = selected
+        ? sessionsRef.current.filter((session) => session.id === selected)
+        : [];
+      const next = [...new Map([...retained, ...listed].map((session) => [session.id, session])).values()];
       sessionsRef.current = next;
       setSessions(next);
       setSourceState(next.length ? "available" : "empty");
-      setNotice("");
-      setSelectedReplayId((current) => current && next.some((session) => session.id === current) ? current : next[0]?.id ?? "");
+      setSourceNotice("");
+      const current = selectedReplayIdRef.current;
+      selectReplay(current && next.some((session) => session.id === current) ? current : next[0]?.id ?? "");
     } else {
       setSourceState(sessionsRef.current.length ? "stale" : "unavailable");
-      setNotice(replaysResult.reason instanceof Error ? replaysResult.reason.message : "Operational Replay is unavailable.");
+      setSourceNotice(replaysResult.reason instanceof Error ? replaysResult.reason.message : "Operational Replay is unavailable.");
     }
     if (failuresResult.status === "fulfilled") {
       const next = rows(failuresResult.value, ["failures", "events", "records", "items"]);
@@ -259,17 +292,22 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
     } else {
       setFailureState(failureRecordsRef.current.length ? "stale" : "unavailable");
     }
-  }, []);
+  }, [selectReplay]);
 
   useEffect(() => { void refreshList(); }, [refreshList]);
   useEffect(() => {
-    if (!requestedMissionId) return;
-    let cancelled = false;
-    localNexusClient.operationalReplayForMission(requestedMissionId).then((value) => {
-      if (cancelled) return;
+    if (!requestedTarget?.id) return;
+    const requestSequence = ++targetLoadSequenceRef.current;
+    const request = requestedTarget.kind === "mission"
+      ? localNexusClient.operationalReplayForMission(requestedTarget.id)
+      : requestedTarget.kind === "receipt"
+        ? localNexusClient.operationalReplayForReceipt(requestedTarget.id)
+        : localNexusClient.operationalReplay(requestedTarget.id);
+    request.then((value) => {
+      if (requestSequence !== targetLoadSequenceRef.current) return;
       const linked = sessionsFrom(value);
       if (!linked.length) {
-        setNotice(`Runtime returned no Replay linked to mission ${requestedMissionId}.`);
+        setSourceNotice(`Runtime returned no Replay linked to ${requestedTarget.kind} ${requestedTarget.id}.`);
         return;
       }
       const merged = new Map(sessionsRef.current.map((item) => [item.id, item]));
@@ -277,24 +315,45 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
       const next = [...merged.values()];
       sessionsRef.current = next;
       setSessions(next);
-      setSelectedReplayId(linked[0].id);
+      selectReplay(linked[0].id);
       setSourceState("available");
     }).catch((caught) => {
-      if (!cancelled) setNotice(caught instanceof Error ? caught.message : "Mission-linked Replay is unavailable.");
+      if (requestSequence === targetLoadSequenceRef.current) {
+        setSourceNotice(caught instanceof Error ? caught.message : "Linked Operational Replay is unavailable.");
+      }
     });
-    return () => { cancelled = true; };
-  }, [requestedMissionId]);
+    return () => { targetLoadSequenceRef.current += 1; };
+  }, [requestedTarget?.id, requestedTarget?.kind, selectReplay]);
 
   const loadReplay = useCallback(async (replayId: string, quiet = false) => {
     if (!replayId) return;
+    const requestSequence = ++replayLoadSequenceRef.current;
     if (!quiet) setDetailState("loading");
     const [detailResult, eventsResult] = await Promise.allSettled([
       localNexusClient.operationalReplay(replayId),
       localNexusClient.operationalReplayEvents(replayId),
     ]);
+    const disposition = classifyOperationalReplayLoad({
+      requestedReplayId: replayId,
+      selectedReplayId: selectedReplayIdRef.current,
+      requestSequence,
+      activeRequestSequence: replayLoadSequenceRef.current,
+      detail: detailResult.status === "fulfilled"
+        ? { fulfilled: true, value: detailResult.value }
+        : { fulfilled: false },
+      events: eventsResult.status === "fulfilled"
+        ? { fulfilled: true, value: eventsResult.value }
+        : { fulfilled: false },
+    });
+    if (disposition === "stale_request") return;
+    if (disposition === "identity_mismatch") {
+      setDetailState(stagesRef.current.length ? "stale" : "unavailable");
+      setDetailNotice("Runtime returned malformed or mismatched Replay detail; the response was rejected.");
+      return;
+    }
     if (detailResult.status === "rejected" && eventsResult.status === "rejected") {
       setDetailState(stagesRef.current.length ? "stale" : "unavailable");
-      if (!quiet) setNotice(detailResult.reason instanceof Error ? detailResult.reason.message : "Replay detail is unavailable.");
+      if (!quiet) setDetailNotice(detailResult.reason instanceof Error ? detailResult.reason.message : "Replay detail is unavailable.");
       return;
     }
     const nextDetail = detailResult.status === "fulfilled" ? replayRecord(detailResult.value) : null;
@@ -305,6 +364,7 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
     stagesRef.current = nextStages;
     setStages(nextStages);
     setDetailState(nextStages.length ? "available" : "empty");
+    setDetailNotice("");
   }, []);
 
   useEffect(() => {
@@ -330,6 +390,11 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
   const visibleStages = failureOnly ? stages.filter((stage) => stage.failure || failed(stage.status)) : stages;
   const currentIndex = Math.min(selectedStage, Math.max(visibleStages.length - 1, 0));
   const current = visibleStages[currentIndex];
+  currentStageIdRef.current = current?.id ?? "";
+  const currentPresentation = current
+    ? presentHostedReplayStage(current, visibleStages.length)
+    : null;
+  const currentFacts = current ? positiveHostedReplayFacts(current) : [];
 
   useEffect(() => { setSelectedStage(0); setPlaying(false); }, [failureOnly]);
   useEffect(() => {
@@ -346,15 +411,38 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
   useEffect(() => {
     if (live && visibleStages.length) setSelectedStage(visibleStages.length - 1);
   }, [live, visibleStages.length]);
-  useEffect(() => { setExplanation(""); setExplainState("idle"); }, [current?.id]);
+  useEffect(() => {
+    stageButtonsRef.current[currentIndex]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [current?.id, currentIndex]);
+  useEffect(() => {
+    explanationSequenceRef.current += 1;
+    setExplanation("");
+    setExplainState("idle");
+  }, [current?.id, selectedReplayId]);
   useEffect(() => {
     if (!current || !selectedReplayId) return;
     let cancelled = false;
-    localNexusClient.operationalReplayStage(selectedReplayId, current.contractStage).then((value) => {
-      if (cancelled) return;
+    const requestedReplayId = selectedReplayId;
+    const requestedStageId = current.id;
+    const requestedStageSelector = current.contractStage;
+    const requestSequence = ++replayStageSequenceRef.current;
+    localNexusClient.operationalReplayStage(requestedReplayId, requestedStageSelector).then((value) => {
+      if (
+        cancelled
+        || requestSequence !== replayStageSequenceRef.current
+        || requestedReplayId !== selectedReplayIdRef.current
+        || requestedStageId !== currentStageIdRef.current
+      ) return;
+      if (!matchesOperationalReplayStage(value, requestedReplayId, requestedStageSelector)) {
+        setDetailNotice("Runtime returned a mismatched Replay stage; the response was rejected.");
+        return;
+      }
       const supplied = stageFrom(value, currentIndex);
       setStages((items) => {
-        const next = items.map((item) => item.id === current.id ? supplied : item);
+        const next = items.map((item) => item.id === requestedStageId ? supplied : item);
         stagesRef.current = next;
         return next;
       });
@@ -379,10 +467,31 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
 
   async function explainCurrentStage() {
     if (!current || !selectedReplayId) return;
+    const requestedReplayId = selectedReplayId;
+    const requestedStageId = current.id;
+    const requestSequence = ++explanationSequenceRef.current;
     setExplainState("loading");
     setExplanation("");
     try {
-      const supplied = replayRecord(await localNexusClient.explainOperationalReplayStage(selectedReplayId, current.contractStage));
+      const response = await localNexusClient.explainOperationalReplayStage(
+        requestedReplayId,
+        current.contractStage,
+      );
+      if (
+        requestSequence !== explanationSequenceRef.current
+        || requestedReplayId !== selectedReplayIdRef.current
+        || requestedStageId !== currentStageIdRef.current
+      ) return;
+      if (!matchesOperationalReplayExplanation(
+        response,
+        requestedReplayId,
+        current.contractStage,
+      )) {
+        setExplainState("unavailable");
+        setDetailNotice("Runtime returned a mismatched Replay explanation; the response was rejected.");
+        return;
+      }
+      const supplied = replayRecord(response);
       const whatChanged = text(supplied.whatChanged ?? supplied.what_changed, "");
       const whyChanged = text(supplied.whyChanged ?? supplied.why_changed, "");
       const next = text(supplied.explanation ?? supplied.summary ?? supplied.stageExplanation, "")
@@ -392,6 +501,10 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
         setExplainState("available");
       } else setExplainState("unavailable");
     } catch {
+      if (
+        requestSequence !== explanationSequenceRef.current
+        || requestedReplayId !== selectedReplayIdRef.current
+      ) return;
       setExplainState("unavailable");
     }
   }
@@ -430,18 +543,19 @@ export function OperationalReplay({ requestedMissionId }: { requestedMissionId?:
     limitations: ["Presentation-safe normalized fields only; unrestricted Runtime payloads are omitted."],
   } : null;
   const sourceUnavailable = sourceState === "unavailable" && !sessions.length;
+  const notice = detailNotice || sourceNotice;
 
   return <div className="operational-replay">
     <section className="nx-workspace-hero"><div><span className="nx-eyebrow">Operational Replay</span><h2>Watch NEXUS build operational understanding.</h2><p>Every stage comes from the authenticated, tenant-bound Runtime contract. Replay remains passive: it explains recorded work and never re-executes it.</p></div><div className="replay-live"><StatusPill value={detailState === "available" && live ? "live" : detailState} /><button className="nx-action" onClick={() => { setPlaying(false); setLive(true); setSelectedStage(Math.max(0, visibleStages.length - 1)); }} disabled={!visibleStages.length}><Radio size={14} />Live</button></div></section>
     {notice && <section className="operation-error" role="alert"><AlertTriangle size={18} />{notice}</section>}
     {sourceUnavailable && <section className="operation-error" role="status"><AlertTriangle size={18} />Authenticated Runtime Replay is unavailable. NEXUS has not synthesized replacement data.</section>}
     <section className="replay-source-health" aria-label="Replay source availability"><span>Authenticated Runtime <StatusPill value={sourceState} /></span><span>Replay detail <StatusPill value={detailState} /></span><span>Failure records · {failureRecords.length} <StatusPill value={failureState} /></span></section>
-    <section className="replay-runbar"><label><span>Replay source</span><select value={selectedReplayId} onChange={(event) => setSelectedReplayId(event.target.value)} disabled={!sessions.length}><option value="">{sessions.length ? "Select replay source" : "No Runtime Replay available"}</option>{sessions.map((session) => <option key={session.id} value={session.id}>{session.label} · {session.status}</option>)}</select></label><article><Waypoints size={14} /><span>Stages</span><strong>{stages.length}</strong></article><article><Eye size={14} /><span>Observations</span><strong>{observationCount}</strong></article><article><ShieldCheck size={14} /><span>Evidence</span><strong>{evidenceCount}</strong></article><article><Gauge size={14} /><span>Representations</span><strong>{representationCount}</strong></article><article><FileCheck2 size={14} /><span>Receipts</span><strong>{receiptCount}</strong></article><button onClick={() => { void refreshList(); if (selectedReplayId) void loadReplay(selectedReplayId); }}><RefreshCw size={14} />Refresh</button><button onClick={exportReplay} disabled={!current}><Download size={14} />Export</button></section>
+    <section className="replay-runbar"><label><span>Replay source</span><select value={selectedReplayId} onChange={(event) => selectReplay(event.target.value)} disabled={!sessions.length}><option value="">{sessions.length ? "Select replay source" : "No Runtime Replay available"}</option>{sessions.map((session) => <option key={session.id} value={session.id}>{session.label} · {session.status}</option>)}</select></label>{stages.length > 0 && <article><Waypoints size={14} /><span>Stages</span><strong>{stages.length}</strong></article>}{observationCount > 0 && <article><Eye size={14} /><span>Observations</span><strong>{observationCount}</strong></article>}{evidenceCount > 0 && <article><ShieldCheck size={14} /><span>Evidence</span><strong>{evidenceCount}</strong></article>}{representationCount > 0 && <article><Gauge size={14} /><span>Representations</span><strong>{representationCount}</strong></article>}{receiptCount > 0 && <article><FileCheck2 size={14} /><span>Receipts</span><strong>{receiptCount}</strong></article>}<button onClick={() => { void refreshList(); if (selectedReplayId) void loadReplay(selectedReplayId); }}><RefreshCw size={14} />Refresh</button><button onClick={exportReplay} disabled={!current}><Download size={14} />Export</button></section>
     <p className="replay-source-boundary"><strong>Canonical direct Replay</strong> · tenant and workspace are resolved by the authenticated Experience Gateway. No local-only Replay fallback is used.</p>
-    <section className="replay-pipeline" aria-label="Replay pipeline visualization">{stages.map((stage, index) => <button key={`${stage.id}-${index}`} data-status={stage.status} data-active={!failureOnly && current?.id === stage.id} onClick={() => { setFailureOnly(false); chooseStage(index); }}>{complete(stage.status) ? <CheckCircle2 size={15} /> : failed(stage.status) ? <AlertTriangle size={15} /> : <Circle size={15} />}<span>{String(index + 1).padStart(2, "0")} · {stage.label}</span><small>{stage.status}</small></button>)}</section>
+    <section className="replay-pipeline" aria-label="Replay pipeline visualization">{stages.map((stage, index) => { const stagePresentation = presentHostedReplayStage(stage, stages.length); return <button ref={(element) => { stageButtonsRef.current[index] = element; }} key={`${stage.id}-${index}`} data-status={stage.status} data-active={!failureOnly && current?.id === stage.id} onClick={() => { setFailureOnly(false); chooseStage(index); }}>{complete(stage.status) ? <CheckCircle2 size={15} /> : failed(stage.status) ? <AlertTriangle size={15} /> : <Circle size={15} />}<span>{String(index + 1).padStart(2, "0")} · {stagePresentation.title}</span><small>{stage.status}</small></button>; })}</section>
     <div className="replay-toolbar"><div><button data-active={mode === "watch"} onClick={() => setMode("watch")}>Executive Mode</button><button data-active={mode === "inspect"} onClick={() => setMode("inspect")}><CircleHelp size={14} />Inspect</button><button data-active={mode === "engineering"} onClick={() => setMode("engineering")}><TerminalSquare size={14} />Engineering Mode</button><button data-active={failureOnly} onClick={() => setFailureOnly((value) => !value)}><AlertTriangle size={14} />Failure Replay</button></div><div><button onClick={() => chooseStage(Math.max(0, currentIndex - 1))} aria-label="Previous replay stage" disabled={!current || currentIndex === 0}><ChevronLeft size={15} /></button><button onClick={() => { setLive(false); if (!playing && currentIndex >= visibleStages.length - 1) setSelectedStage(0); setPlaying((value) => !value); }} aria-label={playing ? "Pause replay" : "Play replay"} disabled={visibleStages.length < 2}>{playing ? <Pause size={15} /> : <Play size={15} />}</button><button onClick={() => chooseStage(Math.min(Math.max(0, visibleStages.length - 1), currentIndex + 1))} aria-label="Next replay stage" disabled={!current || currentIndex >= visibleStages.length - 1}><ChevronRight size={15} /></button></div></div>
     {current ? <section className="replay-inspector">
-      <div className="replay-stage"><span className="nx-eyebrow">Stage Inspector · {String(currentIndex + 1).padStart(2, "0")}</span><h2>{current.label}</h2><StatusPill value={current.status} />{current.failure && <section className="replay-failure"><AlertTriangle size={17} /><div><strong>{current.failure.type}</strong><p>{current.failure.reason}</p><span>Last success: {current.failure.lastSuccessfulStage} · Restart: {current.failure.restartPoint}</span></div></section>}{mode === "watch" && <><span className="replay-section-label">What changed</span><h3>{current.whatChanged}</h3><p>{current.whyChanged}</p><div className="replay-state-metrics"><div><strong>{current.inputs.length}</strong><span>Inputs</span></div><div><strong>{current.evidence.length}</strong><span>Evidence</span></div><div><strong>{current.outputs.length}</strong><span>Outputs</span></div><div><strong>{current.artifacts.length}</strong><span>Artifacts</span></div></div></>}{mode === "inspect" && <div className="replay-inspection-grid"><section><span>Inputs</span><ObjectList values={current.inputs} empty="No input objects were recorded at this boundary." /></section><section><span>Outputs</span><ObjectList values={current.outputs} empty="No output objects were recorded at this boundary." /></section><section><span>Evidence lineage</span><ReferenceList values={current.evidence} empty="No Evidence participated in this available record." /></section><section><span>Artifacts</span><ReferenceList values={current.artifacts} empty="No generated artifacts were recorded." /></section></div>}{mode === "engineering" && <div className="replay-engineering"><header><Braces size={15} /><span>Normalized Runtime record</span></header><pre>{JSON.stringify(engineeringView, null, 2)}</pre></div>}<dl><div><dt>Source classification</dt><dd>{current.source}</dd></div><div><dt>Occurred</dt><dd>{current.occurredAt || "Runtime timestamp unavailable"}</dd></div><div><dt>Stage ID</dt><dd>{current.id}</dd></div></dl></div>
+      <div className="replay-stage"><span className="nx-eyebrow">Stage Inspector · {String(currentIndex + 1).padStart(2, "0")}</span><h2>{currentPresentation?.title ?? current.label}</h2><StatusPill value={current.status} />{current.failure && <section className="replay-failure"><AlertTriangle size={17} /><div><strong>{current.failure.type}</strong><p>{current.failure.reason}</p><span>Last success: {current.failure.lastSuccessfulStage} · Restart: {current.failure.restartPoint}</span></div></section>}{mode === "watch" && <><span className="replay-section-label">What changed</span><h3>{currentPresentation?.headline ?? current.label}</h3><p>{currentPresentation?.explanation ?? current.whyChanged}</p>{currentPresentation?.recordId && <p className="replay-record-reference"><span>{currentPresentation.recordLabel ?? "Recorded item"}</span><code title={currentPresentation.recordId}>{compactReplayReference(currentPresentation.recordId)}</code></p>}{currentFacts.length > 0 ? <div className="replay-state-metrics">{currentFacts.map((fact) => <div key={fact.label}><strong>{fact.value}</strong><span>{fact.label}</span></div>)}</div> : <p className="replay-scheduling-posture">Scheduling trace · this stage records lifecycle state only; it does not claim Evidence, derived output, or completed work.</p>}</>}{mode === "inspect" && <div className="replay-inspection-grid"><section><span>Inputs</span><ObjectList values={current.inputs} empty="No input objects were recorded at this boundary." /></section><section><span>Outputs</span><ObjectList values={current.outputs} empty="No output objects were recorded at this boundary." /></section><section><span>Evidence lineage</span><ReferenceList values={current.evidence} empty="No Evidence participated in this available record." /></section><section><span>Artifacts</span><ReferenceList values={current.artifacts} empty="No generated artifacts were recorded." /></section></div>}{mode === "engineering" && <div className="replay-engineering"><header><Braces size={15} /><span>Normalized Runtime record</span></header><pre>{JSON.stringify(engineeringView, null, 2)}</pre></div>}<dl><div><dt>Source classification</dt><dd>{current.source}</dd></div><div><dt>Occurred</dt><dd>{current.occurredAt || "Runtime timestamp unavailable"}</dd></div><div><dt>Stage ID</dt><dd>{compactReplayReference(current.id)}</dd></div></dl></div>
       <aside><header className="replay-explain-header"><CircleHelp size={17} /><div><span className="nx-eyebrow">Explain This Step</span><h3>Why NEXUS can say this</h3></div></header><button className="replay-explain-action" onClick={() => void explainCurrentStage()} disabled={explainState === "loading"}>{explainState === "loading" ? "Requesting Runtime explanation…" : "Explain This Step"}</button>{explainState === "available" && <p className="replay-explanation">{explanation}</p>}{explainState === "unavailable" && <p className="replay-explanation replay-explanation--unavailable">Runtime supplied no explanation for this stage.</p>}<dl className="replay-explain-list"><div><dt>Evidence</dt><dd><ReferenceList values={current.evidence} empty="No Evidence reference is attached." /></dd></div><div><dt>Governance</dt><dd><ReferenceList values={current.policies} empty="No policy reference is attached." /></dd></div><div><dt>Confidence</dt><dd><strong>{current.confidenceStatus}</strong><p>{current.confidenceExplanation}</p></dd></div><div><dt>Decision</dt><dd><ReferenceList values={current.decisions} empty="No Decision reference is attached." /></dd></div></dl></aside>
     </section> : <section className="conclave-empty"><Circle size={24} /><div><strong>No replay stage is available.</strong><p>Select an authenticated Runtime Replay, wait for its ordered events, or disable Failure Replay.</p></div></section>}
     <footer className="replay-controls"><div><button onClick={() => { setLive(false); setPlaying(false); setSelectedStage(0); }} aria-label="Restart replay"><RotateCcw size={14} /><span>Restart</span></button><button onClick={() => chooseStage(Math.max(0, currentIndex - 1))} disabled={!current || currentIndex === 0} aria-label="Previous stage"><ChevronLeft size={14} /><span>Previous</span></button><button onClick={() => setPlaying((value) => !value)} disabled={visibleStages.length < 2} aria-label={playing ? "Pause replay" : "Play replay"}>{playing ? <><Pause size={14} /><span>Pause</span></> : <><Play size={14} /><span>Play</span></>}</button><button onClick={() => chooseStage(Math.min(Math.max(0, visibleStages.length - 1), currentIndex + 1))} disabled={!current || currentIndex >= visibleStages.length - 1} aria-label="Next stage"><span>Next</span><ChevronRight size={14} /></button><label><FastForward size={14} />Speed<select value={speed} onChange={(event) => setSpeed(Number(event.target.value) as Speed)}>{SPEEDS.map((item) => <option key={item} value={item}>{item}×</option>)}</select></label></div><span><ScrollText size={14} />Replay is a passive projection of recorded Runtime data. It does not re-execute work.</span></footer>

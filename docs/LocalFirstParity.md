@@ -26,4 +26,4 @@ Interaction behavior is likewise Runtime-owned through the Human Interaction Fra
 
 ## Deployment boundary
 
-Local capability routing is disabled by default and permits only a loopback Runtime target. Hosted Runtime access remains read-only until tenant identity, authorization, privacy, retention, and remote execution contracts are implemented and verified.
+Local capability routing is disabled by default and permits only a loopback Runtime target. Hosted Runtime reads and mutations are admitted independently: a hosted operation requires a literal allowlisted route, server-derived tenant/workspace identity, the exact scope, same-origin and CSRF protection for mutation, bounded payload validation, idempotency where state may change, Runtime action admission where applicable, and postcondition evidence. Everything else fails closed; no wildcard or generic forwarding establishes capability.

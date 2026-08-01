@@ -1,0 +1,82 @@
+{
+  "recordType": "nexus_experience_corrective_receipt",
+  "schemaVersion": "nexus.experience-corrective-receipt@1.0.0",
+  "receiptId": "POST-M5-WEB-DRAFT-LIFECYCLE-FUNCTIONAL-HOTFIX-20260731",
+  "status": "live_verified",
+  "scope": "additive post-acceptance Experience draft-lifecycle and demo-path functional correction",
+  "source": {
+    "branch": "codex/web-light-theme-contrast-hotfix",
+    "providerCheckoutBranch": "codex/provider-checkpoint-bea9ff1",
+    "sourceCommit": "bea9ff1d2d401483956d9509b60c9c04b3248256",
+    "sourceTree": "50d14ed171d52dad0f568d87c6bea2897f918cea",
+    "constitutionalRelease": "NCR-1.0.0",
+    "constitutionalReleaseDigest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principleImpactRecord": "NCR-IMPACT-post-m5-web-draft-lifecycle-20260731",
+    "principleImpactRecordDigest": "sha256:86860a6ca8cfd5e3b4d73467404cd04e038fe82afb70ada940cda00776657770",
+    "principleImpactValidationDigest": "sha256:96f1bcb27e4ead153921772405ba20def50f8224d132180a0ee085d63ee37404"
+  },
+  "lineage": {
+    "predecessorSourceCommit": "42a20fc047336bbb153405dc72a0b66b1d2e14ca",
+    "predecessorServingDeploymentInstance": "d9a5169b",
+    "supersededDeploymentInstance": "13dea8e9",
+    "supersededReason": "The first publish rebuilt the prior Replit provider checkpoint; live Voice behavior proved that the submitted draft was still retained.",
+    "finalServingDeploymentInstance": "56c3101a",
+    "acceptedMission5GateMutated": false,
+    "historicalReceiptMutated": false,
+    "mission6CreatedOrAdmitted": false
+  },
+  "deployment": {
+    "provider": "Replit",
+    "environment": "private_non_production_experience_gateway",
+    "url": "https://command-portal.replit.app",
+    "servingDeploymentInstance": "56c3101a",
+    "builtJavascript": "/assets/index-B3LJC0Tm.js",
+    "builtStylesheet": "/assets/index-CPF6Oiqi.css",
+    "sourceCommitVerifiedBeforePublish": true,
+    "providerCheckpointVerifiedBeforePublish": true,
+    "liveAssetsMatchVerifiedBuild": true,
+    "secretValuesExposed": false
+  },
+  "postconditions": {
+    "transientDraftsClearedAfterAdmittedSubmission": true,
+    "runtimeHistoryAndReceiptsPreserved": true,
+    "projectAndWorkspaceSelectorsPreserved": true,
+    "voiceTextDraftClearedImmediately": true,
+    "voiceRuntimeProofId": "PROOF-20260731230732-89107657",
+    "voiceRuntimeReceiptId": "VOP-REC-E6E9FF7D3817",
+    "conclaveDraftEmptyAndBrowserLocal": true,
+    "conclaveVerifiedReviewVisible": true,
+    "conclaveVerifiedReviewEvidenceCount": 4,
+    "conclaveVerifiedReviewTerminalReceiptVisible": true,
+    "historicalZeroEvidencePromptsLabeledLegacyPromptOnly": true,
+    "historicalZeroEvidencePromptsPromotedToCompleted": false,
+    "independentUsableModulesRemainLiveWhenReadinessIsDegraded": true,
+    "deterministicReadiness503Retried": false,
+    "transportFailureCollapsedFromDegradedToUnavailable": false
+  },
+  "verification": {
+    "focusedTests": "node --test tests/prompt-draft-lifecycle.test.mjs tests/document-intake-result.test.mjs tests/conclave-request-identity.test.mjs tests/executive-ui.test.mjs tests/mission3-admission.test.mjs",
+    "focusedTestsPassed": 56,
+    "focusedTestsFailed": 0,
+    "productionBuildModules": 1632,
+    "productionBuildPassed": true,
+    "assetVerificationPassed": true,
+    "liveAuthenticatedBrowserVerified": true,
+    "liveVoiceOperationRecordedNoExecution": true,
+    "liveConclaveResultProjectionVerified": true,
+    "liveDraftLifecycleVerified": true
+  },
+  "limitations": [
+    "The non-production Runtime may truthfully report a degraded readiness boundary while its independent Voice, Conclave, Mission, Project, Knowledge, and Replay modules remain usable; this receipt does not relabel unavailable physical, external, or Authority-gated capability as healthy.",
+    "The existing production-build chunk-size advisory remains non_blocking_degraded and does not affect the draft-lifecycle or demo-path postconditions."
+  ],
+  "rollback": {
+    "source": "Additively revert commit bea9ff1d2d401483956d9509b60c9c04b3248256; do not reset or rewrite history.",
+    "deployment": "Redeploy private Experience Gateway instance 13dea8e9 from predecessor source 42a20fc047336bbb153405dc72a0b66b1d2e14ca.",
+    "preservation": "Retain this receipt, its PIR, both deployment identities, and the Runtime Voice proof/receipt as historical evidence."
+  },
+  "impedimentClassification": "non_blocking_degraded",
+  "operatorActionRequired": false,
+  "sanitized": true,
+  "recordedAt": "2026-07-31T23:08:16Z"
+}

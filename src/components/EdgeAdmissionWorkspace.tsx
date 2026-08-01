@@ -37,6 +37,15 @@ import {
   type RuntimeAdmissionIntentRequest,
   type RuntimeAdmissionResponse,
 } from "../lib/local-client";
+import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
+import type { CapabilityRegistryProjection } from "../lib/types";
 
 const ADMISSION_REFRESH_INTERVAL_MS = 5_000;
 const ADMISSION_REQUEST_SCOPE = "edge:node_admission:request";
@@ -57,6 +66,7 @@ type AdmissionForm = {
 type MissionOption = { missionId: string; label: string; status: string };
 type SafeArtifact = { id: string; status: string; result: string; recordedAt: string };
 type SafeReplayEvent = { eventId: string; stage: string; status: string; occurredAt: string; summary: string };
+type PendingAdmissionCreate = PrivateDraftOperation<RuntimeAdmissionIntentRequest>;
 
 const INITIAL_FORM: AdmissionForm = {
   missionId: "",
@@ -322,9 +332,11 @@ function safeReplayEvents(value: Record<string, unknown>): SafeReplayEvent[] {
 
 export function EdgeAdmissionWorkspace({
   capability: fleetCapability,
+  capabilityRegistry = null,
   onFleetRefresh,
 }: {
   capability?: RuntimeAdmissionCapability;
+  capabilityRegistry?: CapabilityRegistryProjection | null;
   onFleetRefresh: () => void;
 }) {
   const [runtimeCapability, setRuntimeCapability] = useState<RuntimeAdmissionCapability>();
@@ -340,7 +352,7 @@ export function EdgeAdmissionWorkspace({
   const [mutating, setMutating] = useState<"cancel" | "reissue" | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [pendingCreateKey, setPendingCreateKey] = useState<string | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<PendingAdmissionCreate | null>(null);
   const [pendingMutation, setPendingMutation] = useState<{ operation: string; requestId: string; key: string } | null>(null);
   const [receipt, setReceipt] = useState<SafeArtifact | null>(null);
   const [replayEvents, setReplayEvents] = useState<SafeReplayEvent[]>([]);
@@ -348,36 +360,59 @@ export function EdgeAdmissionWorkspace({
 
   const capability = runtimeCapability ?? fleetCapability;
   const dependencies = useMemo(() => capabilityDependencies(capability), [capability]);
-  const dependenciesReady = dependencies.length > 0 && dependencies.every(dependencyReady);
   const sessionAuthenticated = session.authenticated === true;
   const permissionGranted = session.scopes?.includes(ADMISSION_REQUEST_SCOPE) === true;
-  const reviewPermissionGranted = session.scopes?.includes(ADMISSION_REVIEW_SCOPE) === true;
+  const hostedAccess = {
+    hosted: operationalSessionClient.mode() === "hosted",
+    authenticated: sessionAuthenticated,
+    scopes: session.scopes,
+  };
+  const createAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "edge_node_admission",
+      method: "POST",
+      pathTemplate: "/runtime-coordination/admissions",
+    },
+    hostedAccess,
+    ADMISSION_REQUEST_SCOPE,
+  );
+  const cancelAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "edge_node_admission",
+      method: "POST",
+      pathTemplate: "/runtime-coordination/admissions/{admission_id}/cancel",
+    },
+    hostedAccess,
+    ADMISSION_REQUEST_SCOPE,
+  );
+  const reissueAction = canonicalHostedControlAvailability(
+    capabilityRegistry,
+    {
+      capabilityId: "edge_node_admission",
+      method: "POST",
+      pathTemplate: "/runtime-coordination/admissions/{admission_id}/challenge/reissue",
+    },
+    hostedAccess,
+    ADMISSION_REVIEW_SCOPE,
+  );
   const requestedCapabilities = useMemo(() => [...new Set(form.requestedCapabilities.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))], [form.requestedCapabilities]);
   const evidenceRefs = useMemo(() => [...new Set(form.evidenceRefs.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))], [form.evidenceRefs]);
   const capabilitiesValid = requestedCapabilities.length > 0 && requestedCapabilities.every((item) => item.startsWith("nexus."));
   const canCreate = Boolean(
-    capability?.available === true
-      && dependenciesReady
-      && sessionAuthenticated
-      && permissionGranted
+    createAction.available
       && form.missionId
       && form.displayName.trim()
       && form.nodeClass.trim()
       && form.operationalPurpose.trim()
       && capabilitiesValid,
   );
-  const blockedDependency = dependencies.find((dependency) => !dependencyReady(dependency));
-  const gateReason = capability?.available !== true
-    ? capability?.reason ?? "The Runtime has not reported governed node admission as available."
-    : !dependenciesReady
-      ? blockedDependency?.reason ?? "One or more Runtime admission dependencies are not healthy."
-      : !sessionAuthenticated
-        ? "An authenticated hosted operational session is required."
-        : !permissionGranted
-          ? `The authenticated session lacks required permission: ${ADMISSION_REQUEST_SCOPE}.`
-          : !form.missionId
-            ? "Select the existing Mission that owns this admission request."
-            : "Complete the required descriptive intent fields.";
+  const gateReason = !createAction.available
+    ? createAction.reason
+    : !form.missionId
+      ? "Select the existing Mission that owns this admission request."
+      : "Complete the required descriptive intent fields.";
 
   const loadAdmissions = useCallback(async (quiet = false) => {
     if (quiet) setRefreshing(true); else setLoading(true);
@@ -449,38 +484,51 @@ export function EdgeAdmissionWorkspace({
 
   function updateForm<K extends keyof AdmissionForm>(key: K, value: AdmissionForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
-    setPendingCreateKey(null);
+    setPendingCreate(null);
     setActionError(null);
   }
 
   async function createAdmission(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canCreate) { setActionError(gateReason); return; }
-    const idempotencyKey = pendingCreateKey ?? `edge-admission:${globalThis.crypto.randomUUID()}`;
-    setPendingCreateKey(idempotencyKey);
-    const payload: RuntimeAdmissionIntentRequest = {
-      missionId: form.missionId,
-      intent: {
-        displayName: form.displayName.trim(),
-        nodeClass: form.nodeClass.trim(),
-        requestedCapabilities,
-        operationalPurpose: form.operationalPurpose.trim(),
-        ...(form.location.trim() ? { location: form.location.trim() } : {}),
-        ...(form.deploymentProfile.trim() ? { deploymentMetadata: { profile: form.deploymentProfile.trim() } } : {}),
-        ...(evidenceRefs.length ? { evidenceRefs } : {}),
+    if (!createAction.available) { setActionError(createAction.reason); return; }
+    if (!pendingCreate && !canCreate) { setActionError(gateReason); return; }
+    const staged = pendingCreate ?? snapshotPrivateDraftOperation(
+      {
+        missionId: form.missionId,
+        intent: {
+          displayName: form.displayName.trim(),
+          nodeClass: form.nodeClass.trim(),
+          requestedCapabilities,
+          operationalPurpose: form.operationalPurpose.trim(),
+          ...(form.location.trim() ? { location: form.location.trim() } : {}),
+          ...(form.deploymentProfile.trim() ? { deploymentMetadata: { profile: form.deploymentProfile.trim() } } : {}),
+          ...(evidenceRefs.length ? { evidenceRefs } : {}),
+        },
       },
-    };
+      `edge-admission:${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingCreate) {
+      setPendingCreate(staged);
+      setForm({
+        ...INITIAL_FORM,
+        missionId: staged.payload.missionId,
+        nodeClass: staged.payload.intent.nodeClass,
+      });
+    }
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingCreate(operation);
     setCreating(true);
     setActionError(null);
     try {
-      const admission = responseAdmission(await localNexusClient.createRuntimeAdmission(payload, idempotencyKey));
+      const admission = responseAdmission(await localNexusClient.createRuntimeAdmission(operation.payload, operation.idempotencyKey));
       setAdmissions((current) => [admission, ...current.filter((item) => item.admissionRequestId !== admission.admissionRequestId)]);
       setSelectedAdmission(admission);
       setSelectedId(admission.admissionRequestId);
-      setPendingCreateKey(null);
+      setPendingCreate(clearPrivateDraftAfterSuccess());
       setForm((current) => ({ ...INITIAL_FORM, missionId: current.missionId, nodeClass: current.nodeClass }));
       onFleetRefresh();
     } catch (error) {
+      setPendingCreate(retainPrivateDraftAfterFailure(operation));
       setActionError(messageFrom(error));
     } finally {
       setCreating(false);
@@ -489,9 +537,9 @@ export function EdgeAdmissionWorkspace({
 
   async function mutateAdmission(operation: "cancel" | "reissue") {
     if (!selectedAdmission) return;
-    const requiredPermission = operation === "reissue" ? ADMISSION_REVIEW_SCOPE : ADMISSION_REQUEST_SCOPE;
-    if (!session.scopes?.includes(requiredPermission)) {
-      setActionError(`The authenticated session lacks required permission: ${requiredPermission}.`);
+    const action = operation === "reissue" ? reissueAction : cancelAction;
+    if (!action.available) {
+      setActionError(action.reason);
       return;
     }
     const idempotencyKey = pendingMutation?.operation === operation && pendingMutation.requestId === selectedAdmission.admissionRequestId
@@ -589,14 +637,15 @@ export function EdgeAdmissionWorkspace({
           <label><span>Owning Mission</span><select value={form.missionId} onChange={(event) => updateForm("missionId", event.target.value)} required><option value="">Select an existing Mission</option>{missions.map((mission) => <option key={mission.missionId} value={mission.missionId}>{mission.label} · {mission.missionId}</option>)}</select><small>{selectedMission ? `Bound to ${selectedMission.missionId} (${readable(selectedMission.status)}).` : "Admission cannot begin without an existing Mission."}</small></label>
           <label><span>Node display name</span><input value={form.displayName} onChange={(event) => updateForm("displayName", event.target.value)} maxLength={120} placeholder="North operations node" autoComplete="off" required /></label>
           <label><span>Operational asset class</span><input value={form.nodeClass} onChange={(event) => updateForm("nodeClass", event.target.value)} maxLength={80} placeholder="edge_runtime_node" autoComplete="off" spellCheck={false} required /></label>
-          <label><span>Operational purpose</span><textarea rows={3} value={form.operationalPurpose} onChange={(event) => updateForm("operationalPurpose", event.target.value)} maxLength={1000} placeholder="Describe the operational outcome this node will support." required /></label>
-          <label><span>Requested capabilities</span><textarea rows={3} value={form.requestedCapabilities} onChange={(event) => updateForm("requestedCapabilities", event.target.value)} aria-invalid={!capabilitiesValid} /><small>Canonical nexus.* capability identifiers, separated by commas or lines.</small></label>
+          <label><span>Operational purpose</span><textarea rows={3} value={form.operationalPurpose} onChange={(event) => updateForm("operationalPurpose", event.target.value)} maxLength={1000} placeholder="Describe the operational outcome this node will support." autoComplete="off" required /></label>
+          <label><span>Requested capabilities</span><textarea rows={3} value={form.requestedCapabilities} onChange={(event) => updateForm("requestedCapabilities", event.target.value)} aria-invalid={!capabilitiesValid} autoComplete="off" /><small>Canonical nexus.* capability identifiers, separated by commas or lines.</small></label>
           <div className="edge-admission-form-row"><label><span>Location (optional)</span><input value={form.location} onChange={(event) => updateForm("location", event.target.value)} maxLength={240} placeholder="Operations lab" autoComplete="off" /></label><label><span>Deployment profile (optional)</span><input value={form.deploymentProfile} onChange={(event) => updateForm("deploymentProfile", event.target.value)} maxLength={240} placeholder="raspberry-pi" autoComplete="off" /></label></div>
-          <label><span>Existing Evidence references (optional)</span><textarea rows={2} value={form.evidenceRefs} onChange={(event) => updateForm("evidenceRefs", event.target.value)} placeholder="Evidence IDs only—never secure enrollment material" /></label>
+          <label><span>Existing Evidence references (optional)</span><textarea rows={2} value={form.evidenceRefs} onChange={(event) => updateForm("evidenceRefs", event.target.value)} placeholder="Evidence IDs only—never secure enrollment material" autoComplete="off" /></label>
           {!capabilitiesValid && <p className="edge-admission-error"><TriangleAlert />At least one canonical nexus.* capability is required.</p>}
           {actionError && <p className="edge-admission-error" role="alert"><TriangleAlert />{actionError}</p>}
-          {!canCreate && <p className="edge-admission-gate"><ShieldCheck />{gateReason}</p>}
-          <footer><NexusButton variant="primary" type="submit" loading={creating} disabled={!canCreate}><Plus />Request governed admission</NexusButton></footer>
+          {!canCreate && !pendingCreate && <p className="edge-admission-gate"><ShieldCheck />{gateReason}</p>}
+          {pendingCreate && <p className="edge-admission-gate"><ShieldCheck />The failed request is held privately with its exact idempotency key; submitted text will not be restored into editable fields.</p>}
+          <footer><NexusButton variant="primary" type="submit" loading={creating} disabled={!createAction.available || (!canCreate && !pendingCreate)}><Plus />{pendingCreate ? "Retry exact governed admission" : "Request governed admission"}</NexusButton></footer>
         </form>
       </NexusPanel>
 
@@ -609,7 +658,7 @@ export function EdgeAdmissionWorkspace({
       </NexusPanel>
     </div>
 
-    <NexusPanel className="edge-admission-inspector" eyebrow="Operational evolution" title={selectedAdmission?.intent.displayName ?? "No admission selected"} description={selectedAdmission ? `${selectedAdmission.admissionRequestId} · Mission ${selectedAdmission.missionId}` : "Select an admission request to inspect policy, Authority, verification, proof, receipt, and Replay lineage."} actions={selectedAdmission && <><NexusStatus tone={statusTone(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}>{readable(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}</NexusStatus><NexusButton size="sm" variant="ghost" title={reviewPermissionGranted ? "Reissue the governed challenge" : `Requires ${ADMISSION_REVIEW_SCOPE}`} disabled={!reviewPermissionGranted || !operationAllowed(selectedAdmission, "challenge.reissue") || mutating !== null} loading={mutating === "reissue"} onClick={() => void mutateAdmission("reissue")}><RotateCcw />Reissue challenge</NexusButton><NexusButton size="sm" variant="danger" title={permissionGranted ? "Cancel the admission request" : `Requires ${ADMISSION_REQUEST_SCOPE}`} disabled={!permissionGranted || !operationAllowed(selectedAdmission, "cancel") || mutating !== null} loading={mutating === "cancel"} onClick={() => void mutateAdmission("cancel")}><Ban />Cancel request</NexusButton></>}>
+    <NexusPanel className="edge-admission-inspector" eyebrow="Operational evolution" title={selectedAdmission?.intent.displayName ?? "No admission selected"} description={selectedAdmission ? `${selectedAdmission.admissionRequestId} · Mission ${selectedAdmission.missionId}` : "Select an admission request to inspect policy, Authority, verification, proof, receipt, and Replay lineage."} actions={selectedAdmission && <><NexusStatus tone={statusTone(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}>{readable(selectedAdmission.operationalState ?? selectedAdmission.lifecycleState)}</NexusStatus><NexusButton size="sm" variant="ghost" title={reissueAction.available ? "Reissue the governed challenge" : reissueAction.reason} disabled={!reissueAction.available || !operationAllowed(selectedAdmission, "challenge.reissue") || mutating !== null} loading={mutating === "reissue"} onClick={() => void mutateAdmission("reissue")}><RotateCcw />Reissue challenge</NexusButton><NexusButton size="sm" variant="danger" title={cancelAction.available ? "Cancel the admission request" : cancelAction.reason} disabled={!cancelAction.available || !operationAllowed(selectedAdmission, "cancel") || mutating !== null} loading={mutating === "cancel"} onClick={() => void mutateAdmission("cancel")}><Ban />Cancel request</NexusButton></>}>
       {selectedAdmission ? <>
         {selectedAdmission.awaitingNodeProof && <NexusCallout tone="attention" title="Awaiting physical node proof">{selectedAdmission.requiredNextAction ?? "The real node must claim its challenge and submit independently verifiable proof before NEXUS can verify, admit, or activate it."}</NexusCallout>}
         {selectedAdmission.failure && <aside className="edge-admission-failure"><TriangleAlert /><div><strong>{readable(selectedAdmission.failure.category ?? selectedAdmission.failure.code ?? "Admission failed")}</strong><p>{selectedAdmission.failure.message ?? selectedAdmission.failure.reason ?? "The Runtime recorded a failure without a public explanation."}</p><small>{selectedAdmission.failure.remediation ?? selectedAdmission.failure.nextAction ?? (selectedAdmission.failure.retryable ? "A governed retry may be available." : "Review policy and Evidence before taking further action.")}</small></div><NexusStatus tone="critical">{selectedAdmission.failure.retryable ? "retryable" : "action required"}</NexusStatus></aside>}

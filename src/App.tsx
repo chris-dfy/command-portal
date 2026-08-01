@@ -1,59 +1,109 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, BookOpen, Bot, BrainCircuit, CircleGauge, FileCheck2, Files, FolderKanban, History, Mic2, Network, ServerCog, Settings2, ShieldCheck, Waypoints, type LucideIcon } from "lucide-react";
+import { CapabilityRegistryProjection as CapabilityRegistryWorkspace } from "./components/CapabilityRegistryProjection";
+import { ConnectorDiagnosticsWorkspace } from "./components/ConnectorDiagnosticsWorkspace";
 import { ConclaveWorkspace } from "./components/ConclaveWorkspace";
 import { DataPanel, EmptyRecord } from "./components/DataPanel";
 import { DocumentIntake } from "./components/DocumentIntake";
+import { EdgeAdmissionWorkspace } from "./components/EdgeAdmissionWorkspace";
 import { EdgeRuntime } from "./components/EdgeRuntime";
 import { ExecutiveStatusBar } from "./components/ExecutiveStatusBar";
+import { HostedCommandDirectory } from "./components/HostedCommandDirectory";
 import { KnowledgeWorkspace } from "./components/KnowledgeWorkspace";
 import { MissionDashboard } from "./components/MissionDashboard";
 import { NexusCopilot } from "./components/NexusCopilot";
 import { OperationalReplay } from "./components/OperationalReplay";
+import type { OperationalReplayTarget } from "./components/OperationalResultLineage";
 import { OperationsCenter } from "./components/OperationsCenter";
 import { OperationsWorkspace } from "./components/OperationsWorkspace";
 import { OperationalAccessGate } from "./components/OperationalAccessGate";
+import {
+  AuthorityReadinessDiagnostics,
+  FunctionalReadinessDiagnostics,
+  GovernanceReadinessDiagnostics,
+  MissionRuntimeEvidence,
+  RuntimeMissionInventory,
+  VoiceRuntimeStatus,
+} from "./components/ParityDiagnostics";
 import { ProjectStudio } from "./components/ProjectStudio";
+import { RegisteredExecutiveSession } from "./components/RegisteredExecutiveSession";
+import { CanonicalExecutionSpine } from "./components/CanonicalExecutionSpine";
 import { ReleaseRevision } from "./components/ReleaseRevision";
 import { RuntimeHealth } from "./components/RuntimeHealth";
 import { RuntimeInformation } from "./components/RuntimeInformation";
 import { RuntimeTopology } from "./components/RuntimeTopology";
 import { StatusPill } from "./components/StatusPill";
+import {
+  ModuleAvailabilityBoundary,
+  SurfaceAvailabilityBoundary,
+} from "./components/SurfaceAvailabilityBoundary";
 import { VoiceWorkspace } from "./components/VoiceWorkspace";
+import { WorkSessionsWorkspace } from "./components/WorkSessionsWorkspace";
 import { AppearanceWorkspace } from "./appearance/AppearanceWorkspace";
 import { useAppearanceSettings } from "./appearance/useAppearanceSettings";
 import type { EoxAssessment } from "./lib/eox-client";
 import {
+  capabilityStateView,
+  hostedSessionActionAvailability,
+  MODULE_MOUNT_ACTION_REQUIREMENTS,
+} from "./lib/hosted-capability-gate";
+import {
   OPERATIONAL_SESSION_INVALID_EVENT,
   localNexusClient,
   operationalSessionClient,
-  type ClientCapabilityContract,
   type OperationalSession,
 } from "./lib/local-client";
-import { portalClient } from "./lib/portal-client";
+import {
+  PORTAL_CANONICAL_ACTIONS,
+  asCapabilityRegistryProjection,
+  canonicalActionAvailability,
+  portalFailureEnvelope,
+  portalClient,
+} from "./lib/portal-client";
+import {
+  derivePortalConnectionState,
+  selectPortalPrimaryFailure,
+} from "./lib/request-coordination.mjs";
 import { displayLabel } from "./lib/presentation";
-import type { ConnectionState, GatewayEnvelope, ProviderRecord, RuntimeSnapshot } from "./lib/types";
+import type {
+  CapabilityRegistryProjection,
+  ConnectionState,
+  GatewayEnvelope,
+  ProviderRecord,
+  RuntimeRoute,
+  RuntimeSnapshot,
+} from "./lib/types";
 import { NexusContextInspector } from "./platform/NexusContextInspector";
 import { NexusExecutiveNavigation } from "./platform/NexusExecutiveNavigation";
 import { NexusPlatformRail, type PlatformRailGroup } from "./platform/NexusPlatformRail";
 import { NexusActivityStream, NexusWorkspaceCommandBar } from "./platform/NexusWorkspaceChrome";
 import { NexusWorkspaceFrame } from "./platform/NexusWorkspaceFrame";
 import {
-  NEXUS_PLATFORM_NAVIGATION,
   NEXUS_PLATFORM_PATH_ALIASES,
-  NEXUS_PLATFORM_PATHS,
-  type NexusPlatformAreaId,
 } from "./platform/navigation";
+import {
+  NEXUS_EXECUTIVE_SURFACES,
+  NEXUS_SURFACE_GROUPS,
+  NEXUS_WEB_SURFACES,
+  assertNexusModuleComponentMap,
+  nexusSurfaceFromWebPath,
+  nexusSurfaceSourceClass,
+  type NexusModuleDefinition,
+  type NexusSurfaceDefinition,
+  type NexusSurfaceIcon,
+  type NexusSurfaceId,
+} from "./platform/surfaceRegistry";
 import "./design-system/nexus-tokens.css";
 import "./design-system/nexus-foundation.css";
 import "./appearance/appearance-workspace.css";
 import "./platform/nexus-platform.css";
 import "./components/HostedOperationalContext.css";
 
-type AreaId = NexusPlatformAreaId | "documents" | "projects" | "voice" | "providers" | "evidence";
-type Area = { id: AreaId; label: string; detail: string; icon: LucideIcon; group: "Platform" | "Capabilities" };
+type AreaId = NexusSurfaceId;
+type Area = NexusSurfaceDefinition & { iconComponent: LucideIcon };
 type CopilotAreaId = Parameters<typeof NexusCopilot>[0]["activeArea"];
 
-const PLATFORM_ICONS: Record<NexusPlatformAreaId, LucideIcon> = {
+const SURFACE_ICONS: Record<NexusSurfaceIcon, LucideIcon> = {
   dashboard: CircleGauge,
   missions: Waypoints,
   replay: History,
@@ -62,48 +112,66 @@ const PLATFORM_ICONS: Record<NexusPlatformAreaId, LucideIcon> = {
   edge: ServerCog,
   "mission-control": Network,
   settings: Settings2,
+  documents: Files,
+  projects: FolderKanban,
+  "data-platform": Activity,
+  providers: Bot,
+  runtime: ServerCog,
+  connectors: Network,
+  storage: Files,
+  cloud: ServerCog,
+  team: Bot,
+  governance: ShieldCheck,
+  "capability-ledger": FileCheck2,
+  evidence: FileCheck2,
+  security: ShieldCheck,
+  receipts: FileCheck2,
+  voice: Mic2,
+  "executive-views": CircleGauge,
+  "work-sessions": History,
+  government: ShieldCheck,
 };
 
-const AREAS: Area[] = [
-  ...NEXUS_PLATFORM_NAVIGATION.map((area) => ({ ...area, icon: PLATFORM_ICONS[area.id], group: "Platform" as const })),
-  { id: "documents", label: "Document Intelligence", detail: "Governed evidence ingestion", icon: Files, group: "Capabilities" },
-  { id: "projects", label: "Projects", detail: "Plan, scope, and compile", icon: FolderKanban, group: "Capabilities" },
-  { id: "voice", label: "Voice Operations", detail: "Governed voice interface", icon: Mic2, group: "Capabilities" },
-  { id: "providers", label: "Model Gateway", detail: "Verified provider registry", icon: Bot, group: "Capabilities" },
-  { id: "evidence", label: "Evidence Center", detail: "Proofs and receipts", icon: FileCheck2, group: "Capabilities" },
-];
+const AREAS: Area[] = NEXUS_WEB_SURFACES.map((surface) => ({
+  ...surface,
+  clients: {
+    desktop: { ...surface.clients.desktop },
+    web: { ...surface.clients.web },
+  },
+  capabilityIds: [...surface.capabilityIds],
+  iconComponent: SURFACE_ICONS[surface.icon],
+}));
 
-const EXECUTIVE_AREAS = AREAS.filter((area) => area.group === "Platform");
-const RAIL_GROUPS: PlatformRailGroup[] = (["Platform", "Capabilities"] as const).map((group) => ({
+const EXECUTIVE_IDS = new Set(NEXUS_EXECUTIVE_SURFACES.map((surface) => surface.id));
+const EXECUTIVE_AREAS = AREAS.filter((area) => EXECUTIVE_IDS.has(area.id)).map((area) => ({
+  id: area.id,
+  label: area.label,
+  icon: area.iconComponent,
+}));
+const RAIL_GROUPS: PlatformRailGroup[] = NEXUS_SURFACE_GROUPS.map((group) => ({
   label: group,
   items: AREAS.filter((area) => area.group === group).map((area) => ({
-    ...area,
-    live: area.id === "replay",
+    id: area.id,
+    label: area.label,
+    detail: area.detail,
+    icon: area.iconComponent,
   })),
 }));
 
 const record = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const list = (value: unknown) => Array.isArray(value) ? value as Record<string, unknown>[] : [];
-const STATE_PRIORITY: ConnectionState[] = ["Unauthorized", "Schema Mismatch", "Version Mismatch", "Timed Out", "Unavailable", "Unknown", "Degraded", "Retrying", "Connecting", "Healthy"];
 const isAreaId = (value: string): value is AreaId => AREAS.some((area) => area.id === value);
-const AREA_PATHS: Readonly<Record<AreaId, string>> = Object.freeze({
-  ...NEXUS_PLATFORM_PATHS,
-  documents: "/documents",
-  projects: "/projects",
-  voice: "/voice",
-  providers: "/providers",
-  evidence: "/evidence",
-});
+const AREA_PATHS: Readonly<Record<AreaId, string>> = Object.freeze(
+  Object.fromEntries(AREAS.map((area) => [area.id, area.clients.web.route])) as Record<AreaId, string>,
+);
 const normalizePath = (value: string) => {
   const normalized = `/${value}`.replace(/\/{2,}/g, "/").replace(/\/$/, "");
   return normalized || "/";
 };
 const areaFromPath = (pathname: string): AreaId | null => {
   const path = normalizePath(pathname);
-  const canonical = (Object.entries(AREA_PATHS) as Array<[AreaId, string]>).find(([, candidate]) => (
-    path === candidate || (candidate !== "/" && path.startsWith(`${candidate}/`))
-  ));
-  if (canonical) return canonical[0];
+  const canonical = nexusSurfaceFromWebPath(path);
+  if (canonical) return canonical.id;
   return NEXUS_PLATFORM_PATH_ALIASES[path] ?? null;
 };
 const routeFromLocation = (): AreaId => {
@@ -117,88 +185,116 @@ const COPILOT_TO_PLATFORM: Record<CopilotAreaId, AreaId> = {
   conclave: "conclave", information: "settings",
   health: "settings", topology: "edge", providers: "providers", evidence: "evidence",
 };
-const PLATFORM_TO_COPILOT: Record<AreaId, CopilotAreaId> = {
+const PLATFORM_TO_COPILOT: Partial<Record<AreaId, CopilotAreaId>> = {
   dashboard: "center", missions: "missions", replay: "replay", conclave: "conclave",
   knowledge: "knowledge", edge: "edge", "mission-control": "operations", settings: "information",
   documents: "intake", projects: "projects", voice: "voice", providers: "providers", evidence: "evidence",
 };
-const OPERATIONAL_AREAS = new Set<AreaId>([
-  "missions", "replay", "conclave", "knowledge", "edge", "mission-control",
-]);
-const HOSTED_CONTRACT_AREAS = new Set<AreaId>(["documents", "projects", "voice"]);
-const AREA_CAPABILITY_IDS: Partial<Record<AreaId, string[]>> = Object.freeze({
-  missions: ["mission_executor", "receipts", "operational_replay"],
-  replay: ["operational_replay"],
-  conclave: ["conclave", "evidence", "operational_replay"],
-  knowledge: ["knowledge_intake", "mission_store", "knowledge_acquisition", "knowledge_promotion", "knowledge_store"],
-  edge: ["edge_monitoring", "edge_node_admission"],
-  "mission-control": ["mission_executor", "conclave", "receipts", "operational_replay"],
-});
-const AREA_CLIENT_CONTRACT_IDS: Partial<Record<AreaId, string>> = Object.freeze({
-  documents: "knowledge.document_intake",
-  projects: "projects.nexicron_planning",
-  voice: "interaction.human",
+const OPERATIONAL_AREAS = new Set<AreaId>(
+  AREAS.filter((area) => area.webOperationalSessionRequired).map((area) => area.id),
+);
+const HOSTED_CONTRACT_AREAS = new Set<AreaId>(
+  AREAS.filter((area) => area.webHostedContract).map((area) => area.id),
+);
+const AREA_CAPABILITY_IDS: Readonly<Partial<Record<AreaId, readonly string[]>>> = Object.freeze(
+  Object.fromEntries(AREAS.map((area) => [area.id, Object.freeze([...area.capabilityIds])])),
+);
+const MODULE_RUNTIME_ROUTES: Readonly<Record<string, readonly RuntimeRoute[]>> = Object.freeze({
+  "dashboard.executive-status": ["status", "health", "ready", "version", "providers", "environment", "diagnostics"],
+  "dashboard.operations-center": ["eox"],
+  "missions.runtime-evidence": ["ready", "receipts"],
+  "edge.monitoring": ["capabilities", "environment"],
+  "edge.diagnostics-topology": ["diagnostics", "providers", "health"],
+  "settings.runtime-information": ["status", "version", "environment", "providers", "capability-registry"],
+  "settings.runtime-health": ["health", "ready", "version", "environment", "diagnostics"],
+  "providers.registry": ["providers"],
+  "providers.truth-boundary": ["providers"],
+  "mission-control.mission-dashboard": ["ready", "receipts"],
+  "mission-control.runtime-missions": ["ready", "receipts"],
+  "mission-control.functional-readiness": ["ready", "capabilities"],
+  "governance.readiness-diagnostics": ["governance"],
+  "connectors.registry": ["connectors"],
+  "capability-ledger.registry": ["capability-registry"],
+  "evidence.proof-references": ["proofs"],
+  "evidence.execution-receipts": ["receipts"],
+  "evidence.release-provenance": ["version"],
+  "receipts.runtime-workspace": ["receipts"],
+  "receipts.execution-receipts": ["receipts"],
+  "receipts.proof-references": ["proofs"],
+  "receipts.release-provenance": ["version"],
+  "voice.runtime-status": ["health", "providers"],
+  "executive-views.operations-center": ["eox"],
 });
 
-function capabilityId(value: Record<string, unknown>) {
-  return String(value.capabilityId ?? value.capability_id ?? value.id ?? "");
-}
-
-function capabilityStateView(
-  readiness: Record<string, unknown> | null,
-  clientContract: ClientCapabilityContract | null,
-  active: AreaId,
-  readinessFailure: string,
-  clientContractFailure: string,
+function surfaceCapabilityStateView(
+  projection: CapabilityRegistryProjection | null,
+  surface: NexusSurfaceDefinition,
+  registryFailure: string,
 ) {
-  const contractCapabilityId = AREA_CLIENT_CONTRACT_IDS[active];
-  if (contractCapabilityId) {
-    if (clientContractFailure) return { state: "unavailable", reason: clientContractFailure };
-    if (!clientContract) return { state: "checking", reason: "The Runtime client capability contract is being verified." };
-    if (clientContract.truth.hostedExecutionAvailable !== true) {
-      return { state: "unavailable", reason: "The Runtime reports hosted execution unavailable for this deployment." };
-    }
-    if (clientContract.capabilityStates?.[contractCapabilityId] !== "available") {
-      return { state: "unavailable", reason: `The Runtime reports ${contractCapabilityId} unavailable for this deployment.` };
-    }
-    const capability = clientContract.capabilities.find((item) => item.capabilityId === contractCapabilityId);
-    if (!capability || capability.clients.nexusWeb !== "implemented" || !capability.implementationState.startsWith("implemented")) {
-      return { state: "unavailable", reason: `Runtime contract ${clientContract.contractVersion} does not register ${contractCapabilityId} for NEXUS Web.` };
-    }
+  const modules = surface.modules.filter((module) => (
+    ["functional", "read_only"].includes(module.clients.web.state)
+    && module.capabilityIds.length > 0
+  ));
+  if (!modules.length) {
+    return capabilityStateView(projection, AREA_CAPABILITY_IDS[surface.id] ?? [], registryFailure);
+  }
+  const states = modules.map((module) => ({
+    module,
+    capability: capabilityStateView(projection, module.capabilityIds, registryFailure),
+  }));
+  const admitted = states.filter(({ capability }) => ["live", "degraded"].includes(capability.state));
+  if (!admitted.length) return states[0].capability;
+  const unavailable = states.filter(({ capability }) => !["live", "degraded"].includes(capability.state));
+  if (unavailable.length) {
     return {
-      state: "available",
-      reason: `${capability.name} is registered for NEXUS Web by Runtime contract ${clientContract.contractVersion}.`,
+      state: "degraded",
+      reason: `${admitted.length} module capability contract${admitted.length === 1 ? " remains" : "s remain"} usable; ${unavailable.map(({ module }) => module.label).join(", ")} remains unavailable.`,
     };
   }
-  const failure = readinessFailure;
-  if (failure) return { state: "unavailable", reason: failure };
-  if (!readiness) return { state: "checking", reason: "Capability-specific Runtime readiness is being verified." };
-  const required = AREA_CAPABILITY_IDS[active] ?? [];
-  const applicable = list(readiness.capabilities).filter((item) => required.includes(capabilityId(item)));
-  if (!required.length) return { state: "not_applicable", reason: "This workspace has no hosted capability contract." };
-  if (applicable.length !== required.length) {
-    const present = new Set(applicable.map(capabilityId));
-    const missing = required.filter((id) => !present.has(id));
-    return { state: "unavailable", reason: `Runtime did not return readiness for: ${missing.join(", ")}.` };
-  }
-  const unavailable = applicable.filter((item) => String(item.state ?? item.status ?? "unknown").toLowerCase() !== "available");
-  if (!unavailable.length) return { state: "available", reason: `${required.length} required capability contract${required.length === 1 ? " is" : "s are"} available.` };
-  const reasons = unavailable.flatMap((item) => {
-    const missing = Array.isArray(item.missingDependencies) ? item.missingDependencies.map(String) : [];
-    const explanation = String(item.reason ?? item.requiredNextAction ?? item.required_next_action ?? "").trim();
-    return [explanation, missing.length ? `Missing: ${missing.join(", ")}.` : ""].filter(Boolean);
-  });
   return {
-    state: String(unavailable[0].state ?? unavailable[0].status ?? "unavailable"),
-    reason: [...new Set(reasons)].join(" ") || "Runtime reported the capability unavailable without an explanatory reason.",
+    state: states.some(({ capability }) => capability.state === "degraded") ? "degraded" : "live",
+    reason: states.map(({ capability }) => capability.reason).join(" "),
   };
 }
 
+function envelopeHasVerifiedRuntimeEvidence(envelope: GatewayEnvelope | undefined) {
+  return envelope?.data !== undefined
+    && envelope.data !== null
+    && ["Healthy", "Degraded"].includes(envelope.gateway.connectionState);
+}
+
+function moduleHasVerifiedRuntimeEvidence(
+  module: NexusModuleDefinition,
+  snapshot: RuntimeSnapshot,
+  projection: CapabilityRegistryProjection | null,
+) {
+  const routeEvidence = (MODULE_RUNTIME_ROUTES[module.moduleId] ?? [])
+    .some((route) => envelopeHasVerifiedRuntimeEvidence(snapshot[route]));
+  if (routeEvidence) return true;
+  if (!module.capabilityIds.length || !projection) return false;
+  const records = new Map(
+    projection.capabilities.map((capability) => [capability.capabilityId, capability]),
+  );
+  return module.capabilityIds.every((capabilityId) => {
+    const capability = records.get(capabilityId);
+    return capability
+      ? ["live_verified", "live_degraded"].includes(capability.classification)
+      : false;
+  });
+}
+
+function surfaceHasVerifiedRuntimeEvidence(
+  surface: NexusSurfaceDefinition,
+  snapshot: RuntimeSnapshot,
+  projection: CapabilityRegistryProjection | null,
+) {
+  return surface.modules
+    .filter((module) => ["functional", "read_only"].includes(module.clients.web.state))
+    .some((module) => moduleHasVerifiedRuntimeEvidence(module, snapshot, projection));
+}
+
 function connectionState(snapshot: RuntimeSnapshot, failures: GatewayEnvelope[], loading: boolean): ConnectionState {
-  if (!Object.keys(snapshot).length) return loading ? "Connecting" : "Unavailable";
-  if (loading) return "Retrying";
-  const states = [...failures, ...Object.values(snapshot)].map((item) => item?.gateway.connectionState).filter(Boolean) as ConnectionState[];
-  return STATE_PRIORITY.find((state) => states.includes(state)) ?? (failures.length ? "Unavailable" : "Healthy");
+  return derivePortalConnectionState(snapshot, failures, loading) as ConnectionState;
 }
 
 function nexusTone(state: ConnectionState): "neutral" | "info" | "success" | "attention" | "critical" {
@@ -208,20 +304,22 @@ function nexusTone(state: ConnectionState): "neutral" | "info" | "success" | "at
   return "critical";
 }
 
-function Providers({ snapshot }: { snapshot: RuntimeSnapshot }) {
+function ProviderRegistry({ snapshot }: { snapshot: RuntimeSnapshot }) {
   const providers = list(snapshot.providers?.data) as unknown as ProviderRecord[];
-  const openai = providers.find((provider) => provider.id === "openai");
-  return <div className="experience-grid">
-    <DataPanel eyebrow="Provider registry" title="Verified runtime inventory" icon={<ShieldCheck size={18} />} className="span-2">
+  return <DataPanel eyebrow="Provider registry" title="Verified runtime inventory" icon={<ShieldCheck size={18} />} className="span-2">
       {providers.length ? <div className="provider-table" role="table" aria-label="Runtime providers">
         <div className="provider-row provider-head" role="row"><span>Provider</span><span>Configured</span><span>Reachable</span><span>Verified</span><span>Hosting</span></div>
         {providers.map((provider) => <div className="provider-row" role="row" key={provider.id}><div><strong>{provider.displayName}</strong><small>{provider.id}{provider.default ? " · default" : ""}</small></div><StatusPill value={provider.configured ? "configured" : "unconfigured"} /><StatusPill value={provider.reachable ? "reachable" : "unavailable"} /><StatusPill value={provider.verified ? "verified" : "unverified"} /><span>{displayLabel(provider.hostingMode)}</span></div>)}
       </div> : <EmptyRecord />}
-    </DataPanel>
-    <DataPanel eyebrow="Model-native boundary" title="Provider truth" icon={<ShieldCheck size={18} />}>
+    </DataPanel>;
+}
+
+function ProviderTruth({ snapshot }: { snapshot: RuntimeSnapshot }) {
+  const providers = list(snapshot.providers?.data) as unknown as ProviderRecord[];
+  const openai = providers.find((provider) => provider.id === "openai");
+  return <DataPanel eyebrow="Model-native boundary" title="Provider truth" icon={<ShieldCheck size={18} />}>
       <p className="boundary-note">Configuration is not connectivity. {openai?.liveInferenceVerified ? "Live inference is Runtime-verified; model-native output remains non-authoritative." : "No live provider capability is established until Runtime inference succeeds."}</p>
-    </DataPanel>
-  </div>;
+    </DataPanel>;
 }
 
 function HostedCapabilityBoundary({
@@ -235,7 +333,7 @@ function HostedCapabilityBoundary({
   capability: { state: string; reason: string };
   children: ReactNode;
 }) {
-  if (configured && capability.state === "available") return children;
+  if (configured && ["live", "degraded"].includes(capability.state)) return children;
   const boundaryState = configured ? capability.state : "unavailable";
   const reason = configured ? capability.reason : "Hosted operational mode is not configured for this deployment.";
   return <DataPanel eyebrow="Hosted capability boundary" title={`${title} is ${boundaryState === "checking" ? "being verified" : "unavailable"}`} icon={<ShieldCheck size={18} />}>
@@ -244,27 +342,53 @@ function HostedCapabilityBoundary({
   </DataPanel>;
 }
 
-function Evidence({
-  snapshot,
+function ProofReferences({ snapshot }: { snapshot: RuntimeSnapshot }) {
+  const proofs = list(snapshot.proofs?.data);
+  return <DataPanel eyebrow="Decision Flight Recorder" title="Proof references" icon={<FileCheck2 size={18} />}>{proofs.length ? <div className="reference-list">{proofs.map((proof, index) => <article key={String(proof.id ?? index)}><strong>{String(proof.id ?? "Proof")}</strong><StatusPill value={proof.verified ? "verified" : "recorded"} /></article>)}</div> : <EmptyRecord />}</DataPanel>;
+}
+
+function ExecutionReceipts({ snapshot }: { snapshot: RuntimeSnapshot }) {
+  const receipts = list(snapshot.receipts?.data);
+  return <DataPanel eyebrow="Outcome Ledger" title="Execution receipts" icon={<FileCheck2 size={18} />}>{receipts.length ? <div className="reference-list">{receipts.map((receipt, index) => <article key={String(receipt.id ?? index)}><strong>{String(receipt.id ?? "Receipt")}</strong></article>)}</div> : <EmptyRecord>No execution receipts are available.</EmptyRecord>}</DataPanel>;
+}
+
+function ReleaseProvenance({
   runtimeCommit,
   programAlphaCommit,
 }: {
-  snapshot: RuntimeSnapshot;
   runtimeCommit: string;
   programAlphaCommit: string;
 }) {
-  const proofs = list(snapshot.proofs?.data);
-  const receipts = list(snapshot.receipts?.data);
-  return <div className="experience-grid">
-    <DataPanel eyebrow="Decision Flight Recorder" title="Proof references" icon={<FileCheck2 size={18} />}>{proofs.length ? <div className="reference-list">{proofs.map((proof, index) => <article key={String(proof.id ?? index)}><strong>{String(proof.id ?? "Proof")}</strong><StatusPill value={proof.verified ? "verified" : "recorded"} /></article>)}</div> : <EmptyRecord />}</DataPanel>
-    <DataPanel eyebrow="Outcome Ledger" title="Execution receipts" icon={<FileCheck2 size={18} />}>{receipts.length ? <div className="reference-list">{receipts.map((receipt, index) => <article key={String(receipt.id ?? index)}><strong>{String(receipt.id ?? "Receipt")}</strong></article>)}</div> : <EmptyRecord>No execution receipts are available.</EmptyRecord>}</DataPanel>
-    <DataPanel eyebrow="Release provenance" title="Verified deployment revisions" icon={<ShieldCheck size={18} />} className="span-2">
+  return <DataPanel eyebrow="Release provenance" title="Verified deployment revisions" icon={<ShieldCheck size={18} />} className="span-2">
       <div className="information-grid release-provenance-grid">
         <ReleaseRevision label="Runtime commit" value={runtimeCommit} />
         <ReleaseRevision label="Program Alpha commit" value={programAlphaCommit} />
       </div>
-    </DataPanel>
-  </div>;
+    </DataPanel>;
+}
+
+function MissionStepExecutionPosture({
+  readiness,
+}: {
+  readiness: Record<string, unknown> | null;
+}) {
+  const capabilities = rowsFromUnknown(readiness?.capabilities);
+  const mission = capabilities.find((item) => item.capabilityId === "mission_executor");
+  const available = mission?.available === true || mission?.state === "available";
+  return <DataPanel eyebrow="Canonical execution spine" title="Mission step Authority posture" icon={<ShieldCheck size={18} />}>
+    <p className="boundary-note">
+      Supported typed Mission steps require policy and Decision controls, a one-use capability-bound Authority Grant,
+      a receipt, and an independently verified postcondition. When policy requires Approval, the adapter consumes a
+      real recorded Approval; it never fabricates one. Unsupported or unprovisioned steps fail closed.
+    </p>
+    <StatusPill value={available ? "available" : "capability gated"} />
+  </DataPanel>;
+}
+
+function rowsFromUnknown(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    : [];
 }
 
 export function App() {
@@ -278,16 +402,39 @@ export function App() {
   const [query, setQuery] = useState("");
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [copilotExpanded, setCopilotExpanded] = useState(false);
-  const [replayMissionId, setReplayMissionId] = useState<string>();
+  const [replayTarget, setReplayTarget] = useState<OperationalReplayTarget>();
   const [sessionBootstrapComplete, setSessionBootstrapComplete] = useState(false);
   const [hostedOperationalConfigured, setHostedOperationalConfigured] = useState(false);
   const [operationalSession, setOperationalSession] = useState<OperationalSession>({ authenticated: false });
   const [operationalReadiness, setOperationalReadiness] = useState<Record<string, unknown> | null>(null);
-  const [operationalReadinessFailure, setOperationalReadinessFailure] = useState("");
-  const [clientCapabilityContract, setClientCapabilityContract] = useState<ClientCapabilityContract | null>(null);
-  const [clientCapabilityFailure, setClientCapabilityFailure] = useState("");
+  const refreshGeneration = useRef(0);
 
-  const refresh = (forceRefresh = false) => { setLoading(true); portalClient.snapshot(forceRefresh).then((result) => { setSnapshot((current) => ({ ...current, ...result.data })); setFailures(result.failures); }).catch(() => { setSnapshot({}); setFailures([]); }).finally(() => setLoading(false)); };
+  const refresh = (forceRefresh = false) => {
+    const generation = refreshGeneration.current + 1;
+    refreshGeneration.current = generation;
+    setLoading(true);
+    portalClient.snapshot(forceRefresh)
+      .then((result) => {
+        setSnapshot((current) => ({ ...current, ...result.data }));
+        setFailures(result.failures);
+      })
+      .catch(() => {
+        setFailures((current) => [
+          ...current.filter(
+            (item) => item.error?.code !== "gateway_snapshot_failed",
+          ),
+          portalFailureEnvelope(
+            "status",
+            "gateway_snapshot_failed",
+            "The browser could not complete the bounded Runtime snapshot. Previously verified module state remains visible.",
+            "Unknown",
+          ),
+        ]);
+      })
+      .finally(() => {
+        if (refreshGeneration.current === generation) setLoading(false);
+      });
+  };
   function focusPlatformSearch() {
     if (window.matchMedia("(max-width: 820px)").matches) setMenuOpen(true);
     window.requestAnimationFrame(() => document.getElementById("platform-search")?.focus());
@@ -297,17 +444,24 @@ export function App() {
   useEffect(() => {
     let active = true;
     operationalSessionClient.status()
-      .then((session) => { operationalSessionClient.use(session); if (active) { setHostedOperationalConfigured(true); setOperationalSession(session); } })
-      .catch(() => { operationalSessionClient.use({ authenticated: false }); if (active) { setHostedOperationalConfigured(false); setOperationalSession({ authenticated: false }); } })
+      .then((session) => {
+        if (!active) return;
+        operationalSessionClient.use(session);
+        setHostedOperationalConfigured(true);
+        setOperationalSession(session);
+      })
+      .catch(() => {
+        if (!active) return;
+        operationalSessionClient.use({ authenticated: false });
+        setHostedOperationalConfigured(false);
+        setOperationalSession({ authenticated: false });
+      })
       .finally(() => { if (active) setSessionBootstrapComplete(true); });
     return () => { active = false; };
   }, []);
   useEffect(() => {
     if (!operationalSession.authenticated) {
       setOperationalReadiness(null);
-      setOperationalReadinessFailure("");
-      setClientCapabilityContract(null);
-      setClientCapabilityFailure("");
       return;
     }
     let mounted = true;
@@ -315,20 +469,9 @@ export function App() {
       void localNexusClient.capabilityReadiness().then((value) => {
         if (!mounted) return;
         setOperationalReadiness(record(value));
-        setOperationalReadinessFailure("");
-      }).catch((caught) => {
+      }).catch(() => {
         if (!mounted) return;
         setOperationalReadiness(null);
-        setOperationalReadinessFailure(caught instanceof Error ? caught.message : "Capability-specific Runtime readiness is unavailable.");
-      });
-      void localNexusClient.clientCapabilities().then((value) => {
-        if (!mounted) return;
-        setClientCapabilityContract(value);
-        setClientCapabilityFailure("");
-      }).catch((caught) => {
-        if (!mounted) return;
-        setClientCapabilityContract(null);
-        setClientCapabilityFailure(caught instanceof Error ? caught.message : "The Runtime client capability contract is unavailable.");
       });
     };
     void verify();
@@ -345,6 +488,7 @@ export function App() {
       if (document.visibilityState !== "visible") return;
       operationalSessionClient.status().then((session) => {
         operationalSessionClient.use(session);
+        setHostedOperationalConfigured(true);
         setOperationalSession(session);
       }).catch(invalidate);
     };
@@ -391,6 +535,7 @@ export function App() {
 
   const state = connectionState(snapshot, failures, loading);
   const connectionTone = nexusTone(state);
+  const primaryFailure = selectPortalPrimaryFailure(failures, state);
   const current = AREAS.find((area) => area.id === active) ?? AREAS[0];
   const status = record(snapshot.status?.data);
   const versionData = record(snapshot.version?.data);
@@ -402,12 +547,66 @@ export function App() {
   const eox = snapshot.eox?.data as EoxAssessment | null | undefined;
   const proofId = list(snapshot.proofs?.data).map((proof) => proof.id).find(Boolean);
   const receiptId = list(snapshot.receipts?.data).map((receipt) => receipt.id).find(Boolean);
-  const hostedCapability = capabilityStateView(
-    operationalReadiness,
-    clientCapabilityContract,
-    active,
-    operationalReadinessFailure,
-    clientCapabilityFailure,
+  const capabilityRegistryEnvelope = snapshot["capability-registry"];
+  const capabilityRegistry = asCapabilityRegistryProjection(capabilityRegistryEnvelope?.data);
+  const capabilityRegistryFailure = capabilityRegistryEnvelope?.error?.message
+    ?? (capabilityRegistryEnvelope && !capabilityRegistry ? "The canonical Capability Registry projection failed validation." : "");
+  const currentRuntimeEvidenceVerified = surfaceHasVerifiedRuntimeEvidence(
+    current,
+    snapshot,
+    capabilityRegistry,
+  );
+  const hostedActionAccess = {
+    hosted: operationalSessionClient.mode() === "hosted",
+    authenticated: operationalSession.authenticated,
+    scopes: operationalSession.scopes,
+  };
+  const copilotInteractionAction = hostedSessionActionAvailability(
+    canonicalActionAvailability(
+      capabilityRegistry,
+      PORTAL_CANONICAL_ACTIONS.copilotInteractionStart,
+      capabilityRegistryFailure,
+    ),
+    hostedActionAccess,
+    "operations:write",
+  );
+  const realtimeVoiceAction = hostedSessionActionAvailability(
+    canonicalActionAvailability(
+      capabilityRegistry,
+      PORTAL_CANONICAL_ACTIONS.realtimeVoiceCall,
+      capabilityRegistryFailure,
+    ),
+    hostedActionAccess,
+    "operations:write",
+  );
+  const voiceOperatorTranscriptAction = hostedSessionActionAvailability(
+    canonicalActionAvailability(
+      capabilityRegistry,
+      PORTAL_CANONICAL_ACTIONS.voiceOperatorTranscript,
+      capabilityRegistryFailure,
+    ),
+    hostedActionAccess,
+    "operations:read",
+  );
+  const registryRailGroups = RAIL_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.map((item) => {
+      const surface = AREAS.find((candidate) => candidate.id === item.id) ?? AREAS[0];
+      return {
+        ...item,
+        live: ["functional", "read_only"].includes(surface.clients.web.state)
+          && surfaceCapabilityStateView(
+            capabilityRegistry,
+            surface,
+            capabilityRegistryFailure,
+          ).state === "live",
+      };
+    }),
+  }));
+  const hostedCapability = surfaceCapabilityStateView(
+    capabilityRegistry,
+    current,
+    capabilityRegistryFailure,
   );
   const activityTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const sidePanel = copilotOpen ? "copilot" : inspectorOpen ? "inspector" : "closed";
@@ -421,7 +620,7 @@ export function App() {
     setMenuOpen(false);
     window.scrollTo({ top: 0 });
   }
-  function openReplay(missionId?: string) { setReplayMissionId(missionId); navigate("replay"); }
+  function openReplay(target: OperationalReplayTarget) { setReplayTarget(target); navigate("replay"); }
   function toggleCopilot() {
     const next = !copilotOpen;
     setCopilotOpen(next);
@@ -444,13 +643,87 @@ export function App() {
 
   function acceptOperationalSession(session: OperationalSession) {
     operationalSessionClient.use(session);
+    setHostedOperationalConfigured(true);
     setOperationalSession(session);
     refresh(true);
   }
 
+  const webModuleComponents: Record<string, ReactNode> = {
+    "web.dashboard.command-center": <HostedCommandDirectory onAsk={() => { setCopilotOpen(true); setInspectorOpen(false); }} onNavigate={navigate} />,
+    "web.dashboard.executive-status": <ExecutiveStatusBar snapshot={snapshot} connectionState={state} />,
+    "web.dashboard.operations-center": <OperationsCenter assessment={eox ?? null} />,
+    "web.missions.dashboard": <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
+    "web.missions.runtime-evidence": <MissionRuntimeEvidence />,
+    "web.missions.step-execution": <MissionStepExecutionPosture readiness={operationalReadiness} />,
+    "web.replay.timeline": <OperationalReplay requestedTarget={replayTarget} />,
+    "web.conclave.workspace": <ConclaveWorkspace onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
+    "web.knowledge.workspace": <KnowledgeWorkspace snapshot={snapshot} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
+    "web.edge.monitoring": <EdgeRuntime snapshot={snapshot} />,
+    "web.edge.diagnostics-topology": <RuntimeTopology snapshot={snapshot} />,
+    "web.edge.admission-request": <EdgeAdmissionWorkspace capabilityRegistry={capabilityRegistry} onFleetRefresh={() => refresh(true)} />,
+    "web.mission-control.operations-workspace": <OperationsWorkspace onReplay={openReplay} session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} capabilityRegistry={capabilityRegistry} />,
+    "web.mission-control.mission-dashboard": <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
+    "web.mission-control.runtime-missions": <RuntimeMissionInventory />,
+    "web.mission-control.functional-readiness": <FunctionalReadinessDiagnostics readiness={operationalReadiness} />,
+    "web.settings.runtime-information": <RuntimeInformation snapshot={snapshot} connectionState={state} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />,
+    "web.settings.runtime-health": <RuntimeHealth snapshot={snapshot} connectionState={state} />,
+    "web.settings.appearance": <AppearanceWorkspace appearance={appearance} />,
+    "web.settings.registered-executive": <RegisteredExecutiveSession />,
+    "web.settings.canonical-execution": <CanonicalExecutionSpine capabilityRegistry={capabilityRegistry} />,
+    "web.documents.intake": <DocumentIntake capabilityRegistry={capabilityRegistry} session={operationalSession} />,
+    "web.projects.planning": <ProjectStudio onReplay={openReplay} capabilityRegistry={capabilityRegistry} session={operationalSession} />,
+    "web.providers.registry": <ProviderRegistry snapshot={snapshot} />,
+    "web.providers.truth-boundary": <ProviderTruth snapshot={snapshot} />,
+    "web.governance.readiness": <GovernanceReadinessDiagnostics />,
+    "web.governance.authority": <AuthorityReadinessDiagnostics />,
+    "web.connectors.registry": <ConnectorDiagnosticsWorkspace envelope={snapshot.connectors} />,
+    "web.capability-ledger.registry": <CapabilityRegistryWorkspace projection={capabilityRegistry} gatewayStale={capabilityRegistryEnvelope?.gateway.cache.stale === true} />,
+    "web.evidence.proofs": <ProofReferences snapshot={snapshot} />,
+    "web.evidence.execution-receipts": <ExecutionReceipts snapshot={snapshot} />,
+    "web.evidence.release-provenance": <ReleaseProvenance runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />,
+    "web.receipts.runtime-workspace": <ExecutionReceipts snapshot={snapshot} />,
+    "web.receipts.execution-receipts": <ExecutionReceipts snapshot={snapshot} />,
+    "web.receipts.proofs": <ProofReferences snapshot={snapshot} />,
+    "web.receipts.release-provenance": <ReleaseProvenance runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />,
+    "web.voice.operator": <VoiceWorkspace onReplay={openReplay} realtimeAction={realtimeVoiceAction} textAction={voiceOperatorTranscriptAction} />,
+    "web.voice.runtime-status": <VoiceRuntimeStatus />,
+    "web.executive-views.operations-center": <OperationsCenter assessment={eox ?? null} />,
+    "web.work-sessions.workspace": <WorkSessionsWorkspace onReplay={openReplay} capabilityRegistry={capabilityRegistry} session={operationalSession} />,
+  };
+  assertNexusModuleComponentMap("web", webModuleComponents);
+
+  function renderWebModule(module: NexusModuleDefinition) {
+    const projection = module.clients.web;
+    if (!projection.componentKey || ["local_only", "unavailable"].includes(projection.state)) {
+      return <ModuleAvailabilityBoundary key={module.moduleId} module={module} client="web" />;
+    }
+    const component = webModuleComponents[projection.componentKey];
+    const shouldGateCapability = module.capabilityIds.length > 0
+      && (current.webOperationalSessionRequired || current.webHostedContract);
+    const content = shouldGateCapability
+      ? <HostedCapabilityBoundary
+          configured={hostedOperationalConfigured}
+          title={module.label}
+          capability={capabilityStateView(
+            capabilityRegistry,
+            module.capabilityIds,
+            capabilityRegistryFailure,
+            MODULE_MOUNT_ACTION_REQUIREMENTS[module.moduleId] ?? [],
+          )}
+        >{component}</HostedCapabilityBoundary>
+      : component;
+    return <div
+      className="nexus-module-slot"
+      data-module-id={module.moduleId}
+      data-module-state={projection.state}
+      key={module.moduleId}
+    >{content}</div>;
+  }
+
   const requiresOperationalSession = OPERATIONAL_AREAS.has(active) || (hostedOperationalConfigured && HOSTED_CONTRACT_AREAS.has(active));
   const showsHostedContext = operationalSession.authenticated && (OPERATIONAL_AREAS.has(active) || HOSTED_CONTRACT_AREAS.has(active));
-  const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length) ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section> : requiresOperationalSession && !operationalSession.authenticated ? <OperationalAccessGate workspace={current.label} onAuthenticated={acceptOperationalSession} /> : <>
+  const renderedModules = current.modules.map(renderWebModule);
+  const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length) ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section> : ["local_only", "unavailable"].includes(current.clients.web.state) ? <SurfaceAvailabilityBoundary surface={current} /> : requiresOperationalSession && !operationalSession.authenticated ? <OperationalAccessGate workspace={current.label} onAuthenticated={acceptOperationalSession} /> : <>
     {showsHostedContext && <section className="hosted-operational-context" aria-label="Authenticated hosted operational context">
       <article><span>Gateway transport</span><StatusPill value={state} /></article>
       <article><span>Capability state</span><StatusPill value={hostedCapability.state} /></article>
@@ -459,19 +732,7 @@ export function App() {
       <article><span>Workspace</span><strong>{operationalSession.workspaceId ?? "Unavailable"}</strong></article>
       <article><span>Session expires</span><strong>{operationalSession.expiresAt ? new Date(operationalSession.expiresAt).toLocaleString() : "Unavailable"}</strong></article>
     </section>}
-    {active === "dashboard" && <><ExecutiveStatusBar snapshot={snapshot} connectionState={state} /><OperationsCenter assessment={eox ?? null} /></>}
-    {active === "missions" && <MissionDashboard onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} />}
-    {active === "replay" && <OperationalReplay requestedMissionId={replayMissionId} />}
-    {active === "conclave" && <ConclaveWorkspace readiness={operationalReadiness} session={operationalSession} />}
-    {active === "knowledge" && <KnowledgeWorkspace snapshot={snapshot} session={operationalSession} />}
-    {active === "edge" && <><EdgeRuntime snapshot={snapshot} /><RuntimeTopology snapshot={snapshot} /></>}
-    {active === "mission-control" && <OperationsWorkspace session={operationalSession} onSessionChange={acceptOperationalSession} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />}
-    {active === "settings" && <div className="settings-workspaces"><AppearanceWorkspace appearance={appearance} /><RuntimeInformation snapshot={snapshot} connectionState={state} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} /><RuntimeHealth snapshot={snapshot} connectionState={state} /></div>}
-    {active === "documents" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Document Intelligence" capability={hostedCapability}><DocumentIntake /></HostedCapabilityBoundary>}
-    {active === "projects" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Projects" capability={hostedCapability}><ProjectStudio /></HostedCapabilityBoundary>}
-    {active === "voice" && <HostedCapabilityBoundary configured={hostedOperationalConfigured} title="Voice Operations" capability={hostedCapability}><VoiceWorkspace /></HostedCapabilityBoundary>}
-    {active === "providers" && <Providers snapshot={snapshot} />}
-    {active === "evidence" && <Evidence snapshot={snapshot} runtimeCommit={deployedRuntimeCommit} programAlphaCommit={deployedProgramAlphaCommit} />}
+    {active === "settings" ? <div className="settings-workspaces">{renderedModules}</div> : renderedModules}
   </>;
 
   return <div
@@ -488,12 +749,14 @@ export function App() {
       connectionLabel={state}
       connectionTone={connectionTone}
       alertCount={failures.length}
+      colorMode={appearance.settings.colorMode}
+      onColorModeChange={(colorMode) => appearance.updateSettings({ colorMode })}
       onNavigate={(id) => navigate(id as AreaId)}
       onSearch={focusPlatformSearch}
     />
     <div className="nx-app-shell__body">
       <NexusPlatformRail
-        groups={RAIL_GROUPS}
+        groups={registryRailGroups}
         active={active}
         open={menuOpen}
         query={query}
@@ -515,13 +778,13 @@ export function App() {
           onToggleCopilot={toggleCopilot}
           onToggleInspector={toggleInspector}
         />
-        {failures.length > 0 && <section className="nx-runtime-alert" role="alert" data-tone={connectionTone}><Activity size={17} /><div><strong>{state}</strong><span>{failures[0]?.error?.message ?? "One or more Runtime signals are unavailable."}</span></div></section>}
+        {failures.length > 0 && <section className="nx-runtime-alert" role="alert" data-tone={connectionTone}><Activity size={17} /><div><strong>{state}</strong><span>{primaryFailure?.error?.message ?? "One or more Runtime signals are unavailable."}</span></div></section>}
         <main id="main-content" className="nx-primary-workspace">
           <NexusWorkspaceFrame
             eyebrow={current.group === "Platform" ? "Hosted Experience Gateway" : "Platform capability"}
             title={current.label}
             description={current.detail}
-            icon={current.icon}
+            icon={current.iconComponent}
             connectionLabel={state}
             connectionTone={connectionTone}
           >{content}</NexusWorkspaceFrame>
@@ -534,7 +797,7 @@ export function App() {
       {inspectorOpen && <NexusContextInspector
         featureLabel={current.label}
         routePath={AREA_PATHS[active]}
-        sourceClass="runtime_evidence"
+        sourceClass={nexusSurfaceSourceClass(current, "web", currentRuntimeEvidenceVerified)}
         connectionLabel={state}
         connectionTone={connectionTone}
         environment={environment}
@@ -546,10 +809,13 @@ export function App() {
         onClose={() => setInspectorOpen(false)}
       />}
       <NexusCopilot
-        activeArea={PLATFORM_TO_COPILOT[active]}
+        activeArea={PLATFORM_TO_COPILOT[active] ?? "center"}
         activeLabel={current.label}
         runtimeState={state}
         onNavigate={(area) => navigate(COPILOT_TO_PLATFORM[area])}
+        interactionAction={copilotInteractionAction}
+        realtimeAction={realtimeVoiceAction}
+        textAction={voiceOperatorTranscriptAction}
         open={copilotOpen}
         expanded={copilotExpanded}
         onOpenChange={setCopilotPanelOpen}

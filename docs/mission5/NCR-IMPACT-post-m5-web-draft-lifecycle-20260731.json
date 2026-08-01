@@ -1,0 +1,36 @@
+{
+  "impact_id": "NCR-IMPACT-post-m5-web-draft-lifecycle-20260731",
+  "artifact_id": "nexus.experience.post-m5-draft-lifecycle-hotfix",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0024@1",
+      "NCR-CON-0027@1",
+      "NCR-CON-0034@1",
+      "NCR-ARC-0010@1",
+      "NCR-ARC-0019@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:673da593e0b248552263a0536892465c4219d829553ddd95818c79bc8e360017"
+  },
+  "disposition": "no_constitutional_change",
+  "rationale": "This additive Experience repair consumes transient operational drafts after their action-specific gate admits submission, keeps project and workspace selectors intact, and leaves durable request, Mission, Replay, proof, receipt, and history records with their canonical Runtime owners. It removes typed-form rehydration without deleting or weakening governed records, idempotency, Authority checks, Evidence boundaries, or cross-client contracts.",
+  "evidence_references": [
+    "command:node --test tests/prompt-draft-lifecycle.test.mjs tests/document-intake-result.test.mjs tests/conclave-request-identity.test.mjs tests/executive-ui.test.mjs tests/mission3-admission.test.mjs (56 passed; 0 failed)",
+    "command:npm run build (TypeScript and Vite production build passed; 1632 modules transformed)",
+    "command:npm run verify:build (hashed assets present; secretValuesExposed=false)",
+    "path:src/components/ConclaveWorkspace.tsx",
+    "path:src/components/DocumentIntake.tsx",
+    "path:src/components/MissionDashboard.tsx",
+    "path:src/components/OperationsWorkspace.tsx",
+    "path:src/components/ProjectStudio.tsx",
+    "path:src/components/VoiceWorkspace.tsx",
+    "path:src/components/WorkSessionsWorkspace.tsx",
+    "rollback:additively revert only the draft lifecycle source commit; retain Runtime records and receipts"
+  ],
+  "conflicts": [],
+  "recorded_by": "NEXUS Engineering",
+  "recorded_at": "2026-07-31T22:50:13Z"
+}

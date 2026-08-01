@@ -10,13 +10,26 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
-import { localNexusClient, type OperationalSession } from "../lib/local-client";
-import type { RuntimeSnapshot } from "../lib/types";
+import {
+  localNexusClient,
+  operationalSessionClient,
+  type OperationalSession,
+} from "../lib/local-client";
+import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import {
+  beginPrivateDraftAttempt,
+  clearPrivateDraftAfterSuccess,
+  retainPrivateDraftAfterFailure,
+  snapshotPrivateDraftOperation,
+  type PrivateDraftOperation,
+} from "../lib/private-draft-operation";
+import type { CapabilityRegistryProjection, RuntimeSnapshot } from "../lib/types";
 import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
 
 type RuntimeRecord = Record<string, unknown>;
+type PendingKnowledgeIntake = PrivateDraftOperation<Parameters<typeof localNexusClient.knowledgeIntake>[0]>;
 type SourceState = "loading" | "available" | "empty" | "unavailable";
 type KnowledgeSources = {
   readiness: RuntimeRecord | null;
@@ -106,9 +119,11 @@ function ReadinessRecord({ readiness }: { readiness: RuntimeRecord | null }) {
 export function KnowledgeWorkspace({
   snapshot,
   session = { authenticated: false },
+  capabilityRegistry = null,
 }: {
   snapshot?: RuntimeSnapshot;
   session?: OperationalSession;
+  capabilityRegistry?: CapabilityRegistryProjection | null;
 }) {
   const [sources, setSources] = useState<KnowledgeSources>(EMPTY_SOURCES);
   const [states, setStates] = useState<Record<keyof KnowledgeSources, SourceState>>({
@@ -137,6 +152,8 @@ export function KnowledgeWorkspace({
   const [intakeSource, setIntakeSource] = useState<"model_native" | "platform_knowledge" | "tenant_knowledge" | "retrieved_evidence" | "live_external_source" | "runtime_evidence">("runtime_evidence");
   const [completeIntakeTask, setCompleteIntakeTask] = useState(false);
   const [expectedDeployedCommit, setExpectedDeployedCommit] = useState("");
+  const [pendingBaseline, setPendingBaseline] = useState<PrivateDraftOperation<Parameters<typeof localNexusClient.establishRuntimeBaseline>[0]> | null>(null);
+  const [pendingIntake, setPendingIntake] = useState<PendingKnowledgeIntake | null>(null);
   const [busy, setBusy] = useState<"" | "intake" | "baseline" | "candidate" | "promotion">("");
   const [errors, setErrors] = useState<string[]>([]);
   const [operationResult, setOperationResult] = useState<RuntimeRecord | null>(null);
@@ -306,21 +323,32 @@ export function KnowledgeWorkspace({
     [intakeMission],
   );
   const runtimeConnection = snapshot?.status?.gateway.connectionState ?? "Unavailable";
-  const capabilityRecords = rows(sources.readiness, ["capabilities", "items", "records"]);
-  const actionGate = (capabilityId: string, scope: string) => {
-    const capability = capabilityRecords.find((item) => identifier(item, ["capabilityId", "capability_id", "id"]) === capabilityId);
-    const available = stateOf(capability ?? {}, "unavailable").toLowerCase() === "available";
-    const scoped = session.scopes?.includes(scope) === true;
-    return {
-      allowed: available && scoped,
-      reason: !available
-        ? reasonsOf(capability ?? {}, `${capabilityId} capability readiness is unavailable.`)
-        : scoped ? `${capabilityId} and ${scope} are available.` : `The hosted session lacks ${scope}.`,
-    };
+  const hostedAccess = {
+    hosted: operationalSessionClient.mode() === "hosted",
+    authenticated: session.authenticated,
+    scopes: session.scopes,
   };
-  const intakeGate = actionGate("knowledge_intake", "evidence:write");
-  const acquisitionGate = actionGate("knowledge_acquisition", "operations:write");
-  const promotionGate = actionGate("knowledge_promotion", "knowledge:promote");
+  const actionGate = (
+    capabilityId: string,
+    pathTemplate: string,
+    scope: string,
+  ) => {
+    const action = canonicalHostedControlAvailability(
+      capabilityRegistry,
+      { capabilityId, method: "POST", pathTemplate },
+      hostedAccess,
+      scope,
+    );
+    return { allowed: action.available, reason: action.reason };
+  };
+  const intakeGate = actionGate("knowledge_intake", "/knowledge/intake", "evidence:write");
+  const baselineGate = actionGate("knowledge_acquisition", "/runtime/baselines", "operations:write");
+  const candidateGate = actionGate(
+    "knowledge_promotion",
+    "/knowledge/acquisitions/{mission_id}/promotion-candidates",
+    "operations:write",
+  );
+  const promotionGate = actionGate("knowledge_promotion", "/knowledge/promotions", "knowledge:promote");
 
   useEffect(() => {
     setIntakeTaskId((current) => current && intakeTasks.some((task) => identifier(task, ["taskId", "task_id", "id"]) === current)
@@ -330,51 +358,73 @@ export function KnowledgeWorkspace({
 
   async function submitIntake() {
     if (!intakeGate.allowed) { setErrors([intakeGate.reason]); return; }
-    const missionId = identifier(intakeMission ?? {}, ["missionId", "mission_id", "id"]);
-    const confidence = Number(intakeConfidence);
-    if (!missionId || !intakeTaskId || !intakeOrigin.trim() || !intakeClaim.trim() || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-      setErrors(["Select a mission task and provide a valid origin, factual claim, and confidence between zero and one."]);
-      return;
-    }
-    setBusy("intake"); setErrors([]); setOperationResult(null);
-    try {
-      const result = await localNexusClient.knowledgeIntake({
-        missionId,
-        taskId: intakeTaskId,
-        origin: intakeOrigin.trim(),
-        sourceClassification: intakeSource,
-        confidence,
-        claim: intakeClaim.trim(),
-        supportingArtifacts: [],
-        relationships: [],
-        operationalContext: {},
-        completeTask: completeIntakeTask,
-      }, `knowledge-intake-${globalThis.crypto.randomUUID()}`);
-      setOperationResult(result);
+    let staged = pendingIntake;
+    if (!staged) {
+      const missionId = identifier(intakeMission ?? {}, ["missionId", "mission_id", "id"]);
+      const confidence = Number(intakeConfidence);
+      if (!missionId || !intakeTaskId || !intakeOrigin.trim() || !intakeClaim.trim() || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+        setErrors(["Select a mission task and provide a valid origin, factual claim, and confidence between zero and one."]);
+        return;
+      }
+      staged = snapshotPrivateDraftOperation(
+        {
+          missionId,
+          taskId: intakeTaskId,
+          origin: intakeOrigin.trim(),
+          sourceClassification: intakeSource,
+          confidence,
+          claim: intakeClaim.trim(),
+          supportingArtifacts: [],
+          relationships: [],
+          operationalContext: {},
+          completeTask: completeIntakeTask,
+        },
+        `knowledge-intake-${globalThis.crypto.randomUUID()}`,
+      );
+      setPendingIntake(staged);
       setIntakeOrigin("");
       setIntakeClaim("");
       setCompleteIntakeTask(false);
+    }
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingIntake(operation);
+    setBusy("intake"); setErrors([]); setOperationResult(null);
+    try {
+      const result = await localNexusClient.knowledgeIntake(operation.payload, operation.idempotencyKey);
+      setOperationResult(result);
+      setPendingIntake(clearPrivateDraftAfterSuccess());
       await refresh();
     } catch (caught) {
+      setPendingIntake(retainPrivateDraftAfterFailure(operation));
       setErrors([caught instanceof Error ? caught.message : "Knowledge intake failed safely."]);
     } finally { setBusy(""); }
   }
 
   async function establishBaseline() {
-    if (!acquisitionGate.allowed) { setErrors([acquisitionGate.reason]); return; }
+    if (!baselineGate.allowed) { setErrors([baselineGate.reason]); return; }
+    const staged = pendingBaseline ?? snapshotPrivateDraftOperation(
+      expectedDeployedCommit.trim()
+        ? { expectedDeployedCommit: expectedDeployedCommit.trim() }
+        : {},
+      `baseline-${globalThis.crypto.randomUUID()}`,
+    );
+    if (!pendingBaseline) setExpectedDeployedCommit("");
+    const operation = beginPrivateDraftAttempt(staged);
+    setPendingBaseline(operation);
     setBusy("baseline"); setErrors([]); setOperationResult(null);
     try {
-      const payload = expectedDeployedCommit.trim() ? { expectedDeployedCommit: expectedDeployedCommit.trim() } : {};
-      const result = await localNexusClient.establishRuntimeBaseline(payload, `baseline-${globalThis.crypto.randomUUID()}`);
+      const result = await localNexusClient.establishRuntimeBaseline(operation.payload, operation.idempotencyKey);
+      setPendingBaseline(clearPrivateDraftAfterSuccess());
       setOperationResult(result);
       await refresh();
     } catch (caught) {
+      setPendingBaseline(retainPrivateDraftAfterFailure(operation));
       setErrors([caught instanceof Error ? caught.message : "Runtime baseline creation failed safely."]);
     } finally { setBusy(""); }
   }
 
   async function createPromotionCandidate() {
-    if (!acquisitionGate.allowed) { setErrors([acquisitionGate.reason]); return; }
+    if (!candidateGate.allowed) { setErrors([candidateGate.reason]); return; }
     if (!selectedAcquisitionRecord) return;
     const missionId = identifier(selectedAcquisitionRecord, ["missionId", "mission_id", "id"]);
     if (!missionId) return;
@@ -424,14 +474,14 @@ export function KnowledgeWorkspace({
     </DataPanel>
     <DataPanel eyebrow="Knowledge intake" title="Admit factual Evidence to a Mission task" icon={<BookOpen size={18} />}>
       <p className="boundary-note">Intake adds an evidence-backed record to the temporary Mission Store. It does not promote anything into permanent Knowledge Store.</p>
-      <label className="operation-field"><span>Acquisition mission</span><select value={selectedAcquisition} onChange={(event) => setSelectedAcquisition(event.target.value)} disabled={!sources.acquisitions.length}>{sources.acquisitions.length ? sources.acquisitions.map((item, index) => { const id = identifier(item, ["missionId", "mission_id", "id"], `mission-${index + 1}`); return <option key={id} value={id}>{text(item.title ?? item.objective, id)}</option>; }) : <option value="">No Mission Store record available</option>}</select></label>
-      <label className="operation-field"><span>Mission task</span><select value={intakeTaskId} onChange={(event) => setIntakeTaskId(event.target.value)} disabled={!intakeTasks.length}>{intakeTasks.length ? intakeTasks.map((task, index) => { const id = identifier(task, ["taskId", "task_id", "id"], `task-${index + 1}`); return <option key={id} value={id}>{text(task.objective ?? task.title, id)} · {stateOf(task, "unknown")}</option>; }) : <option value="">No task available for intake</option>}</select></label>
-      <label className="operation-field"><span>Evidence origin</span><input value={intakeOrigin} onChange={(event) => setIntakeOrigin(event.target.value)} placeholder="runtime://collector/source or governed source locator" autoComplete="off" /></label>
-      <label className="operation-field"><span>Source classification</span><select value={intakeSource} onChange={(event) => setIntakeSource(event.target.value as typeof intakeSource)}><option value="runtime_evidence">Runtime Evidence</option><option value="live_external_source">Live external source</option><option value="retrieved_evidence">Retrieved Evidence</option><option value="tenant_knowledge">Tenant knowledge</option><option value="platform_knowledge">Platform knowledge</option><option value="model_native">Model-native candidate</option></select></label>
-      <label className="operation-field"><span>Factual claim</span><textarea value={intakeClaim} onChange={(event) => setIntakeClaim(event.target.value)} placeholder="Record the observed claim without adding Authority or approval assertions." /></label>
-      <label className="operation-field"><span>Evidence confidence (0–1)</span><input type="number" min="0" max="1" step="0.01" value={intakeConfidence} onChange={(event) => setIntakeConfidence(event.target.value)} /></label>
-      <label className="operation-field"><span><input type="checkbox" checked={completeIntakeTask} onChange={(event) => setCompleteIntakeTask(event.target.checked)} /> Mark task complete only if this Evidence satisfies its recorded criterion</span></label>
-      <button className="nx-action" onClick={() => void submitIntake()} disabled={!selectedAcquisition || !intakeTaskId || !intakeOrigin.trim() || !intakeClaim.trim() || Boolean(busy) || !intakeGate.allowed}><BookOpen size={14} />{busy === "intake" ? "Admitting Evidence…" : "Admit Evidence"}</button>
+      <label className="operation-field"><span>Acquisition mission</span><select value={selectedAcquisition} onChange={(event) => { setSelectedAcquisition(event.target.value); setPendingIntake(null); }} disabled={!sources.acquisitions.length}>{sources.acquisitions.length ? sources.acquisitions.map((item, index) => { const id = identifier(item, ["missionId", "mission_id", "id"], `mission-${index + 1}`); return <option key={id} value={id}>{text(item.title ?? item.objective, id)}</option>; }) : <option value="">No Mission Store record available</option>}</select></label>
+      <label className="operation-field"><span>Mission task</span><select value={intakeTaskId} onChange={(event) => { setIntakeTaskId(event.target.value); setPendingIntake(null); }} disabled={!intakeTasks.length}>{intakeTasks.length ? intakeTasks.map((task, index) => { const id = identifier(task, ["taskId", "task_id", "id"], `task-${index + 1}`); return <option key={id} value={id}>{text(task.objective ?? task.title, id)} · {stateOf(task, "unknown")}</option>; }) : <option value="">No task available for intake</option>}</select></label>
+      <label className="operation-field"><span>Evidence origin</span><input value={intakeOrigin} onChange={(event) => { setIntakeOrigin(event.target.value); setPendingIntake(null); }} placeholder="runtime://collector/source or governed source locator" autoComplete="off" /></label>
+      <label className="operation-field"><span>Source classification</span><select value={intakeSource} onChange={(event) => { setIntakeSource(event.target.value as typeof intakeSource); setPendingIntake(null); }}><option value="runtime_evidence">Runtime Evidence</option><option value="live_external_source">Live external source</option><option value="retrieved_evidence">Retrieved Evidence</option><option value="tenant_knowledge">Tenant knowledge</option><option value="platform_knowledge">Platform knowledge</option><option value="model_native">Model-native candidate</option></select></label>
+      <label className="operation-field"><span>Factual claim</span><textarea value={intakeClaim} onChange={(event) => { setIntakeClaim(event.target.value); setPendingIntake(null); }} placeholder="Record the observed claim without adding Authority or approval assertions." autoComplete="off" /></label>
+      <label className="operation-field"><span>Evidence confidence (0–1)</span><input type="number" min="0" max="1" step="0.01" value={intakeConfidence} onChange={(event) => { setIntakeConfidence(event.target.value); setPendingIntake(null); }} /></label>
+      <label className="operation-field"><span><input type="checkbox" checked={completeIntakeTask} onChange={(event) => { setCompleteIntakeTask(event.target.checked); setPendingIntake(null); }} /> Mark task complete only if this Evidence satisfies its recorded criterion</span></label>
+      <button className="nx-action" onClick={() => void submitIntake()} disabled={(!pendingIntake && (!selectedAcquisition || !intakeTaskId || !intakeOrigin.trim() || !intakeClaim.trim())) || Boolean(busy) || !intakeGate.allowed}><BookOpen size={14} />{busy === "intake" ? "Admitting Evidence…" : pendingIntake ? "Retry exact Evidence admission" : "Admit Evidence"}</button>
       <p className="boundary-note">Knowledge intake gate: {intakeGate.reason}</p>
       <p className="boundary-note">Mission detail source: {missionStoreDetail ? "Mission Store" : "unavailable"}. Acquisition detail source: {acquisitionDetail ? "Knowledge Acquisition" : "unavailable"}.</p>
     </DataPanel>
@@ -451,8 +501,8 @@ export function KnowledgeWorkspace({
           const id = identifier(item, ["missionId", "mission_id", "acquisitionId", "id"], `acquisition-${index + 1}`);
           return <label key={id} data-eligible="true"><input type="radio" name="knowledge-acquisition" checked={selectedAcquisition === id} onChange={() => setSelectedAcquisition(id)} /><span><strong>{text(item.title ?? item.objective ?? item.proposal, id)}</strong><small>{id} · version {text(item.version ?? item.missionVersion, "not supplied")} · {stateOf(item)}</small></span></label>;
         })}{states.acquisitions === "empty" && <EmptyRecord>No acquisition mission is eligible for candidate creation.</EmptyRecord>}</div>}
-        <button className="nx-action" onClick={() => void createPromotionCandidate()} disabled={!selectedAcquisitionRecord || Boolean(busy) || !acquisitionGate.allowed}><BookOpen size={14} />{busy === "candidate" ? "Validating mission…" : "Create promotion candidate"}</button>
-        <p className="boundary-note">Candidate creation gate: {acquisitionGate.reason}</p>
+        <button className="nx-action" onClick={() => void createPromotionCandidate()} disabled={!selectedAcquisitionRecord || Boolean(busy) || !candidateGate.allowed}><BookOpen size={14} />{busy === "candidate" ? "Validating mission…" : "Create promotion candidate"}</button>
+        <p className="boundary-note">Candidate creation gate: {candidateGate.reason}</p>
         <p className="boundary-note">The Runtime validates mission lifecycle, Evidence, confidence, contradiction state, lineage, and policy. The browser supplies only mission identity and an advisory expected version.</p>
       </DataPanel>
       <ArrowRight className="knowledge-flow__arrow" />
@@ -494,9 +544,9 @@ export function KnowledgeWorkspace({
         <p className="boundary-note">Promotion history is read from the Runtime. Mission completion never creates these records automatically.</p>
       </DataPanel>
       <DataPanel eyebrow="Runtime Baseline" title="Capture the deployed operational baseline" icon={<FileCheck2 size={18} />}>
-        <label className="operation-field"><span>Expected deployed commit (optional)</span><input value={expectedDeployedCommit} onChange={(event) => setExpectedDeployedCommit(event.target.value)} placeholder="Full source commit for compare-and-record" autoComplete="off" spellCheck={false} /></label>
-        <button className="nx-action" onClick={() => void establishBaseline()} disabled={Boolean(busy) || !acquisitionGate.allowed}><FileCheck2 size={14} />{busy === "baseline" ? "Recording Runtime baseline…" : "Record Runtime baseline"}</button>
-        <p className="boundary-note">Baseline gate: {acquisitionGate.reason}</p>
+        <label className="operation-field"><span>Expected deployed commit (optional)</span><input value={expectedDeployedCommit} onChange={(event) => { setExpectedDeployedCommit(event.target.value); setPendingBaseline(null); }} placeholder="Full source commit for compare-and-record" autoComplete="off" spellCheck={false} /></label>
+        <button className="nx-action" onClick={() => void establishBaseline()} disabled={Boolean(busy) || !baselineGate.allowed}><FileCheck2 size={14} />{busy === "baseline" ? "Recording Runtime baseline…" : pendingBaseline ? "Retry exact Runtime baseline" : "Record Runtime baseline"}</button>
+        <p className="boundary-note">Baseline gate: {baselineGate.reason}</p>
         <p className="boundary-note">The Runtime observes its own deployed identity, capability state, routes, missions, Replay, receipts, stores, and Edge posture. The browser may only provide an optional expected commit for mismatch detection.</p>
       </DataPanel>
     </div>

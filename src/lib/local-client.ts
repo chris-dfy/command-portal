@@ -1,3 +1,15 @@
+import {
+  createSerializedRefresh,
+  runBoundedTask,
+} from "./request-coordination.mjs";
+import type {
+  ConclaveEvidenceAdmissionRequest,
+  ConclavePredecessor,
+  ConclaveWorkspaceCreateRequest,
+} from "./conclave-request-identity";
+
+const CLIENT_READ_TIMEOUT_MS = 10_000;
+
 export type LocalEnvelope<T> = {
   ok: boolean;
   data: T | null;
@@ -118,9 +130,10 @@ export type VoiceRouteResult = {
 };
 
 export type ClientCapabilityContract = {
-  contractVersion: string;
-  inventoryScope: "operational_core_v1";
+  contractVersion: "1.1.0";
+  inventoryScope: "registered_runtime_operations_v1";
   completeNativeInventory: false;
+  surfaceInventoryOwnedByExperienceRegistry: true;
   runtimeOwner: "NEXUS Runtime";
   operationalBehaviorInClients: false;
   capabilities: Array<{
@@ -133,9 +146,29 @@ export type ClientCapabilityContract = {
     operations: Array<{ operationId: string; method: string; runtimePath: string; risk: string; approvalRequired: boolean; proofRequired: boolean; receiptRequired: boolean }>;
     limitations: string[];
   }>;
-  parity: { portableCapabilityCount: number; nexusCommandImplemented: number; nexusWebImplemented: number; driftCount: number; driftCapabilityIds: string[] };
-  capabilityStates?: Record<string, "available" | "unavailable">;
-  truth: { source: string; localRuntimeRequired: boolean; hostedExecutionAvailable: boolean; allHostedCapabilitiesAvailable: boolean; hostedExecutionMode: "single_workspace_alpha" | "disabled"; productionMultiTenantReady: false; remainingNativeSurfaces: string[]; secretValuesExposed: false };
+  parity: {
+    scope: "listed_portable_runtime_operations";
+    surfaceParityClaimed: false;
+    portableCapabilityCount: number;
+    nexusCommandImplemented: number;
+    nexusWebImplemented: number;
+    driftCount: number;
+    driftCapabilityIds: string[];
+  };
+  truth: {
+    source: string;
+    localRuntimeRequired: boolean;
+    hostedExecutionAvailable: boolean;
+    hostedExecutionMode: "single_workspace_alpha" | "disabled";
+    productionMultiTenantReady: false;
+    surfaceRegistry: {
+      registryId: "nexus.experience.surface-registry";
+      contractVersion: "1.0.0";
+      scope: "all_known_top_level_surfaces";
+      clientStateVocabulary: Array<"functional" | "read_only" | "local_only" | "unavailable">;
+    };
+    secretValuesExposed: false;
+  };
 };
 
 export type RuntimeCoordinationNode = {
@@ -325,11 +358,15 @@ export type ConclaveEvidence = {
 
 export type ConclaveWorkspaceRecord = {
   recordType: "nexus_conclave_workspace";
-  schemaVersion: string;
+  schemaVersion: "nexus.conclave-workspace@2.0.0";
   created: boolean;
+  workspaceVersion: string;
   workspaceId: string;
   missionId: string;
   proposal: string;
+  predecessor: ConclavePredecessor | null;
+  lifecyclePosture: "canonical_operational" | "legacy_read_only";
+  availableActions: Array<"run" | "restart_canonical">;
   status: string;
   operationalStatus: string;
   executionAuthorized: false;
@@ -344,9 +381,17 @@ export type ConclaveWorkspaceRecord = {
   tasks: ConclaveTask[];
   specialistRegistry: ConclaveSpecialist[];
   evidence: ConclaveEvidence[];
+  waitingTaskIds: string[];
   contradictions: Array<Record<string, unknown>>;
   executiveSummary: Record<string, unknown> | null;
   completionReceipt: Record<string, unknown> | null;
+  displayStatus: string;
+  reviewCompleted?: boolean;
+  reviewIntegrityVerified?: boolean;
+  terminalReceiptVerified?: boolean;
+  runRepeated?: boolean;
+  runReceipt?: Record<string, unknown> | null;
+  canonicalReview?: Record<string, unknown> | null;
   lifecycleReceipt: {
     receiptId: string;
     missionId: string;
@@ -380,7 +425,7 @@ export type ConclaveWorkspaceRecord = {
 
 export type ConclaveWorkspaceList = {
   recordType: "nexus_conclave_workspace_list";
-  schemaVersion: string;
+  schemaVersion: "nexus.conclave-workspace@2.0.0";
   workspaceCount: number;
   workspaces: ConclaveWorkspaceRecord[];
   scope: { tenantId: string; workspaceId: string };
@@ -390,20 +435,36 @@ export type ConclaveWorkspaceList = {
 
 async function request<T>(path: string, options: RequestInit = {}, idempotencyKey?: string): Promise<T> {
   const hosted = capabilityTransport.mode === "hosted";
-  const response = await fetch(`${hosted ? "/api/operations" : "/api/local"}${path}`, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.method === "POST" ? {
-        ...(hosted ? { "X-CSRF-Token": capabilityTransport.csrfToken } : {}),
-        ...(idempotencyKey || hosted ? { "Idempotency-Key": idempotencyKey ?? globalThis.crypto.randomUUID() } : {}),
-      } : {}),
-      ...(options.headers ?? {})
-    },
-    credentials: "same-origin"
-  });
-  const envelope = await response.json() as LocalEnvelope<T>;
+  const readOnly = !options.method || options.method === "GET";
+  const perform = async (signal?: AbortSignal) => {
+    const response = await fetch(`${hosted ? "/api/operations" : "/api/local"}${path}`, {
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.method === "POST" ? {
+          ...(hosted ? { "X-CSRF-Token": capabilityTransport.csrfToken } : {}),
+          ...(idempotencyKey || hosted ? { "Idempotency-Key": idempotencyKey ?? globalThis.crypto.randomUUID() } : {}),
+        } : {}),
+        ...(options.headers ?? {})
+      },
+      credentials: "same-origin",
+      ...(signal ? { signal } : {}),
+    });
+    return {
+      response,
+      envelope: await response.json() as LocalEnvelope<T>,
+    };
+  };
+  const { response, envelope } = readOnly
+    ? await runBoundedTask(
+      (signal) => perform(signal),
+      {
+        timeoutMs: CLIENT_READ_TIMEOUT_MS,
+        ...(options.signal ? { parentSignal: options.signal } : {}),
+      },
+    )
+    : await perform();
   if (!response.ok || !envelope.ok || envelope.data === null) {
     if (hosted && response.status === 401) window.dispatchEvent(new Event(OPERATIONAL_SESSION_INVALID_EVENT));
     const details = envelope.error?.details;
@@ -442,6 +503,254 @@ export type OperationalSession = {
   managed?: boolean;
 };
 
+const operationalSessionRecord = (
+  value: unknown,
+): Record<string, unknown> | null => (
+  value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+const boundedOperationalSessionString = (
+  value: unknown,
+  maximum = 191,
+): value is string => (
+  typeof value === "string"
+  && value.length > 0
+  && value.length <= maximum
+);
+const exactOperationalSessionKeys = (
+  record: Record<string, unknown>,
+  keys: readonly string[],
+) => (
+  Object.keys(record).length === keys.length
+  && keys.every((key) => key in record)
+);
+const AUTHENTICATED_OPERATIONAL_SESSION_KEYS = [
+  "authenticated",
+  "userId",
+  "tenantId",
+  "workspaceId",
+  "role",
+  "scopes",
+  "expiresAt",
+  "csrfToken",
+  "connectionMode",
+  "principalType",
+  "accessBasis",
+  "managed",
+] as const;
+
+export function asOperationalSession(
+  value: unknown,
+  now = Date.now(),
+): OperationalSession | null {
+  const session = operationalSessionRecord(value);
+  if (!session || typeof session.authenticated !== "boolean") return null;
+  if (!session.authenticated) {
+    return exactOperationalSessionKeys(session, ["authenticated"])
+      ? { authenticated: false }
+      : null;
+  }
+  if (
+    !exactOperationalSessionKeys(
+      session,
+      AUTHENTICATED_OPERATIONAL_SESSION_KEYS,
+    )
+    || !boundedOperationalSessionString(session.userId)
+    || !boundedOperationalSessionString(session.tenantId)
+    || !boundedOperationalSessionString(session.workspaceId)
+    || !boundedOperationalSessionString(session.role)
+    || !Array.isArray(session.scopes)
+    || session.scopes.length === 0
+    || session.scopes.length > 64
+    || session.scopes.some(
+      (scope) => !boundedOperationalSessionString(scope),
+    )
+    || new Set(session.scopes).size !== session.scopes.length
+    || !boundedOperationalSessionString(session.expiresAt)
+    || !Number.isFinite(Date.parse(session.expiresAt))
+    || Date.parse(session.expiresAt) <= now
+    || !boundedOperationalSessionString(session.csrfToken, 512)
+    || !["access_key", "automatic_private_workspace"].includes(
+      String(session.connectionMode),
+    )
+    || !["named_operator", "workspace_service"].includes(
+      String(session.principalType),
+    )
+    || !["operator_access_key", "replit_private_deployment"].includes(
+      String(session.accessBasis),
+    )
+    || typeof session.managed !== "boolean"
+  ) {
+    return null;
+  }
+  const automatic = session.connectionMode === "automatic_private_workspace";
+  if (
+    (automatic && (
+      session.principalType !== "workspace_service"
+      || session.accessBasis !== "replit_private_deployment"
+      || session.managed !== true
+    ))
+    || (!automatic && (
+      session.principalType !== "named_operator"
+      || session.accessBasis !== "operator_access_key"
+      || session.managed !== false
+    ))
+  ) {
+    return null;
+  }
+  return session as OperationalSession;
+}
+
+export type RegisteredExecutiveSessionRecord = {
+  recordType: "nexus_registered_executive_session";
+  schemaVersion: "nexus.registered-executive-session@1.0.0";
+  sessionId: string;
+  state: "active" | "revoked";
+  humanIdentity: {
+    registrationId: string;
+    principalId: string;
+    principalType: "registered_human_executive";
+    provider: "replit-auth";
+    providerIssuer: string;
+    providerSubjectBinding: "server_verified_opaque_subject_to_preprovisioned_registration";
+    providerSubjectClientControlled: false;
+    providerSubjectRetained: false;
+    providerAssertionVerified: true;
+    humanVerified: true;
+    authenticationMethods: string[];
+    authenticationTime: string;
+  };
+  serviceIdentity: {
+    principalId: string;
+    principalType: "experience_gateway_service";
+    authenticationMethod: "bound_service_credential";
+    authenticatedBeforeHumanAssertion: true;
+    distinctFromHumanPrincipal: true;
+  };
+  scopeBinding: {
+    tenantId: string;
+    workspaceId: string;
+    selectionOwner: "server_registration_and_runtime";
+    clientControlled: false;
+    exactRuntimeMatch: true;
+  };
+  role: "executive";
+  scopes: ["executive_session.read", "executive_session.revoke"];
+  policyBinding: {
+    policyId: "registered-executive-session-policy";
+    policyVersion: "1.0.0";
+    policyDigest: string;
+    state: "current_verified";
+    clientControlled: false;
+  };
+  assertionBinding: {
+    contractVersion: "nexus.registered-executive-session-assertion@1.0.0";
+    algorithm: "hmac-sha256";
+    keyId: string;
+    issuer: string;
+    audience: string;
+    serviceBindingId: string;
+    maximumLifetimeSeconds: 60;
+    singleUseRequired: true;
+    tokenRetained: false;
+    authorityClaimAccepted: false;
+  };
+  lifecycle: {
+    sessionVersion: number;
+    authenticatedAt: string;
+    issuedAt: string;
+    expiresAt: string;
+    revokedAt: string | null;
+    maximumSessionLifetimeSeconds: number;
+    bounded: true;
+  };
+  replayAndRevocation: {
+    assertionReplayState: "admitted_single_use";
+    sessionReplayRef: string;
+    revocationState: "active" | "revoked";
+    revocationCheckpoint: number;
+    durable: true;
+    rejectedRequestMutatedState: false;
+  };
+  authorityBoundary: {
+    authorityGranted: false;
+    actionAuthorized: false;
+    approvalRef: null;
+    decisionRef: null;
+    authorityGrantRefs: [];
+    missionExecutionAdmitted: false;
+    capabilityHealthGrantsAuthority: false;
+  };
+  receipt: {
+    receiptId: string;
+    receiptDigest: string;
+    accountabilityRef: string;
+    replayRef: string;
+    postconditionVerified: true;
+    credentialMaterialRetained: false;
+    rawProviderSubjectRetained: false;
+  };
+  secretValuesExposed: false;
+};
+
+export type RegisteredExecutiveSessionAbsent = {
+  authenticated: false;
+  runtimeVerified: false;
+  authorityGranted: false;
+  actionAuthorized: false;
+  decisionCreated: false;
+  missionCreated: false;
+  secretValuesExposed: false;
+};
+
+export type RegisteredExecutiveSessionEnvelope = {
+  ok: boolean;
+  session?: RegisteredExecutiveSessionRecord | RegisteredExecutiveSessionAbsent;
+  sessionAccess?: {
+    csrfToken: string;
+    cookieHttpOnly: true;
+    cookieSameSite: "Strict";
+    providerTokenRetained: false;
+    providerSubjectRetained: false;
+    authorityGranted: false;
+    actionAuthorized: false;
+    secretValuesExposed: false;
+  };
+  executiveSession: {
+    mode: "registered_executive_nonproduction";
+    route: string;
+    enabled: boolean;
+    provider: "replit-auth";
+    identityOwner: "server_owned_registration";
+    runtimeOwner: "NEXUS Runtime";
+    serviceIdentityDistinct: true;
+    tenantWorkspaceServerSelected: true;
+    authenticationGrantsAuthority: false;
+    sessionCreatesDecision: false;
+    sessionCreatesMission: false;
+    sessionAuthorizesAction: false;
+    productionMultiTenantReady: false;
+    runtimeVerified?: boolean;
+    lifecycleState?: "absent" | "active" | "revoked";
+    connectionState?: string;
+    secretValuesExposed: false;
+  };
+  error?: { code: string; message: string };
+};
+
+export class RegisteredExecutiveSessionRequestError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = "RegisteredExecutiveSessionRequestError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
 export type RuntimeBaselineRequest = {
   expectedDeployedCommit?: string;
 };
@@ -464,17 +773,64 @@ export type KnowledgeIntakeRequest = {
 };
 
 async function sessionRequest(path: string, options: RequestInit = {}): Promise<OperationalSession> {
-  const response = await fetch(`/api/session${path}`, {
-    ...options, credentials: "same-origin",
-    headers: { Accept: "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers ?? {}) }
-  });
-  const body = await response.json() as { ok: boolean; session?: OperationalSession; error?: { message?: string } };
-  if (!response.ok || !body.ok || !body.session) throw new Error(body.error?.message ?? `Operational session request failed (${response.status})`);
-  return body.session;
+  const readOnly = !options.method || options.method === "GET";
+  const perform = async (signal?: AbortSignal) => {
+    const response = await fetch(`/api/session${path}`, {
+      ...options, credentials: "same-origin",
+      headers: { Accept: "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers ?? {}) },
+      ...(signal ? { signal } : {}),
+    });
+    const parsed = await response.json() as unknown;
+    return {
+      response,
+      body: operationalSessionRecord(parsed),
+    };
+  };
+  const { response, body } = readOnly
+    ? await runBoundedTask(
+      (signal) => perform(signal),
+      {
+        timeoutMs: CLIENT_READ_TIMEOUT_MS,
+        ...(options.signal ? { parentSignal: options.signal } : {}),
+      },
+    )
+    : await perform();
+  const truth = operationalSessionRecord(body?.truth);
+  const error = operationalSessionRecord(body?.error);
+  const session = asOperationalSession(body?.session);
+  const validTruth = (
+    truth?.productionReady === false
+    && truth.enterpriseReady === false
+    && truth.cloudPrimary === false
+    && truth.localSourceOfTruth === true
+    && truth.defaultProvider === "mock_model"
+    && truth.conclave === "unavailable"
+    && truth.actualTrainedSLMs === 0
+    && truth.secretValuesExposed === false
+  );
+  if (
+    !body
+    || typeof body.ok !== "boolean"
+    || response.ok !== body.ok
+    || body.ok !== true
+    || !validTruth
+    || !session
+  ) {
+    throw new Error(
+      typeof error?.message === "string"
+        ? error.message
+        : `Operational session response failed validation (${response.status})`,
+    );
+  }
+  return session;
 }
 
+const operationalSessionStatus = createSerializedRefresh(
+  () => sessionRequest(""),
+);
+
 export const operationalSessionClient = Object.freeze({
-  status: () => sessionRequest(""),
+  status: () => operationalSessionStatus(false),
   logout: () => sessionRequest("/logout", { method: "POST", headers: { "X-CSRF-Token": capabilityTransport.csrfToken }, body: JSON.stringify({}) }),
   use: (session: OperationalSession) => {
     capabilityTransport.mode = session.authenticated ? "hosted" : "local";
@@ -482,6 +838,213 @@ export const operationalSessionClient = Object.freeze({
   },
   hostedMutationHeaders,
   mode: () => capabilityTransport.mode
+});
+
+let registeredExecutiveSessionCsrfToken = "";
+
+async function registeredExecutiveSessionRequest(
+  path: "" | "/login" | "/revoke",
+  options: RequestInit = {},
+): Promise<RegisteredExecutiveSessionEnvelope> {
+  const response = await fetch(`/api/executive-session${path}`, {
+    ...options,
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers ?? {}),
+    },
+  });
+  let envelope: RegisteredExecutiveSessionEnvelope;
+  try {
+    envelope = await response.json() as RegisteredExecutiveSessionEnvelope;
+  } catch {
+    throw new RegisteredExecutiveSessionRequestError(
+      "executive_session_response_invalid",
+      "The Experience Gateway returned an invalid Registered Executive session response.",
+      response.status,
+    );
+  }
+  if (!response.ok || !envelope.ok || !envelope.session) {
+    if (
+      path === "/revoke"
+      || (response.status >= 400 && response.status < 500)
+    ) {
+      registeredExecutiveSessionCsrfToken = "";
+    }
+    throw new RegisteredExecutiveSessionRequestError(
+      envelope.error?.code ?? "executive_session_request_failed",
+      envelope.error?.message ?? `Registered Executive session request failed (${response.status}).`,
+      response.status,
+    );
+  }
+  registeredExecutiveSessionCsrfToken = envelope.sessionAccess?.csrfToken ?? "";
+  if (envelope.executiveSession.lifecycleState === "revoked") {
+    registeredExecutiveSessionCsrfToken = "";
+  }
+  return envelope;
+}
+
+export function isRegisteredExecutiveSessionRecord(
+  value: RegisteredExecutiveSessionEnvelope["session"],
+): value is RegisteredExecutiveSessionRecord {
+  return Boolean(
+    value
+      && "recordType" in value
+      && value.recordType === "nexus_registered_executive_session"
+      && value.schemaVersion === "nexus.registered-executive-session@1.0.0",
+  );
+}
+
+export const registeredExecutiveSessionClient = Object.freeze({
+  status: () => registeredExecutiveSessionRequest(""),
+  login() {
+    return registeredExecutiveSessionRequest(
+      "/login",
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+  revoke: () => registeredExecutiveSessionRequest(
+    "/revoke",
+    {
+      method: "POST",
+      headers: { "X-CSRF-Token": registeredExecutiveSessionCsrfToken },
+      body: JSON.stringify({}),
+    },
+  ),
+});
+
+export type CanonicalExecutionGatewayResponse = {
+  ok: boolean;
+  recordType?: "nexus_canonical_execution_gateway_response";
+  route?: string;
+  data?: {
+    recordType?: string;
+    mission?: {
+      missionId: string;
+      state: string;
+      fixture: {
+        path: string;
+        baselineDigest: string;
+        currentDigest: string;
+        version: number;
+      };
+      actions: Array<{
+        action: string;
+        status: string;
+        beforeDigest: string;
+        afterDigest: string;
+      }>;
+      missionTerminalReceiptId?: string | null;
+    };
+    capabilities?: Array<{
+      capabilityId: string;
+      action: string;
+      classification: string;
+      operationalAvailability: boolean;
+      reason: string;
+    }>;
+    status?: string;
+    result?: {
+      path: string;
+      priorSha256: string;
+      currentSha256: string;
+      effectCount: number;
+    };
+    accountabilityIntegrity?: { valid: boolean; recordCount: number };
+    replay?: { passive: boolean; dispatchesActions: boolean; eventCount: number };
+    secretValuesExposed: false;
+  };
+  error?: { code?: string; message?: string };
+  registeredExecutiveSessionVerified?: boolean;
+  authorityGranted?: false;
+  secretValuesExposed?: false;
+};
+
+async function canonicalExecutionRequest(
+  path: string,
+  options: RequestInit = {},
+  requestKey = "",
+): Promise<CanonicalExecutionGatewayResponse> {
+  if (options.method === "POST" && !registeredExecutiveSessionCsrfToken) {
+    await registeredExecutiveSessionClient.status();
+  }
+  const response = await fetch(`/api/canonical-execution${path}`, {
+    ...options,
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.method === "POST"
+        ? {
+          "X-CSRF-Token": registeredExecutiveSessionCsrfToken,
+          "Idempotency-Key": requestKey || `m4-${crypto.randomUUID()}`,
+        }
+        : {}),
+      ...(options.headers ?? {}),
+    },
+  });
+  const body = await response.json() as CanonicalExecutionGatewayResponse;
+  if (!response.ok || !body.ok || !body.data) {
+    throw new RegisteredExecutiveSessionRequestError(
+      body.error?.code ?? "canonical_execution_request_failed",
+      body.error?.message
+        ?? `Canonical execution request failed (${response.status}).`,
+      response.status,
+    );
+  }
+  return body;
+}
+
+export const canonicalExecutionClient = Object.freeze({
+  status: () => canonicalExecutionRequest(""),
+  createMission: () => canonicalExecutionRequest(
+    "/missions",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        objective: "Prove one governed reversible non-production repository fixture Action.",
+        authorizationAcknowledged: true,
+      }),
+    },
+  ),
+  mission: (missionId: string) => canonicalExecutionRequest(
+    `/missions/${encodeURIComponent(missionId)}`,
+  ),
+  edit: (
+    missionId: string,
+    path: string,
+    expectedSha256: string,
+    content: string,
+  ) => canonicalExecutionRequest(
+    `/missions/${encodeURIComponent(missionId)}/actions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action: "repository.edit",
+        path,
+        expectedSha256,
+        content,
+      }),
+    },
+  ),
+  restore: (
+    missionId: string,
+    path: string,
+    expectedSha256: string,
+    restoreSha256: string,
+  ) => canonicalExecutionRequest(
+    `/missions/${encodeURIComponent(missionId)}/actions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action: "repository.restore",
+        path,
+        expectedSha256,
+        restoreSha256,
+      }),
+    },
+  ),
 });
 
 const post = <T, B extends object = Record<string, unknown>>(path: string, body: B, idempotencyKey?: string) => request<T>(
@@ -496,38 +1059,79 @@ export const localNexusClient = Object.freeze({
   clientCapabilities: () => request<ClientCapabilityContract>("/client-capabilities"),
   intakeHistory: () => request<IntakeHistory>("/intake/history"),
   intakeUpload: (filename: string, contentBase64: string, projectId?: string) => post<Record<string, unknown>>("/intake/upload", { filename, contentBase64, ...(projectId ? { projectId } : {}) }),
-  intakeQuery: (question: string, projectId?: string) => post<{ status: string; answer: string; citations?: Array<Record<string, unknown>> }>("/intake/query", { question, ...(projectId ? { projectId } : {}) }),
-  projectCreate: (name: string) => post<{ projectId: string; name: string }>("/projects", { name }),
+  intakeQuery: (question: string, projectId?: string, idempotencyKey?: string) => post<{ status: string; answer: string; citations?: Array<Record<string, unknown>> }>("/intake/query", { question, ...(projectId ? { projectId } : {}) }, idempotencyKey),
+  projectCreate: (name: string, idempotencyKey?: string) => post<{ projectId: string; name: string }>("/projects", { name }, idempotencyKey),
   artifactTypes: () => request<{ artifacts: ArtifactDefinition[] }>("/projects/artifact-types"),
   projectScope: (projectId: string) => request<ProjectScope>(`/projects/${encodeURIComponent(projectId)}/scope`),
   projectEstimate: (projectId: string) => request<ProjectEstimate>(`/projects/${encodeURIComponent(projectId)}/estimate`),
   projectPlanningModel: (projectId: string) => request<PlanningModel>(`/projects/${encodeURIComponent(projectId)}/planning-model`),
-  projectCompile: (projectId: string, artifactType: string, options: Record<string, unknown>) => post<CompiledArtifact>(`/projects/${encodeURIComponent(projectId)}/compile`, { artifactType, options }),
+  projectCompile: (projectId: string, artifactType: string, options: Record<string, unknown>, idempotencyKey?: string) => post<CompiledArtifact>(`/projects/${encodeURIComponent(projectId)}/compile`, { artifactType, options }, idempotencyKey),
   voiceStatus: () => request<Record<string, unknown>>("/voice-operator/status"),
   voiceHistory: () => request<{ events?: Array<Record<string, unknown>> }>("/voice-operator/history"),
-  routeTranscript: (transcript: string, source: "browser_speech" | "text_fallback") => post<VoiceRouteResult>("/voice-operator/route-transcript", { transcript, source }),
+  routeTranscript: (
+    transcript: string,
+    source: "browser_speech" | "text_fallback",
+    signal?: AbortSignal,
+    idempotencyKey = `voice-transcript:${globalThis.crypto.randomUUID()}`,
+  ) => request<VoiceRouteResult>(
+    "/voice-operator/route-transcript",
+    {
+      method: "POST",
+      body: JSON.stringify({ transcript, source }),
+      ...(signal ? { signal } : {}),
+    },
+    idempotencyKey,
+  ),
   missions: () => request<Record<string, unknown>>("/missions"),
   mission: (missionId: string) => request<Record<string, unknown>>(
     `/missions/${encodeURIComponent(missionId)}`,
   ),
-  planMission: (objective: string) => capabilityTransport.mode === "hosted"
-    ? post<Record<string, unknown>>(
-      "/conclave/workspaces",
-      { proposal: objective },
-      `conclave-mission:${globalThis.crypto.randomUUID()}`,
-    )
-    : post<Record<string, unknown>>("/missions/plan", { objective }),
-  executeMissionStep: (missionId: string, stepId: string) => capabilityTransport.mode === "hosted"
-    ? Promise.reject(new Error("Hosted Mission execution is unavailable until a canonical governed execution route is registered."))
-    : post<Record<string, unknown>>(`/missions/${encodeURIComponent(missionId)}/execute-step`, { stepId }),
+  planMission: (objective: string, idempotencyKey?: string) => post<Record<string, unknown>>(
+    "/missions/plan",
+    { objective },
+    idempotencyKey ?? `mission-plan:${globalThis.crypto.randomUUID()}`,
+  ),
+  executeMissionStep: (missionId: string, stepId: string) => post<Record<string, unknown>>(
+    `/missions/${encodeURIComponent(missionId)}/execute-step`,
+    { stepId },
+    `mission-step:${globalThis.crypto.randomUUID()}`,
+  ),
   conclaveWorkspaces: () => request<ConclaveWorkspaceList>("/conclave/workspaces"),
-  createConclaveWorkspace: (proposal: string, idempotencyKey: string) => post<ConclaveWorkspaceRecord>(
+  createConclaveWorkspace: (
+    payload: ConclaveWorkspaceCreateRequest,
+    idempotencyKey: string,
+  ) => post<ConclaveWorkspaceRecord, ConclaveWorkspaceCreateRequest>(
     "/conclave/workspaces",
-    { proposal },
+    payload,
     idempotencyKey,
   ),
   conclaveWorkspace: (missionId: string) => request<ConclaveWorkspaceRecord>(
     `/conclave/workspaces/${encodeURIComponent(missionId)}`,
+  ),
+  runConclaveWorkspace: (
+    missionId: string,
+    expectedWorkspaceVersion: string,
+    idempotencyKey: string,
+  ) => post<ConclaveWorkspaceRecord>(
+    `/conclave/workspaces/${encodeURIComponent(missionId)}/run`,
+    { expectedWorkspaceVersion },
+    idempotencyKey,
+  ),
+  admitConclaveEvidence: (
+    missionId: string,
+    taskId: string,
+    payload: ConclaveEvidenceAdmissionRequest,
+    idempotencyKey: string,
+  ) => post<ConclaveWorkspaceRecord, ConclaveEvidenceAdmissionRequest>(
+    `/conclave/workspaces/${encodeURIComponent(missionId)}/tasks/${encodeURIComponent(taskId)}/evidence`,
+    payload,
+    idempotencyKey,
+  ),
+  governanceReadiness: () => request<Record<string, unknown>>(
+    "/governance/readiness",
+  ),
+  authorityReadiness: () => request<Record<string, unknown>>(
+    "/authority/readiness",
   ),
   operationalReplays: () => request<Record<string, unknown>>("/operational-replay"),
   operationalReplay: (replayId: string) => request<Record<string, unknown>>(
@@ -550,8 +1154,8 @@ export const localNexusClient = Object.freeze({
     `/operational-replay/receipts/${encodeURIComponent(receiptId)}`,
   ),
   workSessions: () => request<Record<string, unknown>>("/work-sessions"),
-  planWorkSession: (objective: string) => post<Record<string, unknown>>("/work-sessions/plan", { objective }),
-  startWorkSession: (objective: string) => post<Record<string, unknown>>("/work-sessions/start", { objective }),
+  planWorkSession: (objective: string, idempotencyKey?: string) => post<Record<string, unknown>>("/work-sessions/plan", { objective }, idempotencyKey),
+  startWorkSession: (objective: string, idempotencyKey?: string) => post<Record<string, unknown>>("/work-sessions/start", { objective }, idempotencyKey),
   workSession: (sessionId: string) => request<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}`),
   controlWorkSession: (sessionId: string, action: "step" | "continue" | "pause" | "cancel") => post<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}/${action}`, {}),
   workSessionReceipt: (sessionId: string) => request<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}/receipt`),
@@ -560,8 +1164,6 @@ export const localNexusClient = Object.freeze({
   deny: (approvalId: string, reason: string) => post<Record<string, unknown>>(`/approvals/${encodeURIComponent(approvalId)}/deny`, { reason }),
   dryRunAction: (action: string) => post<Record<string, unknown>>("/actions/dry-run", { action }),
   executeAction: (action: string) => post<Record<string, unknown>>("/actions/execute", { action, explicitRequest: true }),
-  connectors: () => request<Record<string, unknown>>("/connectors"),
-  connectorHealth: () => request<Record<string, unknown>>("/connectors/health"),
   runtimeNodes: () => request<RuntimeNodeFleet>("/runtime-coordination/nodes"),
   runtimeAdmissions: () => request<RuntimeAdmissionList>("/runtime-coordination/admissions"),
   createRuntimeAdmission: (intent: RuntimeAdmissionIntentRequest, idempotencyKey: string) => post<RuntimeAdmissionResponse>(

@@ -1,6 +1,8 @@
-# NEXUS Client Parity Contract
+# NEXUS Runtime Client Capability Contract
 
-The NEXUS Client Parity Contract is the versioned Runtime description of portable capabilities shared by NEXUS Command and the NEXUS Web App. Runtime publishes it at `GET /client-capabilities`; the web app reads it only through an exact Experience Gateway route: `GET /api/local/client-capabilities` in local mode or authenticated `GET /api/operations/client-capabilities` in hosted mode.
+The NEXUS Runtime Client Capability Contract is the versioned inventory of registered Runtime operations consumed by NEXUS Command and the NEXUS Web App. Runtime publishes it at `GET /client-capabilities`; the web app reads it only through an exact Experience Gateway route: `GET /api/local/client-capabilities` in local mode or authenticated `GET /api/operations/client-capabilities` in hosted mode.
+
+It is not the client module inventory and does not assert full surface or behavioral parity. The shared `src/platform/surface-registry.json` owns the complete top-level desktop/web surface union and records each client surface as `functional`, `read_only`, `local_only`, or `unavailable`.
 
 ## Ownership boundary
 
@@ -12,23 +14,21 @@ No client may assemble an independent operational context, infer that a handler 
 
 Each capability declares a stable identifier, workspace, Runtime owner, portability, implementation state, client support, limitations, and operations. Each operation declares its Runtime method and path plus risk, approval, proof, and receipt requirements.
 
-The parity section is derived from the capability entries. `driftCount` identifies portable capabilities implemented in NEXUS Command but not in NEXUS Web within the declared inventory scope. CI regression tests cover the web client adapters, exact gateway routes, strict payload validation, Runtime ownership language, and the absence of client-side context assembly.
+The contract's comparison section is derived only from its listed registered Runtime operations. It must set `surfaceParityClaimed=false`; it cannot be used to infer support for an unlisted native surface. CI regression tests cover both the complete shared surface inventory and representative exact Runtime behavior, including route admission, scope, CSRF, idempotency, proof, receipt, readiness, and fail-closed negative cases.
 
-## Current portable surface
+## Current registered operational scope
 
 - Mission planning and governed mission-step submission
 - Governed work-session planning, start, state control, and receipts
-- Approval queue decisions
-- Action dry runs and governed execution requests
-- Connector readiness
-- Proof and receipt visibility
-- Human Interaction Framework behavior
+- Read-only connector registry projection
+- Proof and receipt visibility through registered reads
+- Bounded Human Interaction Framework behavior
 - Document intelligence
 - Nexicron project planning, scope, pricing, and artifact compilation
 
 The contract reports hosted execution separately from capability implementation. A hosted workspace is presented only when Runtime reports `hostedExecutionAvailable=true`, its capability entry is implemented for `nexusWeb`, and an exact authenticated gateway route exists. This does not claim production readiness, enterprise readiness, verified live model inference, or connector reachability.
 
-Version 1.0 covers `operational_core_v1`; it is not yet a complete inventory of every native administration and hardware surface. The Runtime reports the remaining surfaces explicitly, including adaptive learning, builder/self-improvement, browser control, continuity and budget administration, model/persistence administration, hosted-team administration, and hardware wake control. These must move into later contract versions rather than being silently represented as parity.
+Version 1.1 covers `registered_runtime_operations_v1`; it deliberately remains incomplete as a native client inventory. Missing operations stay absent from this contract and their surfaces remain explicitly constrained by the shared Experience surface registry rather than being silently represented as parity.
 
 ## Adding a capability
 
@@ -36,4 +36,4 @@ Version 1.0 covers `operational_core_v1`; it is not yet a complete inventory of 
 2. Register the operation in the Runtime contract.
 3. Add an exact Experience Gateway route and strict request validator; never add a wildcard proxy.
 4. Add presentation adapters in each supported client without duplicating operational behavior.
-5. Update parity tests. A portable native capability must not silently remain absent from the web client.
+5. Update cross-client inventory, route, state, and representative behavior tests. A portable native capability must not silently remain absent from either client.

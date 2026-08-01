@@ -50,6 +50,17 @@ COMMAND_PORTAL_CACHE_TTL_MS
 COMMAND_PORTAL_MAX_RESPONSE_BYTES
 ```
 
+`COMMAND_PORTAL_MAX_RESPONSE_BYTES` remains the general Runtime-read limit.
+The fixed `/api/runtime/capability-registry` mapping has a separate,
+non-configurable 4 MiB ceiling so the measured canonical projection fits
+without widening any other route.
+
+All remaining Runtime, local, and hosted-operation aliases require that
+current Runtime-owned projection to admit one exact typed action before the
+Gateway contacts a target upstream. Unavailable, stale, mismatched, or
+unregistered actions fail closed. The legacy `/api/replay` export proxy is
+retained only as an unavailable compatibility adapter and does not forward.
+
 Never create a `VITE_` runtime variable or credential.
 
 ## Local use
@@ -71,7 +82,7 @@ nexus/bin/python -m nexus_api.server --host 127.0.0.1 --port 8765
 
 Set `COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED=true`, then run `npm run dev:server` and `npm run dev` separately. Vite proxies `/api/runtime` and `/api/local` to the Experience Gateway. The Gateway accepts a loopback local Runtime target only and does not send the hosted Runtime credential to it.
 
-## Runtime capability parity
+## Runtime-bound workspaces and surface truth
 
 - Document Intelligence ingests supported files, links sources to projects, queries evidence, and displays the Runtime source inventory.
 - Nexicron Projects creates project records and consumes Runtime-owned scope, estimate, planning context, evidence, and artifact contracts.
@@ -79,9 +90,9 @@ Set `COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED=true`, then run `npm run dev:serv
 - Human Interaction Framework events provide the common Runtime-owned conversation, speech, streaming, interruption, avatar, navigation, focus, highlighting, and presentation behavior contract shared with NEXUS Command.
 - A persistent NEXUS executive copilot remains available across Operations Center, Document Intelligence, Nexicron Projects, Mission Control, topology, providers, and evidence views. On desktop it receives a dedicated application column and resizes the workspace rather than covering it; it overlays only below the mobile breakpoint. It carries one conversation ID, supports Runtime-governed text and Realtime voice, and presents model-native limitations without assembling Operational Context in the browser.
 - Runtime interaction and Conclave responses use the Experience Gateway's single `data` envelope. Form examples are placeholders rather than submitted defaults, so operator intent is always explicit.
-- Mission Control consumes the versioned Runtime Client Parity Contract and presents mission planning, bounded work sessions, approval decisions, dry-run and governed execution requests, and connector readiness.
+- Mission and Work Session controls consume exact versioned Runtime operations. A control is enabled only when the matching registered route, scoped session, capability state, and action admission all pass.
 
-Only capabilities reported as implemented by Runtime are presented as executable. Numeric estimates remain unavailable when required rate or quantity evidence is absent. The browser owns microphone capture, audio playback, and visual state only. Runtime owns voice provider configuration, instructions, context boundaries, and execution constraints; the permanent provider key remains server-side.
+The shared Experience surface registry is the single top-level module inventory for NEXUS Command and hosted NEXUS. It records the full 26-surface union and an explicit `functional`, `read_only`, `local_only`, or `unavailable` state and reason for each client. Navigation parity does not imply capability parity: only capabilities reported as implemented by Runtime and bound to an exact client route are presented as executable. Numeric estimates remain unavailable when required rate or quantity evidence is absent. The browser owns microphone capture, audio playback, and visual state only. Runtime owns voice provider configuration, instructions, context boundaries, and execution constraints; the permanent provider key remains server-side.
 
 ## Truth boundary
 

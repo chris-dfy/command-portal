@@ -1,4 +1,5 @@
-import { Search, type LucideIcon } from "lucide-react";
+import { Search, SunMoon, type LucideIcon } from "lucide-react";
+import type { NexusColorMode } from "../appearance/themes";
 import { NexusStatus } from "../design-system/NexusPrimitives";
 import nexusSymbol from "../assets/nexus-symbol.svg";
 
@@ -16,6 +17,8 @@ export function NexusExecutiveNavigation({
   connectionLabel,
   connectionTone,
   alertCount,
+  colorMode,
+  onColorModeChange,
   onNavigate,
   onSearch,
 }: {
@@ -24,6 +27,8 @@ export function NexusExecutiveNavigation({
   connectionLabel: string;
   connectionTone: NexusTone;
   alertCount: number;
+  colorMode: NexusColorMode;
+  onColorModeChange: (mode: NexusColorMode) => void;
   onNavigate: (id: string) => void;
   onSearch: () => void;
 }) {
@@ -61,6 +66,19 @@ export function NexusExecutiveNavigation({
       </nav>
 
       <div className="nx-executive-nav__tools">
+        <label className="nx-color-mode-control">
+          <SunMoon aria-hidden="true" />
+          <span>Theme</span>
+          <select
+            aria-label="Color mode"
+            value={colorMode}
+            onChange={(event) => onColorModeChange(event.currentTarget.value as NexusColorMode)}
+          >
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="system">System</option>
+          </select>
+        </label>
         <button
           type="button"
           className="nx-global-search"

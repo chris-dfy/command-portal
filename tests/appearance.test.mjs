@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import {
+  accentContrastRatio,
+  MINIMUM_ACCENT_CONTRAST,
+  resolveAccessibleAccent,
+} from "../src/appearance/accentContrast.js";
+import {
+  COLOR_MODE_STORAGE_KEY,
+  LEGACY_APPEARANCE_STORAGE_KEYS,
+  persistColorModePreference,
+  readColorModePreference,
+} from "../src/appearance/colorModePreference.js";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -30,7 +41,9 @@ test("appearance themes preserve the canonical NEXUS palette and browser color m
 
 test("appearance persistence and document attributes are browser safe", async () => {
   const source = await read("../src/appearance/useAppearanceSettings.ts");
-  assert.match(source, /nexus\.command\.appearance\.v2/);
+  assert.match(source, /COLOR_MODE_STORAGE_KEY/);
+  assert.match(source, /persistColorModePreference\(settings\.colorMode, storage\)/);
+  assert.doesNotMatch(source, /JSON\.stringify\(settings\)/);
   assert.match(source, /candidate\.accentColor\.toLowerCase\(\) === "#62d2ff"/);
   assert.match(source, /"--nx-accent": resolved\.accentColor/);
   assert.match(source, /typeof window === "undefined"/);
@@ -63,10 +76,58 @@ test("appearance persistence and document attributes are browser safe", async ()
   }
   assert.match(source, /root\.style\.colorScheme = resolved\.colorScheme/);
   assert.match(source, /settings\.highContrast \|\| systemAppearance\.prefersHighContrast \|\| forcedColors/);
+  assert.match(source, /import \{ resolveAccessibleAccent \} from "\.\/accentContrast\.js"/);
+  assert.match(source, /resolveAccessibleAccent\(/);
+  assert.match(source, /highContrast \? colors\.accent : settings\.accentColor/);
   assert.match(source, /settings\.reducedMotion \|\| systemAppearance\.prefersReducedMotion/);
   assert.match(source, /addEventListener\("change"/);
   assert.match(source, /removeEventListener\("change"/);
   assert.doesNotMatch(source, /@tauri|\binvoke\s*\(|windowBridge|runtimeBridge/i);
+});
+
+test("persistence retains only the Light Dark System preference and migrates legacy appearance payloads", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+
+  values.set(LEGACY_APPEARANCE_STORAGE_KEYS[0], JSON.stringify({
+    colorMode: "light",
+    accentColor: "#ff0000",
+    transparency: 55,
+    compactMode: true,
+  }));
+  assert.equal(readColorModePreference(storage), "light");
+  assert.equal(persistColorModePreference("dark", storage), true);
+  assert.deepEqual([...values.entries()], [[
+    COLOR_MODE_STORAGE_KEY,
+    JSON.stringify({ colorMode: "dark" }),
+  ]]);
+  assert.equal(readColorModePreference(storage), "dark");
+  assert.equal(persistColorModePreference("system", storage), true);
+  assert.deepEqual(JSON.parse(values.get(COLOR_MODE_STORAGE_KEY)), { colorMode: "system" });
+  assert.equal(persistColorModePreference("sepia", storage), false);
+  assert.deepEqual(JSON.parse(values.get(COLOR_MODE_STORAGE_KEY)), { colorMode: "system" });
+});
+
+test("light appearance rejects low-contrast persisted accents", async () => {
+  const [themes, appearance, tokens] = await Promise.all([
+    read("../src/appearance/themes.ts"),
+    read("../src/appearance/useAppearanceSettings.ts"),
+    read("../src/design-system/nexus-tokens.css"),
+  ]);
+  const minimalLight = themes.match(/id: "minimal-light"[\s\S]*?background: "(#[0-9a-f]{6})"[\s\S]*?accent: "(#[0-9a-f]{6})"/i);
+  assert.ok(minimalLight, "minimal-light palette must expose hexadecimal background and accent colors");
+  const [, background, accent] = minimalLight;
+  assert.ok(accentContrastRatio(accent, background) >= MINIMUM_ACCENT_CONTRAST, `${accent} must remain readable on ${background}`);
+  assert.ok(accentContrastRatio("#86f5d5", background) < MINIMUM_ACCENT_CONTRAST, "the former dark-theme mint must be rejected on cream");
+  assert.equal(resolveAccessibleAccent("#86f5d5", accent, background, "#1e1e1e"), accent);
+  assert.equal(resolveAccessibleAccent("#62d2ff", accent, background, "#1e1e1e"), accent);
+  assert.equal(resolveAccessibleAccent("#315f88", accent, background, "#1e1e1e"), "#315f88");
+  assert.equal(resolveAccessibleAccent("#86f5d5", "#86f5d5", "#1e1e1e", "#f4f0e9"), "#86f5d5");
+  assert.match(tokens, /--nx-accent: #075744/);
 });
 
 test("NEXUS appearance assets are local inert SVGs", async () => {

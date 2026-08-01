@@ -1,0 +1,94 @@
+{
+  "recordType": "nexus_experience_corrective_receipt",
+  "schemaVersion": "nexus.experience-corrective-receipt@1.0.0",
+  "receiptId": "POST-M5-WEB-RESPONSIVE-THEME-CONTROL-HOTFIX-20260731",
+  "status": "live_verified",
+  "scope": "additive post-acceptance Experience responsive status-card and browser-local theme-control correction",
+  "source": {
+    "branch": "codex/web-light-theme-contrast-hotfix",
+    "providerCheckoutBranch": "codex/web-light-theme-layout-deploy-20260731",
+    "baseCommit": "686f151d1ed7cb16c40573b2805c222479d10977",
+    "sourceCommit": "42a20fc047336bbb153405dc72a0b66b1d2e14ca",
+    "sourceTree": "59a28d1e783bebaadc3c3961e29ff9e627ca0b50",
+    "constitutionalRelease": "NCR-1.0.0",
+    "constitutionalReleaseDigest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principleImpactRecord": "NCR-IMPACT-post-m5-web-responsive-theme-control-20260731",
+    "principleImpactRecordDigest": "sha256:c1c9960aabd68b3b4f92790ea4299ba84314f7ca4dd9ffdca4cb2ac2554b5674",
+    "principleImpactValidationDigest": "sha256:64c01e24a647bf3c84bc3d044ebeb956e7b1aea1ee1d557efcc881b115ab8455"
+  },
+  "lineage": {
+    "predecessorFunctionalCommit": "091c505d919df92c60e754a199d4a3fb4d3124cb",
+    "predecessorReceiptCommit": "686f151d1ed7cb16c40573b2805c222479d10977",
+    "predecessorServingDeploymentInstance": "ac7120fd",
+    "acceptedMission5GateMutated": false,
+    "historicalReceiptMutated": false,
+    "mission6CreatedOrAdmitted": false
+  },
+  "deployment": {
+    "provider": "Replit",
+    "environment": "private_non_production_experience_gateway",
+    "url": "https://command-portal.replit.app",
+    "servingDeploymentInstance": "d9a5169b",
+    "builtJavascript": "/assets/index-BB6mtTNd.js",
+    "builtStylesheet": "/assets/index-CPF6Oiqi.css",
+    "sourceCommitVerifiedBeforePublish": true,
+    "liveAssetsMatchVerifiedBuild": true,
+    "secretValuesExposed": false
+  },
+  "postconditions": {
+    "globalThemeSelectorVisible": true,
+    "themeOptions": [
+      "dark",
+      "light",
+      "system"
+    ],
+    "themePreferenceUsesCanonicalAppearanceAdapter": true,
+    "themePreferencePersistsInBrowser": true,
+    "verifiedSelectedTheme": "light",
+    "verifiedResolvedTheme": "light",
+    "verifiedLightCanvas": "#f4f0e9",
+    "verifiedLightAccent": "#075744",
+    "presentationOnlyLabelRemoved": true,
+    "runtimeRibbonClientWidthPx": 801,
+    "runtimeRibbonScrollWidthPx": 801,
+    "runtimeRibbonColumnCount": 2,
+    "runtimeRibbonColumnWidthPx": 394,
+    "runtimeRibbonHorizontalOverflow": false,
+    "runtimeRibbonWithinWordBreaks": false,
+    "runtimeRibbonOverflowWrap": "normal",
+    "runtimeRibbonWordBreak": "normal",
+    "gatewayStatus": "Healthy",
+    "runtimeStatus": "Healthy",
+    "providerRegistryStatus": "Healthy",
+    "environmentStatus": "Healthy",
+    "connectionStatus": "Degraded",
+    "versionStatus": "Compatible",
+    "diagnosticsStatus": "Healthy",
+    "runtimeReadinessPreservedAsCapabilityDegraded": true,
+    "transportCollapsedToUnavailable": false,
+    "independentUsableModulesRemainLive": true
+  },
+  "verification": {
+    "focusedTests": "node --test tests/appearance.test.mjs tests/design-system.test.mjs tests/executive-ui.test.mjs",
+    "focusedTestsPassed": 36,
+    "focusedTestsFailed": 0,
+    "productionBuildModules": 1632,
+    "productionBuildPassed": true,
+    "assetVerificationPassed": true,
+    "liveAuthenticatedBrowserVerified": true,
+    "liveScreenshot": "/tmp/nexus-live-responsive-theme-control.png"
+  },
+  "limitations": [
+    "The non-production Runtime continues to report its explicit degraded connection/readiness boundary; this correction does not relabel unavailable physical or external capability as healthy.",
+    "The existing production-build chunk-size advisory remains non_blocking_degraded and does not affect this responsive-layout or theme-control postcondition."
+  ],
+  "rollback": {
+    "source": "Additively revert commit 42a20fc047336bbb153405dc72a0b66b1d2e14ca; do not reset or rewrite history.",
+    "deployment": "Redeploy the previous private Experience Gateway instance ac7120fd from Experience commit 091c505d919df92c60e754a199d4a3fb4d3124cb.",
+    "preservation": "Retain this receipt, its PIR, the prior contrast receipt, and both deployment identities as historical evidence."
+  },
+  "impedimentClassification": "non_blocking_degraded",
+  "operatorActionRequired": false,
+  "sanitized": true,
+  "recordedAt": "2026-07-31T22:39:16Z"
+}

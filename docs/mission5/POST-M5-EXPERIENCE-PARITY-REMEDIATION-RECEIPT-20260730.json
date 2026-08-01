@@ -1,0 +1,61 @@
+{
+  "recordType": "nexus_experience_remediation_receipt",
+  "schemaVersion": "nexus.experience-remediation-receipt@1.0.0",
+  "receiptId": "POST-M5-EXPERIENCE-PARITY-REMEDIATION-20260730",
+  "status": "locally_verified",
+  "scope": "command-portal-context only",
+  "source": {
+    "branch": "codex/post-m5-experience-parity-remediation",
+    "baseCommit": "26376c806802263ca00019b5b564ae97711fdf0d",
+    "constitutionalRelease": "NCR-1.0.0",
+    "constitutionalReleaseDigest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa"
+  },
+  "postconditions": {
+    "canonicalSurfaceCount": 26,
+    "webSurfaceStates": {
+      "functional": 10,
+      "read_only": 8,
+      "local_only": 2,
+      "unavailable": 6
+    },
+    "everyWebSurfaceRenders": true,
+    "localOnlyAndUnavailableSurfacesClaimCapability": false,
+    "processReadyNotReadyMapsTo": "Degraded",
+    "processReadyNotReadyAttempts": 1,
+    "malformedReadinessFailsClosed": true,
+    "independentHealthyModulesRemainHealthy": true,
+    "missionPlanningUsesCanonicalMissionRoute": true,
+    "missionStepUsesCanonicalGovernedRoute": true,
+    "genericOperationalProxyIntroduced": false,
+    "authorityExpanded": false,
+    "secretValuesExposed": false
+  },
+  "verification": {
+    "constitutionRegistryValid": true,
+    "principleImpactValid": true,
+    "principleImpactRecordDigest": "sha256:03f814cfa9e54be7a7c78036a0a6fc0be708e78b3e0f979f41fb3ffccb79916e",
+    "principleImpactValidationDigest": "sha256:6a8618b1c2b1ae344dcd13310554b836e04384c56bbcc6ff0d7ee5603ef9d4ed",
+    "npmCheckPassed": true,
+    "testsPassed": 180,
+    "testsFailed": 0,
+    "productionBuildModules": 1621,
+    "builtJavascript": "/assets/index-OOAuRcvT.js",
+    "builtStylesheet": "/assets/index-cVsQqztX.css",
+    "buildAssetSecretValuesExposed": false
+  },
+  "limitations": [
+    "This receipt proves local Experience source, contract, test, and production-build postconditions only.",
+    "It does not claim deployment, live provider verification, production readiness, enterprise readiness, or Mission acceptance.",
+    "Existing recorded non_blocking_degraded limitations and prior rollback lineage remain unchanged."
+  ],
+  "rollback": {
+    "source": "Revert only the scoped Experience remediation commit from base 26376c806802263ca00019b5b564ae97711fdf0d.",
+    "deployment": "Redeploy the previously recorded Experience release; no root or Runtime rollback is required for these Experience-only changes.",
+    "preservation": "Retain superseded releases, commits, and receipts as historical evidence."
+  },
+  "impedimentClassification": null,
+  "operatorActionRequired": false,
+  "sanitized": true,
+  "secretValuesExposed": false,
+  "recordedAt": "2026-07-31T04:30:32Z"
+}

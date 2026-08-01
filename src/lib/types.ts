@@ -16,7 +16,7 @@ export type TruthState = {
   cloudPrimary: false;
   localSourceOfTruth: true;
   defaultProvider: "mock_model";
-  conclave: "available_bounded_review";
+  conclave: "unavailable";
   actualTrainedSLMs: 0;
   secretValuesExposed: false;
 };
@@ -74,6 +74,7 @@ export type RuntimeRoute =
   | "diagnostics"
   | "governance"
   | "connectors"
+  | "capability-registry"
   | "conclave"
   | "eox";
 
@@ -92,4 +93,147 @@ export type ProviderRecord = {
   default: boolean;
   hostingMode: string;
   limitations: string[];
+};
+
+export type CapabilityClassification =
+  | "live_verified"
+  | "live_degraded"
+  | "configured_unverified"
+  | "staged"
+  | "simulated"
+  | "unavailable";
+
+export type CapabilityDisplayState = "Live" | "Degraded" | "Simulated" | "Unavailable";
+
+export type RegistryFreshness = {
+  state?: string;
+  stale?: boolean;
+  ageSeconds?: number | null;
+  maxAgeSeconds?: number | null;
+  lastSuccessfulVerification?: string | null;
+  expiresAt?: string | null;
+  [key: string]: unknown;
+};
+
+export type CanonicalCapabilityRecord = {
+  capabilityId: string;
+  connectorId?: string | null;
+  classification: CapabilityClassification;
+  operationalAvailability?: string;
+  authorizationRequirement?: string;
+  lastSuccessfulVerification?: string | null;
+  freshness?: RegistryFreshness;
+  evidenceReferences?: string[];
+  receiptReferences?: string[];
+  limitations: string[];
+  requiredNextAction?: string;
+  [key: string]: unknown;
+};
+
+export type CanonicalConnectorRecord = {
+  connectorId: string;
+  classification?: CapabilityClassification;
+  registration: unknown;
+  configuration: unknown;
+  reachability: unknown;
+  verification: unknown;
+  health: unknown;
+  operationalAvailability: string;
+  authorizationRequirement: string;
+  lastSuccessfulVerification: string | null;
+  freshness: RegistryFreshness;
+  evidenceReferences: string[];
+  receiptReferences: string[];
+  limitations: string[];
+  requiredNextAction: string;
+  [key: string]: unknown;
+};
+
+export type CanonicalActionRecord = {
+  actionId: string;
+  capabilityId: string;
+  connectorId?: string | null;
+  handlerId: string;
+  operationId: string;
+  inputSchemaId: string;
+  method?: string;
+  pathTemplate?: string;
+  fixedTarget?: string;
+  invocationSurfaces?: string[];
+  invocationPaths: string[];
+  classification: CapabilityClassification;
+  operationalAvailability?: boolean;
+  invocable: boolean;
+  authorizationRequirement: string;
+  authorityGranted: false;
+  limitations: string[];
+  requiredNextAction: string;
+  [key: string]: unknown;
+};
+
+export type ExecutiveContinuityClassification =
+  | "hard_blocking"
+  | "safely_remediable"
+  | "non_blocking_degraded"
+  | "operator_action_required";
+
+export type ExecutiveContinuityImpediment = {
+  impedimentId: string;
+  classification: ExecutiveContinuityClassification;
+  limitation: string;
+  requiredNextAction: string;
+  remediationAction?: {
+    actionId?: string;
+    classification: "staged" | "unavailable";
+    invocable: false;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+};
+
+export type CapabilityRegistryProjection = {
+  recordType: "nexus_live_capability_registry_projection";
+  schemaVersion: "nexus.live-capability-registry@1.0.0";
+  capabilityRegistryContract: {
+    recordType: "nexus_capability_registry_contract_identity";
+    schemaVersion: "nexus.live-capability-registry@1.0.0";
+    schemaDigest: string;
+    validatorVersion: "nexus.capability-registry-validator@1.0.0";
+  };
+  sourceIdentity: {
+    rootRevision: string;
+    runtimeRevision: string;
+    rootRevisionVerified: boolean;
+    runtimeRevisionVerified: boolean;
+    verificationMethod:
+      | "local_git_worktree"
+      | "program_alpha_source_attestation";
+    sourceTreeDigest: string;
+    sourceTreeClean: true;
+    environmentRevisionMatched: true;
+  };
+  owner: string;
+  generatedAt: string;
+  constitutionalBasis: Record<string, unknown>;
+  verificationPolicy: Record<string, unknown>;
+  authority: {
+    authorityGranted: false;
+    executionAuthorityIntroduced: false;
+    healthyCapabilityImpliesAuthority: false;
+    [key: string]: unknown;
+  };
+  authorityGranted: false;
+  noExecutionAuthorityIntroduced: true;
+  mission3Admitted: boolean;
+  summary: Record<string, unknown>;
+  capabilities: CanonicalCapabilityRecord[];
+  connectors: CanonicalConnectorRecord[];
+  actions: CanonicalActionRecord[];
+  verificationReceipts: Array<string | Record<string, unknown>>;
+  executiveContinuity: {
+    impediments: ExecutiveContinuityImpediment[];
+    [key: string]: unknown;
+  };
+  limitations: string[];
+  secretValuesExposed: false;
 };
