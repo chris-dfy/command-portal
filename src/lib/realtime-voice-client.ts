@@ -27,6 +27,12 @@ export class RealtimeVoiceClient {
   private animationFrame: number | null = null;
   private assistantTranscript = "";
   private speaking = false;
+  /** A response has been requested or created and has not yet reached response.done. */
+  private responseActive = false;
+  /** A response.cancel was sent and its terminal response.done has not arrived yet. */
+  private cancelling = false;
+  /** A finalized transcript arrived while cancelling; create its response after response.done. */
+  private queuedCreate = false;
   private microphoneMuted = false;
   private outputMuted = false;
   private responseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -120,6 +126,9 @@ export class RealtimeVoiceClient {
     void this.audioContext?.close();
     this.audioContext = null;
     this.speaking = false;
+    this.responseActive = false;
+    this.cancelling = false;
+    this.queuedCreate = false;
     this.callbacks.onAmplitude(0);
   }
 
@@ -144,19 +153,33 @@ export class RealtimeVoiceClient {
     catch { return; }
     switch (event.type) {
       case "input_audio_buffer.speech_started":
-        if (this.speaking) {
+        if (this.responseActive) {
           this.send({ type: "response.cancel" });
           this.send({ type: "output_audio_buffer.clear" });
+          this.cancelling = true;
           this.callbacks.onState("interrupted");
         } else this.callbacks.onState("listening");
         break;
       case "input_audio_buffer.speech_stopped":
+        // Liveness guard: something (finalized transcript -> creation, or a
+        // provider-created response) must move the turn forward within the boundary.
+        this.startResponseBoundary();
+        this.callbacks.onState("thinking");
+        break;
       case "response.created":
+        this.responseActive = true;
         this.startResponseBoundary();
         this.callbacks.onState("thinking");
         break;
       case "conversation.item.input_audio_transcription.completed":
         if (event.transcript) this.callbacks.onUserTranscript(event.transcript);
+        // The Runtime provider contract sets automaticResponseCreation=false:
+        // a response is created only after the Experience admits the finalized
+        // transcript. Admit it here and explicitly request exactly one response.
+        if (event.transcript && event.transcript.trim().length > 0) {
+          if (this.cancelling) this.queuedCreate = true;
+          else if (!this.responseActive) this.createResponse();
+        }
         break;
       case "response.output_audio.delta":
       case "response.audio.delta":
@@ -177,13 +200,25 @@ export class RealtimeVoiceClient {
       case "response.done":
         this.clearResponseBoundary();
         this.speaking = false;
+        this.responseActive = false;
+        this.cancelling = false;
         this.assistantTranscript = "";
-        this.callbacks.onState("listening");
+        if (this.queuedCreate) {
+          this.queuedCreate = false;
+          this.createResponse();
+        } else this.callbacks.onState("listening");
         break;
       case "error":
         this.fail(event.error?.message ?? "The live voice provider reported an error.");
         break;
     }
+  }
+
+  private createResponse() {
+    this.responseActive = true;
+    this.send({ type: "response.create" });
+    this.startResponseBoundary();
+    this.callbacks.onState("thinking");
   }
 
   private send(event: Record<string, unknown>) {
