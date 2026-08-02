@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Maximize2, Mic, MicOff, Minimize2, Send, ShieldCheck, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import { localNexusClient, newExecutiveInteractionId } from "../lib/local-client";
 import type { CanonicalActionAvailability } from "../lib/portal-client";
-import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
+import {
+  isVerifiedManualCommitStatus,
+  RealtimeVoiceClient,
+  type RealtimeManualCommitStatus,
+  type RealtimeVoiceState,
+} from "../lib/realtime-voice-client";
 import { browserSpeechAvailability, recognizeBrowserSpeech, speakBrowserResponse } from "../lib/browser-speech";
 import { assistantPresence } from "../lib/assistant-presence";
 import {
@@ -105,8 +110,8 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       return () => { liveClient.current?.stop(); assistantPresence.reset(); };
     }
     void fetch("/api/runtime/realtime-voice", { credentials: "same-origin", headers: { Accept: "application/json", "Cache-Control": "no-cache" } })
-      .then(async (response) => ({ response, body: await response.json() as { ok?: boolean; data?: { state?: string } } }))
-      .then(({ response, body }) => setVoiceAvailable(response.ok && Boolean(body.ok) && body.data?.state === "available"))
+      .then(async (response) => ({ response, body: await response.json() as { ok?: boolean; data?: RealtimeManualCommitStatus } }))
+      .then(({ response, body }) => setVoiceAvailable(response.ok && Boolean(body.ok) && isVerifiedManualCommitStatus(body.data)))
       .catch(() => setVoiceAvailable(false));
     return () => { liveClient.current?.stop(); assistantPresence.reset(); };
   }, [realtimeAction.available]);

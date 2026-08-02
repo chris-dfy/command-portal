@@ -194,6 +194,10 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /RTCPeerConnection/);
   assert.match(realtime, /echoCancellation: true/);
   assert.match(realtime, /conversation\.item\.input_audio_transcription\.completed/);
+  assert.match(realtime, /type: "input_audio_buffer\.commit"/);
+  assert.match(realtime, /input_audio_buffer\.committed/);
+  assert.match(realtime, /status\.serverVAD === false/);
+  assert.match(realtime, /status\.clientAudioCommitRequired === true/);
   assert.match(realtime, /direction: "sendonly"/);
   assert.match(realtime, /setMicrophoneMuted/);
   assert.match(realtime, /track\.enabled = !this\.microphoneMuted/);
@@ -806,7 +810,7 @@ test("copilot and voice controls fail closed on canonical interaction availabili
     voice.indexOf("if (!liveProviderAvailable)") < voice.indexOf("await client.connect()"),
     "VoiceWorkspace must reject unavailable Realtime before connection",
   );
-  assert.match(voice, /const liveProviderAvailable = realtimeAction\.available[\s\S]*status\?\.state === "available"/);
+  assert.match(voice, /const manualCommitVerified = isVerifiedManualCommitStatus\(status\)[\s\S]*const liveProviderAvailable = realtimeAction\.available[\s\S]*manualCommitVerified/);
   assert.match(voice, /disabled=\{!liveProviderAvailable \|\| voiceState === "connecting"\}/);
   assert.match(
     voice,

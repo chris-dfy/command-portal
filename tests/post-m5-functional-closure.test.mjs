@@ -72,7 +72,8 @@ test("Voice distinguishes provider-backed live availability from governed fallba
     read("../src/lib/local-client.ts"),
     read("../src/lib/runtime-voice-admission.ts"),
   ]);
-  assert.match(voice, /const liveProviderAvailable = realtimeAction\.available[\s\S]*supported[\s\S]*status\?\.state === "available"/);
+  assert.match(voice, /const manualCommitVerified = isVerifiedManualCommitStatus\(status\)[\s\S]*const liveProviderAvailable = realtimeAction\.available[\s\S]*supported[\s\S]*manualCommitVerified/);
+  assert.match(voice, /Client turn detection · manual audio commit/);
   assert.match(voice, /Live voice unavailable/);
   assert.match(voice, /<dt>Realtime provider<\/dt>/);
   assert.match(voice, /<dt>Browser capture<\/dt>/);

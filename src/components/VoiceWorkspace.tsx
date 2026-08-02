@@ -6,7 +6,12 @@ import { DataPanel } from "./DataPanel";
 import { displayLabel } from "../lib/presentation";
 import { localNexusClient, newExecutiveInteractionId } from "../lib/local-client";
 import type { CanonicalActionAvailability } from "../lib/portal-client";
-import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
+import {
+  isVerifiedManualCommitStatus,
+  RealtimeVoiceClient,
+  type RealtimeManualCommitStatus,
+  type RealtimeVoiceState,
+} from "../lib/realtime-voice-client";
 import { browserSpeechAvailability, recognizeBrowserSpeech, speakBrowserResponse } from "../lib/browser-speech";
 import {
   beginPrivateDraftAttempt,
@@ -31,13 +36,15 @@ import {
 import { ExecutiveInteractionApproval } from "./ExecutiveInteractionApproval";
 import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 
-type VoiceStatus = {
+type VoiceStatus = RealtimeManualCommitStatus & {
   state?: string;
   provider?: string;
   model?: string;
   voice?: string;
   transport?: string;
   serverVAD?: boolean;
+  clientAudioCommitRequired?: boolean;
+  inputAudioCommitEvent?: string;
   interruptResponse?: boolean;
   contextAssemblyOwner?: string;
   limitations?: string[];
@@ -84,15 +91,16 @@ export function VoiceWorkspace({
   const connected = ["listening", "thinking", "speaking", "interrupted"].includes(voiceState);
   const supported = RealtimeVoiceClient.supported();
   const browserSpeech = browserSpeechAvailability();
+  const manualCommitVerified = isVerifiedManualCommitStatus(status);
   const liveProviderAvailable = realtimeAction.available
     && supported
-    && status?.state === "available";
+    && manualCommitVerified;
   const liveProviderReason = !realtimeAction.available
     ? realtimeAction.reason
     : !supported
       ? "This browser does not support secure WebRTC microphone capture."
-      : status?.state !== "available"
-        ? status?.limitations?.[0] ?? "The Runtime has not verified an available Realtime voice provider contract."
+      : !manualCommitVerified
+        ? status?.limitations?.[0] ?? "The Runtime has not verified the required manual Realtime audio-commit contract."
         : "The exact Realtime voice action, provider contract, and browser capture path are available.";
   const resultProofId = latestAdmission?.proofIds[0];
   const resultReceiptId = latestAdmission?.receiptIds[0];
@@ -370,7 +378,7 @@ export function VoiceWorkspace({
 
   return <div className="experience-grid local-workspace">
     <DataPanel eyebrow="Runtime-managed Realtime voice" title="Speak with NEXUS" icon={<Mic size={18} />} className="span-2">
-      <p className="workspace-intro">A governed voice session with server turn detection and finalized transcription. WebRTC carries microphone input only; each transcript enters the canonical Runtime once, and browser narration speaks only Runtime response text.</p>
+      <p className="workspace-intro">A governed voice session with bounded browser speech-turn detection and provider transcription. WebRTC carries microphone input only; one manual audio commit closes each detected turn, each final transcript enters the canonical Runtime once, and browser narration speaks only Runtime response text.</p>
       <div className="realtime-voice-stage">
         <NexusAvatar state={deriveAssistantAvatarState({ voiceState, textBusy: busy, hasError: false })} amplitude={amplitude} size="lg" micMuted={microphoneMuted && connected} unavailable={!connected && !liveProviderAvailable} />
         <div className="voice-stage-copy">
@@ -411,7 +419,7 @@ export function VoiceWorkspace({
         <div><dt>Voice / transport</dt><dd>{status?.voice && status?.transport ? `${status.voice} · ${status.transport}` : "Not reported"}</dd></div>
         <div><dt>Browser capture</dt><dd>{supported ? "Secure WebRTC capture supported" : "Unavailable in this browser"}</dd></div>
         <div><dt>Governed fallback</dt><dd>{textAction.available ? "Typed requests available" : "Unavailable"}</dd></div>
-        <div><dt>Conversation</dt><dd>{status?.serverVAD ? "Server voice detection" : "Not verified"}{status?.interruptResponse ? " · interruption enabled" : ""}</dd></div>
+        <div><dt>Conversation</dt><dd>{manualCommitVerified ? "Client turn detection · manual audio commit" : "Manual commit contract not verified"}{status?.interruptResponse ? " · interruption enabled" : ""}</dd></div>
         <div><dt>Context owner</dt><dd>{status?.contextAssemblyOwner ?? "NEXUS Runtime"}</dd></div>
         <div><dt>Governed interaction state</dt><dd>{displayLabel(latestAdmission?.status ?? "idle")}</dd></div>
       </dl>
