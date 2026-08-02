@@ -18,7 +18,7 @@ This allowlist enforces the communication boundary defined by the [NEXUS Platfor
 | `/api/runtime/connectors` | `/runtime/connectors` |
 | `/api/runtime/conclave` | `/runtime/conclave/status` |
 
-The bounded mutation allowlist additionally maps `POST /api/runtime/conclave/reviews` to `POST /runtime/conclave/reviews`. The gateway accepts only `clientId` and a bounded `proposal`; it cannot forward execution or client-authored governance decisions.
+There is no direct conversational mutation allowlist under `/api/runtime`. Former Executive Briefing, Conclave review, HIF interaction, Voice Operator transcript, executive-intent, and generic action routes return `410 canonical_interaction_required`, identify `/executive/interactions` as the required coordinator, and never contact Runtime. Realtime SDP negotiation remains a transport-only exception; finalized transcripts still re-enter through canonical interaction admission before any final response.
 
 No query parameters, record interpolation, wildcard proxy, or arbitrary forwarding exists.
 
@@ -29,6 +29,7 @@ Local routes are disabled unless `COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED=true
 | Browser route | Method | Local Runtime endpoint |
 | --- | --- | --- |
 | `/api/local/status` | GET | `/health` |
+| `/api/local/executive-interactions` | POST | `/executive/interactions` |
 | `/api/local/intake/history` | GET | `/intake/history?limit=30` |
 | `/api/local/intake/upload` | POST | `/intake/upload` |
 | `/api/local/intake/query` | POST | `/intake/query` |
@@ -45,6 +46,5 @@ Local routes are disabled unless `COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED=true
 | `/api/local/voice-operator/status` | GET | `/voice-operator/status` |
 | `/api/local/voice-operator/history` | GET | `/voice-operator/history?limit=8` |
 | `/api/local/voice-operator/receipts` | GET | `/voice-operator/receipts?limit=8` |
-| `/api/local/voice-operator/route-transcript` | POST | `/voice-operator/route-transcript` |
 
-Dynamic project IDs must match the Gateway's safe identifier grammar. Queries, unknown methods, unknown routes, unsafe filenames, and unregistered artifact types are rejected before Runtime contact.
+Typed NEXUS Command input, finalized voice transcripts, Executive Briefing prompts, and Conclave review prompts use only `/api/local/executive-interactions` locally or `/api/operations/executive-interactions` when hosted. The former `/api/runtime/executive-briefing`, `/api/runtime/conclave/reviews`, `/api/runtime/interactions`, `/api/local/interactions`, `/api/local/voice-operator/route-transcript`, executive-intent, and generic action routes are explicit `410` tombstones. Dynamic project IDs must match the Gateway's safe identifier grammar. Queries, unknown methods, unknown routes, unsafe filenames, and unregistered artifact types are rejected before Runtime contact.

@@ -3,12 +3,14 @@ import { createHmac, randomBytes } from "node:crypto";
 import { afterEach, test } from "node:test";
 import {
   CANONICAL_OPERATIONAL_ROUTES,
+  createTenantContextAssertion,
   createPortalServer,
   loadConfig,
   LOCAL_CAPABILITY_ROUTES,
   publicTrustBootstrap,
   REPLAY_ROUTES,
-  RUNTIME_MUTATION_ROUTES,
+  REALTIME_PROMPT_ECHO_HEADER,
+  RETIRED_INTERACTION_ROUTE_BASES,
   RUNTIME_ROUTES,
 } from "../server/portal-server.mjs";
 
@@ -45,6 +47,7 @@ async function start(runtimeFetch, config = {}, localFetch = runtimeFetch, opera
       cacheTtlMs: 500,
       maxAttempts: 3,
       retryDelayMs: 0,
+      contextAssertionSecret: "test-context-assertion-secret-at-least-thirty-two-characters",
       ...config
     },
     runtimeFetch,
@@ -91,87 +94,41 @@ test("arbitrary routes, queries, and every mutation method are rejected", async 
   assert.equal(calls, 0);
 });
 
-test("Conclave, Executive Briefing, and HIF lifecycle are bounded hosted Runtime mutations", async () => {
-  const observed = [];
-  const base = await start(async (url, options) => {
-    observed.push({ url, options });
-    return runtimeResponse({ interaction: { interactionId: "INT-EOX-1" }, events: [{ type: "SpeechStarted", payload: { text: "Briefing" } }] });
+test("every retired interaction and generic execution route requires the canonical coordinator", async () => {
+  let calls = 0;
+  const base = await start(async () => {
+    calls += 1;
+    return runtimeResponse({});
+  }, { localCapabilitiesEnabled: true }, async () => {
+    calls += 1;
+    return localResponse({});
   });
-  assert.deepEqual(RUNTIME_MUTATION_ROUTES, {
-    "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing",
-    "/api/runtime/conclave/reviews": "/runtime/conclave/reviews",
-    "/api/runtime/interactions": "/runtime/interactions"
-  });
-  const response = await fetch(`${base}/api/runtime/executive-briefing`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: "nexus-web", modality: "text", speechRequested: true })
-  });
-  assert.equal(response.status, 200);
-  assert.equal(observed[0].url, "https://runtime.invalid/runtime/executive-operating-loop/briefing");
-  assert.equal(observed[0].options.method, "POST");
-  assert.equal(observed[0].options.headers.Authorization, "Bearer server-only-test-token");
-  assert.equal(JSON.stringify(await response.json()).includes("server-only-test-token"), false);
-  assert.equal((await fetch(`${base}/api/runtime/executive-briefing`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: "nexus-web", execute: true }) })).status, 400);
-  const resumed = await fetch(`${base}/api/runtime/interactions/INT-EOX-1/resume`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({})
-  });
-  assert.equal(resumed.status, 200);
-  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/resume");
-  const events = await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`);
-  assert.equal(events.status, 200);
-  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/events");
-  assert.equal(observed.at(-1).options.method, "GET");
 
-  const conclave = await fetch(`${base}/api/runtime/conclave/reviews`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: "nexus-web", proposal: "Challenge this proposal" })
-  });
-  assert.equal(conclave.status, 200);
-  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/conclave/reviews");
-  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { clientId: "nexus-web", proposal: "Challenge this proposal" });
-  assert.equal((await fetch(`${base}/api/runtime/conclave/reviews`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: "nexus-web", proposal: "Review", execute: true })
-  })).status, 400);
-});
-
-test("hosted conversational reasoning has a dedicated bounded timeout", async () => {
-  const started = Date.now();
-  const base = await start(async (_url, options) => new Promise((resolve, reject) => {
-    const completion = setTimeout(() => resolve(runtimeResponse({ interaction: { responseText: "Verified response" }, events: [] })), 18);
-    options.signal.addEventListener("abort", () => { clearTimeout(completion); reject(Object.assign(new Error("aborted"), { name: "AbortError" })); });
-  }), { timeoutMs: 5, reasoningTimeoutMs: 60 });
-  const response = await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" })
-  });
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  assert.equal(body.ok, true);
-  assert.equal(body.data.interaction.responseText, "Verified response");
-  assert.equal("data" in body.data, false);
-  assert.ok(Date.now() - started >= 15);
+  for (const route of RETIRED_INTERACTION_ROUTE_BASES) {
+    const response = await fetch(`${base}${route}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Attempt a retired direct interaction" }),
+    });
+    assert.equal(response.status, 410, route);
+    const body = await response.json();
+    assert.equal(body.error.code, "canonical_interaction_required", route);
+    assert.equal(body.error.details.canonical_endpoint, "/executive/interactions", route);
+  }
+  const lifecycle = await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`);
+  assert.equal(lifecycle.status, 410);
+  assert.equal((await lifecycle.json()).error.code, "canonical_interaction_required");
+  assert.equal(calls, 0);
 });
 
 test("Experience Gateway signs authoritative Runtime tenant context without exposing the secret", async () => {
   const secret = randomBytes(48).toString("base64url");
-  let observed;
-  const base = await start(async (url, options) => {
-    observed = { url, options };
-    return runtimeResponse({ interaction: { responseText: "Context received" }, events: [] });
-  }, { contextAssertionSecret: secret, operationalTenantId: "nexicron" });
-  const response = await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      clientId: "nexus-web",
-      inputText: "What is Nexicron's mission?",
-      modality: "text",
-      metadata: { tenantId: "untrusted-browser-tenant", contextAssemblyOwner: "browser" }
-    })
+  const config = loadConfig({
+    runtimeToken: "server-only-test-token",
+    contextAssertionSecret: secret,
+    operationalTenantId: "nexicron",
   });
-  assert.equal(response.status, 200);
-  const token = observed.options.headers["X-NEXUS-Context-Assertion"];
+  const token = createTenantContextAssertion(config, null, "nexus-web", () => Date.parse("2026-08-01T00:00:00Z"));
   const [encodedPayload, signature] = token.split(".");
   const assertion = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
   assert.equal(assertion.v, 2);
@@ -189,10 +146,63 @@ test("Experience Gateway signs authoritative Runtime tenant context without expo
   assert.equal(assertion.authorityGranted, false);
   assert.equal(assertion.exp - assertion.iat, 60);
   assert.equal(signature, createHmac("sha256", secret).update(encodedPayload).digest("base64url"));
-  const forwarded = JSON.parse(observed.options.body);
-  assert.equal(forwarded.metadata.tenantId, "nexicron");
-  assert.equal(forwarded.metadata.contextAssemblyOwner, "nexus-runtime");
-  assert.equal(JSON.stringify(await response.json()).includes(secret), false);
+  assert.equal(token.includes(secret), false);
+});
+
+test("named operator assertions bind the human actor, role, and sorted scopes in v3", () => {
+  const secret = "human-context-assertion-secret-at-least-thirty-two-characters";
+  const assertion = createTenantContextAssertion({
+    contextAssertionSecret: secret,
+    contextAssertionIssuer: "command-portal-experience-gateway",
+    contextAssertionAudience: "nexus-runtime",
+    contextAssertionKeyId: "context-assertion-current",
+    contextAssertionClientIds: ["nexus-web"],
+  }, {
+    sub: "operator-alpha",
+    tenantId: "tenant-alpha",
+    workspaceId: "workspace-alpha",
+    role: "admin",
+    scopes: ["operations:write", "operations:read", "operations:write"],
+    principalType: "named_operator",
+  }, "nexus-web", () => Date.parse("2026-08-02T01:00:00Z"));
+  const [encodedPayload, signature] = assertion.split(".");
+  assert.equal(signature, createHmac("sha256", secret).update(encodedPayload).digest("base64url"));
+  const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+  assert.deepEqual(payload, {
+    v: 3,
+    contract: "nexus.context-assertion@3.0.0",
+    alg: "hmac-sha256",
+    kid: "context-assertion-current",
+    iss: "command-portal-experience-gateway",
+    aud: "nexus-runtime",
+    tid: "tenant-alpha",
+    wid: "workspace-alpha",
+    sub: "operator-alpha",
+    roles: ["admin"],
+    scopes: ["operations:read", "operations:write"],
+    clientId: "nexus-web",
+    iat: 1785632400,
+    exp: 1785632460,
+    jti: payload.jti,
+    trustBindingId: "runtime-experience-trust-bootstrap",
+    authorityGranted: true,
+    humanOperatorVerified: true,
+  });
+  assert.match(payload.jti, /^[0-9a-f-]{36}$/);
+  assert.throws(
+    () => createTenantContextAssertion({
+      contextAssertionSecret: secret,
+      contextAssertionClientIds: ["nexus-web"],
+    }, {
+      sub: "workspace-service",
+      tenantId: "tenant-alpha",
+      workspaceId: "workspace-alpha",
+      role: "admin",
+      scopes: ["operations:write"],
+      principalType: "workspace_service",
+    }, "nexus-web"),
+    /named operator/,
+  );
 });
 
 test("redacted trust bootstrap requires secret-manager references but never returns material", () => {
@@ -275,37 +285,44 @@ test("redacted trust bootstrap requires secret-manager references but never retu
   assert.equal(invalidPublicBinding.provisioningReady, false);
 });
 
-test("hosted conversational reasoning reports its own timeout truthfully", async () => {
-  const base = await start(async (_url, options) => new Promise((_resolve, reject) => {
-    options.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
-  }), { timeoutMs: 50, reasoningTimeoutMs: 5 });
-  const response = await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" })
-  });
-  const body = await response.json();
-  assert.equal(response.status, 504);
-  assert.equal(body.gateway.connectionState, "Timed Out");
-  assert.equal(body.error.code, "runtime_reasoning_timeout");
-});
-
 test("Realtime WebRTC SDP crosses the same-origin gateway without exposing either server credential", async () => {
   const offer = "v=0\r\na=offer\r\n".repeat(12);
   const answer = "v=0\r\na=answer\r\n".repeat(12);
+  const promptEchoSignature = "NEXUS, enterprise operations, governance, evidence, proofs, and receipts.";
   let observed;
   const base = await start(async (url, options) => {
     observed = { url, options };
-    return new Response(answer, { status: 201, headers: { "Content-Type": "application/sdp" } });
+    return new Response(answer, { status: 201, headers: {
+      "Content-Type": "application/sdp",
+      [REALTIME_PROMPT_ECHO_HEADER]: promptEchoSignature,
+    } });
   });
   const response = await fetch(`${base}/api/runtime/realtime/call`, {
     method: "POST", headers: { "Content-Type": "application/sdp", Accept: "application/sdp" }, body: offer
   });
   assert.equal(response.status, 201);
   assert.equal(await response.text(), answer);
+  assert.equal(response.headers.get(REALTIME_PROMPT_ECHO_HEADER), promptEchoSignature);
   assert.equal(observed.url, "https://runtime.invalid/runtime/voice/realtime/call");
   assert.equal(observed.options.headers.Authorization, "Bearer server-only-test-token");
   assert.equal(Buffer.from(observed.options.body).toString("utf8"), offer);
   assert.equal(answer.includes("server-only-test-token"), false);
+});
+
+test("Realtime gateway fails closed when Runtime omits the transcript-admission boundary", async () => {
+  const offer = "v=0\r\na=offer\r\n".repeat(12);
+  const answer = "v=0\r\na=answer\r\n".repeat(12);
+  const base = await start(async () => new Response(answer, {
+    status: 201,
+    headers: { "Content-Type": "application/sdp" },
+  }));
+  const response = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST", headers: { "Content-Type": "application/sdp" }, body: offer,
+  });
+  const body = await response.json();
+  assert.equal(response.status, 502);
+  assert.equal(body.error.code, "realtime_response_invalid");
+  assert.match(body.error.message, /transcript-admission boundary/);
 });
 
 test("Realtime gateway rejects non-SDP and unsafe methods before contacting Runtime", async () => {
@@ -319,7 +336,7 @@ test("Realtime gateway rejects non-SDP and unsafe methods before contacting Runt
   assert.equal(calls, 0);
 });
 
-test("hosted HIF and Realtime voice require the signed operational session and CSRF proof", async () => {
+test("hosted Realtime voice requires the signed operational session and CSRF proof", async () => {
   const calls = [];
   const answer = "v=0\r\na=answer\r\n".repeat(12);
   const config = {
@@ -338,15 +355,13 @@ test("hosted HIF and Realtime voice require the signed operational session and C
   const base = await start(async (url, options) => {
     calls.push({ url, options });
     if (url.endsWith("/runtime/voice/realtime/call")) {
-      return new Response(answer, { status: 201, headers: { "Content-Type": "application/sdp" } });
+      return new Response(answer, { status: 201, headers: {
+        "Content-Type": "application/sdp",
+        [REALTIME_PROMPT_ECHO_HEADER]: "NEXUS, enterprise operations, governance, evidence, proofs, and receipts.",
+      } });
     }
-    return runtimeResponse({ interaction: { responseText: "Verified response" }, events: [] });
+    return runtimeResponse({});
   }, config);
-  const interactionBody = JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" });
-  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: interactionBody,
-  })).status, 401);
-  assert.equal(calls.length, 0);
 
   const login = await fetch(`${base}/api/session/login`, {
     method: "POST",
@@ -355,19 +370,6 @@ test("hosted HIF and Realtime voice require the signed operational session and C
   });
   const session = await login.json();
   const cookie = login.headers.get("set-cookie").split(";")[0];
-  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: interactionBody,
-  })).status, 403);
-  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST",
-    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken },
-    body: interactionBody,
-  })).status, 200);
-  assert.equal((await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`)).status, 401);
-  assert.equal((await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`, {
-    headers: { Cookie: cookie },
-  })).status, 200);
-
   const offer = "v=0\r\na=offer\r\n".repeat(12);
   assert.equal((await fetch(`${base}/api/runtime/realtime/call`, {
     method: "POST", headers: { "Content-Type": "application/sdp" }, body: offer,
@@ -382,7 +384,7 @@ test("hosted HIF and Realtime voice require the signed operational session and C
   });
   assert.equal(realtime.status, 201);
   assert.equal(await realtime.text(), answer);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 1);
 });
 
 test("runtime credential is server-only and never serialized", async () => {
@@ -624,21 +626,28 @@ test("local capability allowlist maps only literal governed Runtime operations",
   }, localFetch);
 
   const postBodies = {
+    "/api/local/executive-interactions": {
+      interaction_id: "11111111-1111-4111-8111-111111111111",
+      session_id: "22222222-2222-4222-8222-222222222222",
+      input: { modality: "text", text: "Summarize project Alpha", source_client: "nexus-command" },
+      context: { active_object_ids: [], conversation_id: "22222222-2222-4222-8222-222222222222" },
+    },
     "/api/local/intake/upload": { filename: "brief.txt", contentBase64: "SGVsbG8=" },
     "/api/local/intake/query": { question: "What is in the brief?" },
     "/api/local/projects": { name: "Nexicron Alpha" },
     "/api/local/missions/plan": { objective: "Plan a governed launch" },
     "/api/local/work-sessions/plan": { objective: "Plan a bounded audit" },
     "/api/local/work-sessions/start": { objective: "Start a bounded audit" },
-    "/api/local/actions/dry-run": { action: "inspect local project status" },
-    "/api/local/actions/execute": { action: "run approved local test", explicitRequest: true },
-    "/api/local/voice-operator/route-transcript": { transcript: "Summarize project Alpha", source: "text_fallback" },
-    "/api/local/interactions": { clientId: "nexus-web", inputText: "Summarize project Alpha", modality: "text" }
   };
   for (const [route, definition] of Object.entries(LOCAL_CAPABILITY_ROUTES)) {
     const response = await fetch(`${base}${route}`, {
       method: definition.method,
-      headers: definition.method === "POST" ? { "Content-Type": "application/json" } : {},
+      headers: definition.method === "POST" ? {
+        "Content-Type": "application/json",
+        "Idempotency-Key": route === "/api/local/executive-interactions"
+          ? "11111111-1111-4111-8111-111111111111"
+          : "local-capability-test-0001",
+      } : {},
       ...(definition.method === "POST" ? { body: JSON.stringify(postBodies[route]) } : {})
     });
     assert.equal(response.status, 200, route);
@@ -663,7 +672,7 @@ test("operational parity routes are explicit, validated, and remain Runtime-owne
     ["/api/local/approvals/APPROVAL-1/deny", { reason: "Insufficient evidence" }, "/approvals/APPROVAL-1/deny"]
   ];
   for (const [route, body, runtimePath] of cases) {
-    const response = await fetch(`${base}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const response = await fetch(`${base}${route}`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": "parity-operation-test-0001" }, body: JSON.stringify(body) });
     assert.equal(response.status, 200, route);
     assert.equal(observed.at(-1).url, `http://127.0.0.1:8765${runtimePath}`);
     assert.equal((await response.json()).local.contextAssemblyOwner, "NEXUS Runtime");
@@ -818,38 +827,41 @@ test("Runtime Coordination exposes fleet reads and exact governed admission rout
   assert.equal((await fetch(`${base}/api/local/runtime-coordination/nodes?tenant=other`)).status, 400);
 });
 
-test("operational payloads cannot smuggle client-side governance decisions", async () => {
+test("legacy generic action routes are tombstoned instead of accepting client-side classification", async () => {
   let calls = 0;
   const base = await start(async () => runtimeResponse({}), { localCapabilitiesEnabled: true }, async () => { calls += 1; return localResponse({}); });
   const response = await fetch(`${base}/api/local/actions/execute`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": "governance-smuggle-test-0001" },
     body: JSON.stringify({ action: "change production", explicitRequest: true, approved: true })
   });
-  assert.equal(response.status, 400);
+  assert.equal(response.status, 410);
+  const profile = await fetch(`${base}/api/local/actions/dry-run`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "inspect status", profile: "personal", write: true })
+  });
+  assert.equal(profile.status, 410);
   assert.equal(calls, 0);
 });
 
-test("HIF interaction events use the shared platform Runtime boundary", async () => {
-  const observed = [];
+test("legacy HIF interaction routes require canonical admission", async () => {
+  let calls = 0;
   const base = await start(async () => runtimeResponse({}), {
     localCapabilitiesEnabled: true,
     platformRuntimeBaseUrl: "http://127.0.0.1:8080"
-  }, async (url, options) => {
-    observed.push({ url, options });
-    return localResponse({ status: "ok", data: { interaction: { interactionId: "INT-1" }, events: [] } });
+  }, async () => {
+    calls += 1;
+    return localResponse({});
   });
   const created = await fetch(`${base}/api/local/interactions`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clientId: "nexus-web", inputText: "Brief me", presentation: { navigate: "projects", focus: "alpha" } })
   });
-  assert.equal(created.status, 200);
-  assert.equal(observed[0].url, "http://127.0.0.1:8080/runtime/interactions");
-  assert.equal((await fetch(`${base}/api/local/interactions/INT-1/events`)).status, 200);
-  assert.equal(observed[1].url, "http://127.0.0.1:8080/runtime/interactions/INT-1/events");
+  assert.equal(created.status, 410);
+  assert.equal((await fetch(`${base}/api/local/interactions/INT-1/events`)).status, 410);
   assert.equal((await fetch(`${base}/api/local/interactions/INT-1/interrupt`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "barge_in" })
-  })).status, 200);
-  assert.equal(observed[2].url, "http://127.0.0.1:8080/runtime/interactions/INT-1/interrupt");
+  })).status, 410);
+  assert.equal(calls, 0);
 });
 
 test("project scope estimate planning and compile use one dynamic Runtime project contract", async () => {
@@ -949,7 +961,7 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Role"], "admin");
-  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,actions:simulate");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "actions:simulate,operations:read,operations:write");
   const callsBeforeLegacyPlan = observed.length;
   assert.equal((await fetch(`${base}/api/operations/missions/plan`, {
     method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ objective: "Plan alpha" })
@@ -1077,9 +1089,10 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
   assert.equal(replayFallbackCalls, 0);
   assert.equal(localFallbackCalls, 0);
   const callsBeforeStaleRoutes = observed.length;
-  for (const stale of ["work-sessions", "approvals", "connectors", "actions/dry-run"]) {
+  for (const stale of ["work-sessions", "approvals", "connectors"]) {
     assert.equal((await fetch(`${base}/api/operations/${stale}`, { headers: { Cookie: cookie } })).status, 404, stale);
   }
+  assert.equal((await fetch(`${base}/api/operations/actions/dry-run`, { headers: { Cookie: cookie } })).status, 410);
   assert.equal(observed.length, callsBeforeStaleRoutes);
   assert.equal(localFallbackCalls, 0);
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/missions"].GET, "/missions");
@@ -1122,7 +1135,7 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
   assert.equal(promotion.status, 200);
   assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/knowledge/promotions");
   assert.equal(observed.at(-1).options.headers["Idempotency-Key"], promotionKey);
-  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,knowledge:promote");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "knowledge:promote,operations:read,operations:write");
   assert.deepEqual(JSON.parse(observed.at(-1).options.body), { candidateId: "candidate-runtime-baseline-001" });
 
   const candidateKey = "promotion-candidate-0001";
@@ -1182,7 +1195,7 @@ test("hosted Document, Project, and Voice workspaces use authenticated Runtime-o
     operationalWorkspaceId: "workspace-alpha",
     operationalUserId: "operator-1",
     operationalRole: "admin",
-    operationalScopes: ["operations:read", "operations:write", "evidence:write"],
+    operationalScopes: ["operations:read", "operations:write", "approvals:decide", "evidence:write"],
     operationalCookieSecure: false,
   };
   const base = await start(
@@ -1221,11 +1234,17 @@ test("hosted Document, Project, and Voice workspaces use authenticated Runtime-o
   })).status, 400);
 
   const operations = [
+    ["/executive-interactions", "/executive/interactions", "11111111-1111-4111-8111-111111111111", {
+      interaction_id: "11111111-1111-4111-8111-111111111111",
+      session_id: "22222222-2222-4222-8222-222222222222",
+      input: { modality: "text", text: "Prepare and execute the bounded readiness review", source_client: "nexus-command" },
+      context: { active_object_ids: [], conversation_id: "22222222-2222-4222-8222-222222222222" },
+    }],
+    ["/approvals/APPROVAL-001/approve", "/approvals/APPROVAL-001/approve", "approval-decision-0001", {}],
     ["/intake/upload", "/intake/upload", "intake-upload-0001", { filename: "requirements.txt", contentBase64: "SGVsbG8=", projectId: "PROJECT-001" }],
     ["/intake/query", "/intake/query", "intake-query-0001", { question: "What requirements are supported?", projectId: "PROJECT-001" }],
     ["/projects", "/projects", "project-create-0001", { name: "Project Alpha" }],
     ["/projects/PROJECT-001/compile", "/projects/PROJECT-001/compile", "project-compile-0001", { artifactType: "roadmap", options: { defaultPhaseDurationWeeks: 2, assumptions: [] } }],
-    ["/voice-operator/route-transcript", "/voice-operator/route-transcript", "voice-route-0001", { transcript: "Summarize project Alpha", source: "text_fallback" }],
   ];
   for (const [portalPath, runtimePath, key, body] of operations) {
     const response = await fetch(`${base}/api/operations${portalPath}`, {
@@ -1239,7 +1258,14 @@ test("hosted Document, Project, and Voice workspaces use authenticated Runtime-o
     assert.equal(call.options.headers["Idempotency-Key"], key, portalPath);
     assert.equal(call.options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha", portalPath);
     assert.equal(call.options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha", portalPath);
-    assert.deepEqual(JSON.parse(call.options.body), body, portalPath);
+    const forwarded = JSON.parse(call.options.body);
+    if (portalPath === "/executive-interactions") {
+      assert.deepEqual(forwarded, {
+        ...body,
+        actor: { actor_id: "operator-1", tenant_id: "tenant-alpha", roles: ["admin"] },
+        context: { ...body.context, workspace_id: "workspace-alpha" },
+      });
+    } else assert.deepEqual(forwarded, body, portalPath);
   }
 
   const callsBeforeRejectedIdentity = observed.length;
@@ -1577,7 +1603,7 @@ test("hosted mode cannot coexist with local or legacy Replay gateways", () => {
   assert.throws(() => loadConfig({ ...hosted, replayEnabled: true }), /cannot coexist/);
 });
 
-test("published Replit mode requires its private domain boundary and no operator access key", () => {
+test("published Replit mode defaults to explicit named-operator authentication", () => {
   const hosted = {
     runtimeBaseUrl: "https://runtime.invalid",
     runtimeToken: "server-only-test-token",
@@ -1585,27 +1611,25 @@ test("published Replit mode requires its private domain boundary and no operator
     operationalApiBaseUrl: "https://nexus-runtime-dev.fly.dev",
     operationalRuntimeToken: "runtime-token-at-least-24-characters",
     operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
     replitDeployment: true,
     replitDomains: "command-portal.replit.app",
   };
   const config = loadConfig(hosted);
-  assert.equal(config.operationalSessionMode, "automatic_private_workspace");
-  assert.equal(config.operationalPrincipalType, "workspace_service");
-  assert.equal(config.operationalAccessBasis, "replit_private_deployment");
-  assert.equal(config.operationalAccessKey, "automatic-session-no-access-key");
+  assert.equal(config.operationalSessionMode, "access_key");
+  assert.equal(config.operationalPrincipalType, "named_operator");
+  assert.equal(config.operationalAccessBasis, "operator_access_key");
+  assert.equal(config.operationalAccessKey, "operator-access-key-strong");
   assert.deepEqual(config.replitDomains, ["command-portal.replit.app"]);
 
-  assert.throws(
-    () => loadConfig({ ...hosted, replitDomains: "" }),
-    /Automatic hosted sessions require/,
-  );
+  assert.doesNotThrow(() => loadConfig({ ...hosted, replitDomains: "" }));
   assert.throws(
     () => loadConfig({ ...hosted, replitDeployment: false, operationalSessionMode: "automatic_private_workspace" }),
     /Automatic hosted sessions require/,
   );
   assert.throws(
     () => loadConfig({ ...hosted, operationalCookieSecure: false }),
-    /Automatic hosted sessions require/,
+    /Published Replit sessions require Secure cookies/,
   );
 });
 
@@ -1619,7 +1643,8 @@ test("private Replit ingress automatically establishes one server-derived worksp
     operationalWorkspaceId: "workspace-alpha",
     operationalUserId: "nexus-workspace-service",
     operationalRole: "operator",
-    operationalScopes: ["operations:read", "operations:write", "evidence:write"],
+    operationalScopes: ["operations:read", "operations:write", "approvals:decide", "evidence:write"],
+    operationalSessionMode: "automatic_private_workspace",
     operationalCookieSecure: true,
     replitDeployment: true,
     replitDomains: "command-portal.replit.app",
@@ -1640,7 +1665,7 @@ test("private Replit ingress automatically establishes one server-derived worksp
   assert.equal(body.session.tenantId, "tenant-alpha");
   assert.equal(body.session.workspaceId, "workspace-alpha");
   assert.equal(body.session.role, "operator");
-  assert.deepEqual(body.session.scopes, ["operations:read", "operations:write", "evidence:write"]);
+  assert.deepEqual(body.session.scopes, ["operations:read", "operations:write", "approvals:decide", "evidence:write"]);
   assert.equal(body.session.connectionMode, "automatic_private_workspace");
   assert.equal(body.session.principalType, "workspace_service");
   assert.equal(body.session.accessBasis, "replit_private_deployment");
@@ -1665,6 +1690,43 @@ test("private Replit ingress automatically establishes one server-derived worksp
     body: JSON.stringify({ accessKey: "browser-key-must-not-be-accepted" }),
   });
   assert.equal(keyLogin.status, 404);
+
+  const interactionId = "b9759a83-4cad-4f86-88b3-e8623498d0be";
+  const interaction = await fetch(`${base}/api/operations/executive-interactions`, {
+    method: "POST",
+    headers: {
+      ...trustedHeaders,
+      Cookie: cookie,
+      Origin: "https://command-portal.replit.app",
+      "Content-Type": "application/json",
+      "X-CSRF-Token": body.session.csrfToken,
+      "Idempotency-Key": interactionId,
+    },
+    body: JSON.stringify({
+      interaction_id: interactionId,
+      session_id: "7873c63a-b3b3-4f60-b8d3-313d9486e463",
+      input: { modality: "text", text: "Check Git status", source_client: "nexus-command" },
+      context: { active_object_ids: [], conversation_id: null },
+    }),
+  });
+  const interactionBody = await interaction.json();
+  assert.equal(interaction.status, 403, JSON.stringify(interactionBody));
+  assert.equal(interactionBody.error.code, "named_operator_required");
+
+  const approval = await fetch(`${base}/api/operations/approvals/approval-001/approve`, {
+    method: "POST",
+    headers: {
+      ...trustedHeaders,
+      Cookie: cookie,
+      Origin: "https://command-portal.replit.app",
+      "Content-Type": "application/json",
+      "X-CSRF-Token": body.session.csrfToken,
+      "Idempotency-Key": "approve:approval-001",
+    },
+    body: "{}",
+  });
+  assert.equal(approval.status, 403);
+  assert.equal((await approval.json()).error.code, "named_operator_required");
 });
 
 test("automatic workspace issuance fails closed outside the exact private Replit ingress", async () => {
@@ -1673,6 +1735,7 @@ test("automatic workspace issuance fails closed outside the exact private Replit
     operationalApiBaseUrl: "http://127.0.0.1:9876",
     operationalRuntimeToken: "runtime-token-at-least-24-characters",
     operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalSessionMode: "automatic_private_workspace",
     operationalCookieSecure: true,
     replitDeployment: true,
     replitDomains: "command-portal.replit.app",

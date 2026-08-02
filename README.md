@@ -2,11 +2,22 @@
 
 The standalone NEXUS Operational Engagement client for observing a hosted Runtime and using governed capabilities from the authoritative NEXUS Runtime through the NEXUS Experience Gateway.
 
-The [NEXUS Platform Constitution](docs/architecture/NEXUS_Platform_Constitution.md) is the canonical architectural reference for this repository.
+The governing Experience migration basis is pinned in
+[`docs/nexus-command-experience-contract.json`](docs/nexus-command-experience-contract.json):
+Registry release `NCR-1.0.0` and official publication `NCA-2.0.0`. Local architecture
+documents are implementation history and must not create a competing constitution.
 
 ## Architecture
 
-NEXUS is an [Operational Understanding Platform](docs/architecture/Operational_Understanding_Platform.md) composed of a Runtime Foundation, the continuous Operational Understanding Loop, six Operational Capabilities, and shared Operational Objects. The portal presents the Executive Operational Experience; it does not own operational understanding, authority, or context assembly.
+NEXUS is the Enterprise eXecutive Unified System: an evidence-governed operational
+cognition platform and executive operating system. One causal operating spine links
+Source, Observation, Evidence, Representation, Context, Understanding, Conclave,
+Recommendation, Governance and Authority, Decision, Mission, verified Outcomes,
+Operational Replay, promotion review, and durable Knowledge. Eight cooperating
+systems—Reality, Understanding, Deliberation, Authority, Mission, Knowledge,
+Accountability, and Runtime—own responsibilities across that spine; they are not
+tiers. The portal presents the NEXUS Command Experience and does not own operational
+truth, Authority, capability, execution, receipts, Outcomes, or context assembly.
 
 ```text
 Executive User
@@ -32,7 +43,7 @@ Tenant Operational Context is also Runtime-owned. When `NEXUS_CONTEXT_ASSERTION_
 
 Hosted operational access uses the separate `/api/operations` allowlist. Its current classification is single-workspace hosted alpha: signed HttpOnly sessions, CSRF verification, scoped authorization, idempotency keys, fixed tenant/workspace identity, and a server-only Runtime credential are enforced. The allowlist includes the Runtime Client Capability Contract plus the bounded Document Intelligence, Projects, and Voice Operator routes registered by that contract. It does not claim production multi-tenant isolation.
 
-Local document intake, evidence query, project intelligence, artifact compilation, voice routing, missions, work sessions, approvals, governed execution requests, connector readiness, proof, and receipts use a separate explicit allowlist under `/api/local`. The browser supplies operator intent and renders Runtime results; it does not assemble operational context, calculate project scope or price, make governance decisions, or fabricate capability. There is no wildcard proxy or arbitrary URL forwarding.
+Local document intake, evidence query, project intelligence, artifact compilation, voice transport, missions, work sessions, approval decisions, connector readiness, proof, and receipts use a separate explicit allowlist under `/api/local`. Typed and finalized voice interaction requests use only the canonical interaction route. The browser supplies input and renders Runtime results; it does not assemble operational context, classify or authorize commands, calculate project scope or price, make governance decisions, or fabricate capability. There is no wildcard proxy or arbitrary URL forwarding.
 
 ## Hosted runtime mode
 
@@ -74,12 +85,13 @@ Set `COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED=true`, then run `npm run dev:serv
 ## Runtime capability parity
 
 - Document Intelligence ingests supported files, links sources to projects, queries evidence, and displays the Runtime source inventory.
-- Nexicron Projects creates project records and consumes Runtime-owned scope, estimate, planning context, evidence, and artifact contracts.
-- Voice Operator supports natural full-duplex WebRTC audio, server voice detection, streaming response audio, interruption, independent microphone mute, and independent NEXUS playback mute through the Runtime-owned Realtime session contract. Mute controls remain browser media controls and do not end or redefine the governed Runtime session. Typed requests remain available through the shared Runtime Human Interaction Framework.
-- Human Interaction Framework events provide the common Runtime-owned conversation, speech, streaming, interruption, avatar, navigation, focus, highlighting, and presentation behavior contract shared with NEXUS Command.
-- A persistent NEXUS executive copilot remains available across Operations Center, Document Intelligence, Nexicron Projects, Mission Control, topology, providers, and evidence views. On desktop it receives a dedicated application column and resizes the workspace rather than covering it; it overlays only below the mobile breakpoint. It carries one conversation ID, supports Runtime-governed text and Realtime voice, and presents model-native limitations without assembling Operational Context in the browser.
-- Runtime interaction and Conclave responses use the Experience Gateway's single `data` envelope. Form examples are placeholders rather than submitted defaults, so operator intent is always explicit.
-- Mission Control consumes the versioned Runtime Client Parity Contract and presents mission planning, bounded work sessions, approval decisions, dry-run and governed execution requests, and connector readiness.
+- NEXUS Projects creates project records and consumes Runtime-owned scope, estimate, planning context, Evidence, and artifact contracts.
+- Realtime voice supports full-duplex WebRTC audio, server voice detection, interruption, independent microphone mute, and independent NEXUS playback mute. Every finalized transcript is admitted through `POST /executive/interactions` before the provider may narrate the canonical `response_text`; provider output is never a second authoritative answer.
+- Typed NEXUS Command requests use that same canonical interaction endpoint. The browser supplies only input and presentation context; the Experience Gateway injects corroborating actor, tenant, role, and workspace values from its authenticated server session. Runtime alone classifies questions and actions, evaluates Authority, resolves capabilities, executes, verifies, and returns receipts.
+- Direct Executive Briefing, Conclave review, HIF interaction, Voice Operator transcript, executive-intent, and generic action browser routes are retired with `410 canonical_interaction_required`; they cannot contact Runtime or produce a competing response.
+- A persistent NEXUS Command assistant remains available across Operations Center, Document Intelligence, NEXUS Projects, Mission Control, topology, providers, and Evidence views. It carries one conversation ID, supports Runtime-governed text and Realtime voice, and presents model-native limitations without assembling Operational Context in the browser.
+- Canonical interaction and Conclave responses use the Experience Gateway's single `data` envelope. Form examples are placeholders rather than submitted defaults, so operator intent is always explicit.
+- Mission Control consumes the versioned Runtime Client Parity Contract and presents mission planning, bounded work-session state, approval decisions, and connector readiness; it does not expose a generic client-authored execution route.
 
 Only capabilities reported as implemented by Runtime are presented as executable. Numeric estimates remain unavailable when required rate or quantity evidence is absent. The browser owns microphone capture, audio playback, and visual state only. Runtime owns voice provider configuration, instructions, context boundaries, and execution constraints; the permanent provider key remains server-side.
 

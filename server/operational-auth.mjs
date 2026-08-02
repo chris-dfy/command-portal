@@ -116,8 +116,6 @@ export function requiredScope(runtimePath, method) {
   if (/^\/runtime-coordination\/admissions\/[A-Za-z0-9_.%:@-]+\/challenge\/reissue$/.test(runtimePath)) return "edge:node_admission:review";
   if (/^\/runtime-coordination\/admissions(?:\/[A-Za-z0-9_.%:@-]+\/cancel)?$/.test(runtimePath)) return "edge:node_admission:request";
   if (/^\/approvals\/.+\/(approve|deny)$/.test(runtimePath)) return "approvals:decide";
-  if (runtimePath === "/actions/execute") return "actions:execute";
-  if (runtimePath === "/actions/dry-run") return "actions:simulate";
   if (runtimePath === "/intake/upload") return "evidence:write";
   return "operations:write";
 }

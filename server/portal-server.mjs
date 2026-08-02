@@ -13,6 +13,7 @@ export const SUPPORTED_RUNTIME_VERSION = "0.1.0";
 export const TRUST_BOOTSTRAP_CONTRACT = "nexus.runtime-experience-trust-bootstrap@1.0.0";
 export const CONTEXT_ASSERTION_CONTRACT = "nexus.context-assertion@2.0.0";
 export const CONTEXT_ASSERTION_ALGORITHM = "hmac-sha256";
+export const REALTIME_PROMPT_ECHO_HEADER = "X-NEXUS-Prompt-Echo-Signature";
 const CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime";
 const CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway";
 const CONTEXT_ASSERTION_KEY_ID = "context-assertion-current";
@@ -55,20 +56,31 @@ export function resolveRuntimeReadRoute(pathname) {
   return null;
 }
 
-export const RUNTIME_MUTATION_ROUTES = Object.freeze({
-  "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing",
-  "/api/runtime/conclave/reviews": "/runtime/conclave/reviews",
-  "/api/runtime/interactions": "/runtime/interactions"
-});
+export const RETIRED_INTERACTION_ROUTE_BASES = Object.freeze([
+  "/api/runtime/executive-briefing",
+  "/api/runtime/conclave/reviews",
+  "/api/runtime/interactions",
+  "/api/runtime/executive-intents",
+  "/api/runtime/voice-operator/route-transcript",
+  "/api/local/interactions",
+  "/api/local/executive-intents",
+  "/api/local/voice-operator/route-transcript",
+  "/api/local/actions/dry-run",
+  "/api/local/actions/execute",
+  "/api/operations/interactions",
+  "/api/operations/executive-intents",
+  "/api/operations/voice-operator/route-transcript",
+  "/api/operations/actions/dry-run",
+  "/api/operations/actions/execute",
+]);
 
-function resolveRuntimeMutation(pathname) {
-  if (RUNTIME_MUTATION_ROUTES[pathname]) return RUNTIME_MUTATION_ROUTES[pathname];
-  const match = pathname.match(/^\/api\/runtime\/interactions\/([A-Z0-9-]+)\/(events|interrupt|resume|presentation-complete)$/);
-  return match ? `/runtime/interactions/${match[1]}/${match[2]}` : null;
+function retiredInteractionRoute(pathname) {
+  return RETIRED_INTERACTION_ROUTE_BASES.some((base) => pathname === base || pathname.startsWith(`${base}/`));
 }
 
 export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/status": { method: "GET", runtimePath: "/health" },
+  "/api/local/executive-interactions": { method: "POST", runtimePath: "/executive/interactions" },
   "/api/local/intake/history": { method: "GET", runtimePath: "/intake/history?limit=30" },
   "/api/local/intake/upload": { method: "POST", runtimePath: "/intake/upload" },
   "/api/local/intake/query": { method: "POST", runtimePath: "/intake/query" },
@@ -82,8 +94,6 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/work-sessions/plan": { method: "POST", runtimePath: "/work-sessions/plan" },
   "/api/local/work-sessions/start": { method: "POST", runtimePath: "/work-sessions/start" },
   "/api/local/approvals": { method: "GET", runtimePath: "/approvals?limit=12" },
-  "/api/local/actions/dry-run": { method: "POST", runtimePath: "/actions/dry-run" },
-  "/api/local/actions/execute": { method: "POST", runtimePath: "/actions/execute" },
   "/api/local/connectors": { method: "GET", runtimePath: "/connectors" },
   "/api/local/connectors/health": { method: "GET", runtimePath: "/connectors/health" },
   "/api/local/proofs": { method: "GET", runtimePath: "/proof/recent?limit=8" },
@@ -92,9 +102,6 @@ export const LOCAL_CAPABILITY_ROUTES = Object.freeze({
   "/api/local/voice-operator/status": { method: "GET", runtimePath: "/voice-operator/status" },
   "/api/local/voice-operator/history": { method: "GET", runtimePath: "/voice-operator/history?limit=8" },
   "/api/local/voice-operator/receipts": { method: "GET", runtimePath: "/voice-operator/receipts?limit=8" },
-  "/api/local/voice-operator/route-transcript": { method: "POST", runtimePath: "/voice-operator/route-transcript" },
-  "/api/local/interactions/status": { method: "GET", runtimePath: "/runtime/interactions/status", target: "platform" },
-  "/api/local/interactions": { method: "POST", runtimePath: "/runtime/interactions", target: "platform" }
 });
 
 export const REPLAY_ROUTES = Object.freeze({
@@ -114,6 +121,7 @@ const ADMISSION_ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const OPERATIONAL_RECORD_ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const RUNTIME_CAPABILITY_PATTERN = /^nexus\.[A-Za-z0-9][A-Za-z0-9._:-]{0,158}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,160}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RESERVED_ADMISSION_METADATA_KEYS = new Set([
   "tenantid", "workspaceid", "principalid", "requestingprincipalid", "authoritygrantid",
   "decisionid", "accountabilityid", "nodeid", "operationalassetid", "verificationstate",
@@ -129,9 +137,9 @@ const RUNTIME_COORDINATION_SECRET_FIELDS = new Set([
   "signingkey",
 ]);
 const UNTRUSTED_OPERATIONAL_FIELDS = new Set([
-  "identity", "tenant", "tenantid", "workspace", "workspaceid", "principal", "principalid",
+  "actor", "actorid", "identity", "tenant", "tenantid", "workspace", "workspaceid", "principal", "principalid",
   "requestingprincipal", "requestingprincipalid", "user", "userid", "role", "roles", "scope", "scopes",
-  "authority", "authorities", "authoritygrant", "authoritygrantid", "approval", "approvals", "approvalid",
+  "authority", "authorities", "authoritygrant", "authoritygrantid", "authoritygranted", "approval", "approvals", "approvalid",
   "approvalrequired", "approvalgranted", "approved", "approvalstate", "decisionid", "evidencevalidity",
   "evidencevalid", "evidencevalidation", "evidenceverified", "missionowner", "missionownership",
   "verification", "verified", "verificationstate", "verificationstatus", "principalrole", "servicerole",
@@ -254,7 +262,7 @@ function optionalSecretReference(value, name) {
 
 const encodeBase64Url = (value) => Buffer.from(value).toString("base64url");
 
-export function createTenantContextAssertion(config, _claims, clientId, clock = () => Date.now()) {
+export function createTenantContextAssertion(config, claims, clientId, clock = () => Date.now()) {
   if (!config.contextAssertionSecret) return "";
   const issuer = config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER;
   const audience = config.contextAssertionAudience ?? CONTEXT_ASSERTION_AUDIENCE;
@@ -264,7 +272,32 @@ export function createTenantContextAssertion(config, _claims, clientId, clock = 
     throw new Error("The Runtime client identity is not provisioned for this Experience Gateway.");
   }
   const issuedAt = Math.floor(clock() / 1000);
-  const payload = {
+  const humanOperatorVerified = claims?.principalType === "named_operator";
+  if (claims && !humanOperatorVerified) {
+    throw new Error("An authoritative context assertion requires an explicitly authenticated named operator.");
+  }
+  const roles = humanOperatorVerified ? [claims.role] : [...CONTEXT_ASSERTION_ROLES];
+  const scopes = humanOperatorVerified ? [...new Set(claims.scopes)].sort() : undefined;
+  const payload = humanOperatorVerified ? {
+    v: 3,
+    contract: "nexus.context-assertion@3.0.0",
+    alg: CONTEXT_ASSERTION_ALGORITHM,
+    kid: keyId,
+    iss: issuer,
+    aud: audience,
+    tid: claims.tenantId,
+    wid: claims.workspaceId,
+    sub: claims.sub,
+    roles,
+    scopes,
+    clientId,
+    iat: issuedAt,
+    exp: issuedAt + 60,
+    jti: randomUUID(),
+    trustBindingId: TRUST_BINDING_ID,
+    authorityGranted: true,
+    humanOperatorVerified: true,
+  } : {
     v: 2,
     contract: CONTEXT_ASSERTION_CONTRACT,
     alg: CONTEXT_ASSERTION_ALGORITHM,
@@ -274,13 +307,13 @@ export function createTenantContextAssertion(config, _claims, clientId, clock = 
     tid: config.operationalTenantId ?? "nexicron",
     wid: config.operationalWorkspaceId ?? "primary",
     sub: issuer,
-    roles: [...CONTEXT_ASSERTION_ROLES],
+    roles,
     clientId,
     iat: issuedAt,
     exp: issuedAt + 60,
     jti: randomUUID(),
     trustBindingId: TRUST_BINDING_ID,
-    authorityGranted: false
+    authorityGranted: false,
   };
   const encodedPayload = encodeBase64Url(JSON.stringify(payload));
   const signature = createHmac("sha256", config.contextAssertionSecret).update(encodedPayload).digest("base64url");
@@ -401,13 +434,13 @@ export function loadConfig(overrides = {}) {
   const operationalApiBaseUrl = safeOperationalApiUrl(String(
     overrides.operationalApiBaseUrl ?? process.env.COMMAND_PORTAL_OPERATIONAL_API_BASE_URL ?? "https://nexus-operations.invalid"
   ));
-  const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,actions:simulate,actions:execute,approvals:decide,evidence:write,knowledge:promote,edge:node_admission:request")
+  const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,repository:metadata:read,approvals:decide,evidence:write,edge:node_admission:request")
     .split(",").map((item) => item.trim()).filter(Boolean);
   const replitDeployment = enabled(overrides.replitDeployment ?? process.env.REPLIT_DEPLOYMENT);
   const operationalSessionMode = String(
     overrides.operationalSessionMode
       ?? process.env.COMMAND_PORTAL_SESSION_MODE
-      ?? (replitDeployment ? "automatic_private_workspace" : "access_key")
+      ?? "access_key"
   ).trim();
   if (!OPERATIONAL_SESSION_MODES.has(operationalSessionMode)) {
     throw new Error("COMMAND_PORTAL_SESSION_MODE must be access_key or automatic_private_workspace.");
@@ -417,6 +450,9 @@ export function loadConfig(overrides = {}) {
     .split(",")
     .map((item) => item.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, ""))
     .filter(Boolean);
+  if (operationalEnabled && replitDeployment && !operationalCookieSecure) {
+    throw new Error("Published Replit sessions require Secure cookies.");
+  }
   if (operationalEnabled && operationalSessionMode === "automatic_private_workspace") {
     if (!replitDeployment || !operationalCookieSecure || replitDomains.length === 0) {
       throw new Error("Automatic hosted sessions require REPLIT_DEPLOYMENT=1, at least one REPLIT_DOMAINS binding, and Secure cookies.");
@@ -710,6 +746,13 @@ function operationalFailure(config, route, code, message, status = "Unavailable"
 }
 
 function resolveLocalCapability(pathname, method) {
+  const executiveInteraction = pathname.match(/^\/api\/local\/executive-interactions\/([0-9a-f-]{36})$/i);
+  if (executiveInteraction) {
+    if (!UUID_PATTERN.test(executiveInteraction[1])) return null;
+    return method === "GET"
+      ? { method, runtimePath: `/executive/interactions/${executiveInteraction[1]}` }
+      : { methodMismatch: true, allowed: "GET" };
+  }
   if (pathname === "/api/local/runtime-coordination/nodes") {
     return method === "GET"
       ? { method, runtimePath: "/runtime-coordination/nodes" }
@@ -759,12 +802,6 @@ function resolveLocalCapability(pathname, method) {
         ? { method, runtimePath: `/conclave/workspaces/${conclaveEvidence[1]}/tasks/${conclaveEvidence[2]}/evidence` }
         : { methodMismatch: true, allowed: "POST" };
     }
-    const interaction = pathname.match(/^\/api\/local\/interactions\/([A-Z0-9-]+)\/(events|interrupt|presentation-complete)$/);
-    if (interaction) {
-      const expectedMethod = interaction[2] === "events" ? "GET" : "POST";
-      if (method !== expectedMethod) return { methodMismatch: true, allowed: expectedMethod };
-      return { method: expectedMethod, runtimePath: `/runtime/interactions/${interaction[1]}/${interaction[2]}`, target: "platform" };
-    }
     const mission = pathname.match(/^\/api\/local\/missions\/([A-Za-z0-9_.:-]{1,160})\/execute-step$/);
     if (mission) return method === "POST" ? { method, runtimePath: `/missions/${mission[1]}/execute-step` } : { methodMismatch: true, allowed: "POST" };
     const approval = pathname.match(/^\/api\/local\/approvals\/([A-Za-z0-9_.:-]{1,160})\/(approve|deny)$/);
@@ -787,6 +824,7 @@ function resolveLocalCapability(pathname, method) {
 }
 
 export const CANONICAL_OPERATIONAL_ROUTES = Object.freeze({
+  "/api/operations/executive-interactions": Object.freeze({ POST: "/executive/interactions" }),
   "/api/operations/capabilities/readiness": Object.freeze({ GET: "/capabilities/readiness" }),
   "/api/operations/client-capabilities": Object.freeze({ GET: "/client-capabilities" }),
   "/api/operations/intake/history": Object.freeze({ GET: "/intake/history" }),
@@ -796,7 +834,6 @@ export const CANONICAL_OPERATIONAL_ROUTES = Object.freeze({
   "/api/operations/projects/artifact-types": Object.freeze({ GET: "/projects/artifact-types" }),
   "/api/operations/voice-operator/status": Object.freeze({ GET: "/voice-operator/status" }),
   "/api/operations/voice-operator/history": Object.freeze({ GET: "/voice-operator/history" }),
-  "/api/operations/voice-operator/route-transcript": Object.freeze({ POST: "/voice-operator/route-transcript" }),
   "/api/operations/missions": Object.freeze({ GET: "/missions" }),
   "/api/operations/conclave/workspaces": Object.freeze({ GET: "/conclave/workspaces", POST: "/conclave/workspaces" }),
   "/api/operations/operational-replay": Object.freeze({ GET: "/operational-replay" }),
@@ -833,6 +870,19 @@ function operationalIdentifier(raw) {
 export function resolveOperationalCapability(pathname, method) {
   const direct = operationalMethod(CANONICAL_OPERATIONAL_ROUTES[pathname], method);
   if (direct) return direct;
+
+  const executiveInteraction = pathname.match(/^\/api\/operations\/executive-interactions\/([0-9a-f-]{36})$/i);
+  if (executiveInteraction) {
+    if (!UUID_PATTERN.test(executiveInteraction[1])) return null;
+    return operationalMethod({ GET: `/executive/interactions/${executiveInteraction[1]}` }, method);
+  }
+
+  const approval = pathname.match(/^\/api\/operations\/approvals\/([^/]+)\/(approve|deny)$/);
+  if (approval) {
+    const approvalId = operationalIdentifier(approval[1]);
+    if (!approvalId) return null;
+    return operationalMethod({ POST: `/approvals/${approvalId}/${approval[2]}` }, method);
+  }
 
   const project = pathname.match(/^\/api\/operations\/projects\/([^/]+)\/(scope|estimate|planning-model|compile)$/);
   if (project) {
@@ -1027,15 +1077,15 @@ function strictKeys(payload, allowed) {
   if (unknown.length) throw new GatewayFailure("request_invalid", `Unsupported request field: ${unknown[0]}.`, "Unknown", 400);
 }
 
-function rejectUntrustedOperationalFields(value, trail = []) {
+function rejectUntrustedOperationalFields(value, trail = [], explicitlyAdmitted = new Set()) {
   if (Array.isArray(value)) {
-    value.forEach((item, index) => rejectUntrustedOperationalFields(item, [...trail, String(index)]));
+    value.forEach((item, index) => rejectUntrustedOperationalFields(item, [...trail, String(index)], explicitlyAdmitted));
     return;
   }
   if (!value || typeof value !== "object") return;
   for (const [key, item] of Object.entries(value)) {
     const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (UNTRUSTED_OPERATIONAL_FIELDS.has(normalized)) {
+    if (UNTRUSTED_OPERATIONAL_FIELDS.has(normalized) && !explicitlyAdmitted.has(normalized)) {
       throw new GatewayFailure(
         "untrusted_identity_field",
         `Request field ${[...trail, key].join(".")} cannot select or strengthen Runtime identity, approval, or Authority.`,
@@ -1043,7 +1093,7 @@ function rejectUntrustedOperationalFields(value, trail = []) {
         403,
       );
     }
-    rejectUntrustedOperationalFields(item, [...trail, key]);
+    rejectUntrustedOperationalFields(item, [...trail, key], explicitlyAdmitted);
   }
 }
 
@@ -1101,6 +1151,65 @@ function structuredOperationalFailure(value) {
 }
 
 function validateLocalPayload(runtimePath, payload, maximumBytes) {
+  if (runtimePath === "/executive/interactions") {
+    strictKeys(payload, new Set(["interaction_id", "session_id", "input", "context", "approval_id"]));
+    const interactionId = boundedText(payload.interaction_id, "interaction_id", 64);
+    const sessionId = boundedText(payload.session_id, "session_id", 64);
+    if (!UUID_PATTERN.test(interactionId) || !UUID_PATTERN.test(sessionId)) {
+      throw new GatewayFailure("request_invalid", "interaction_id and session_id must be UUIDs.", "Unknown", 400);
+    }
+    if (!payload.input || typeof payload.input !== "object" || Array.isArray(payload.input)) {
+      throw new GatewayFailure("request_invalid", "input must be an object.", "Unknown", 400);
+    }
+    if (!payload.context || typeof payload.context !== "object" || Array.isArray(payload.context)) {
+      throw new GatewayFailure("request_invalid", "context must be an object.", "Unknown", 400);
+    }
+    strictKeys(payload.input, new Set(["modality", "text", "source_client"]));
+    strictKeys(payload.context, new Set(["active_object_ids", "conversation_id"]));
+    const modality = boundedText(payload.input.modality, "input.modality", 20).toLowerCase();
+    if (!["text", "voice", "api"].includes(modality)) {
+      throw new GatewayFailure("request_invalid", "input.modality is invalid.", "Unknown", 400);
+    }
+    if (boundedText(payload.input.source_client, "input.source_client", 64) !== "nexus-command") {
+      throw new GatewayFailure("request_invalid", "input.source_client is not registered for this gateway.", "Unknown", 400);
+    }
+    if (!Array.isArray(payload.context.active_object_ids) || payload.context.active_object_ids.length > 64) {
+      throw new GatewayFailure("request_invalid", "context.active_object_ids is invalid.", "Unknown", 400);
+    }
+    const activeObjectIds = payload.context.active_object_ids.map((value) => {
+      const identifier = boundedText(value, "context.active_object_ids", 160);
+      if (!OPERATIONAL_RECORD_ID_PATTERN.test(identifier)) {
+        throw new GatewayFailure("request_invalid", "context.active_object_ids contains an invalid identifier.", "Unknown", 400);
+      }
+      return identifier;
+    });
+    const conversationId = payload.context.conversation_id === null
+      ? null
+      : boundedText(payload.context.conversation_id, "context.conversation_id", 64);
+    if (conversationId !== null && !UUID_PATTERN.test(conversationId)) {
+      throw new GatewayFailure("request_invalid", "context.conversation_id must be a UUID or null.", "Unknown", 400);
+    }
+    const approvalId = payload.approval_id === undefined
+      ? undefined
+      : boundedText(payload.approval_id, "approval_id", 160);
+    if (approvalId && !OPERATIONAL_RECORD_ID_PATTERN.test(approvalId)) {
+      throw new GatewayFailure("request_invalid", "approval_id is invalid.", "Unknown", 400);
+    }
+    return {
+      interaction_id: interactionId,
+      session_id: sessionId,
+      input: {
+        modality,
+        text: boundedText(payload.input.text, "input.text", 4_000),
+        source_client: "nexus-command",
+      },
+      context: {
+        active_object_ids: activeObjectIds,
+        conversation_id: conversationId,
+      },
+      ...(approvalId ? { approval_id: approvalId } : {}),
+    };
+  }
   if (runtimePath === "/runtime/baselines") {
     strictKeys(payload, new Set(["expectedDeployedCommit"]));
     const expectedDeployedCommit = boundedText(payload.expectedDeployedCommit, "expectedDeployedCommit", 160, false);
@@ -1320,15 +1429,6 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
     strictKeys(payload, new Set(["reason"]));
     return { reason: boundedText(payload.reason, "reason", 1_000) };
   }
-  if (["/actions/dry-run", "/actions/execute"].includes(runtimePath)) {
-    strictKeys(payload, new Set(["action", "profile", "explicitRequest"]));
-    const profile = payload.profile === undefined ? undefined : boundedText(payload.profile, "profile", 100);
-    return {
-      action: boundedText(payload.action, "action", 4_000),
-      ...(profile ? { profile } : {}),
-      ...(runtimePath === "/actions/execute" ? { explicitRequest: payload.explicitRequest === true } : {})
-    };
-  }
   if (runtimePath.endsWith("/compile")) {
     strictKeys(payload, new Set(["artifactType", "options"]));
     const artifactType = boundedText(payload.artifactType, "artifactType", 80).toLowerCase();
@@ -1339,24 +1439,6 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
     if (weeks !== undefined && (!Number.isFinite(weeks) || weeks < 0.5 || weeks > 520)) throw new GatewayFailure("request_invalid", "defaultPhaseDurationWeeks is invalid.", "Unknown", 400);
     const assumptions = Array.isArray(options.assumptions) ? options.assumptions.slice(0, 10).map((item) => boundedText(item, "assumption", 1_000)) : [];
     return { artifactType, options: { defaultPhaseDurationWeeks: weeks, targetDate: boundedText(options.targetDate, "targetDate", 100, false), teamCapacity: boundedText(options.teamCapacity, "teamCapacity", 500, false), assumptions } };
-  }
-  if (runtimePath === "/voice-operator/route-transcript") {
-    strictKeys(payload, new Set(["transcript", "source"]));
-    const source = String(payload.source ?? "text_fallback");
-    if (!["browser_speech", "text_fallback"].includes(source)) throw new GatewayFailure("request_invalid", "Voice source is invalid.", "Unknown", 400);
-    return { transcript: boundedText(payload.transcript, "transcript", 4_000), source };
-  }
-  if (runtimePath === "/runtime/interactions") {
-    strictKeys(payload, new Set(["clientId", "inputText", "modality", "kind", "subject", "conversationId", "stream", "speechRequested", "presentation", "metadata"]));
-    const presentation = payload.presentation && typeof payload.presentation === "object" && !Array.isArray(payload.presentation) ? payload.presentation : {};
-    const metadata = payload.metadata && typeof payload.metadata === "object" && !Array.isArray(payload.metadata) ? payload.metadata : {};
-    strictKeys(presentation, new Set(["presentationMode", "avatarMove", "navigate", "highlight", "focus"]));
-    return {
-      clientId: boundedText(payload.clientId, "clientId", 128), inputText: boundedText(payload.inputText, "inputText", 20_000),
-      modality: boundedText(payload.modality ?? "text", "modality", 40), kind: boundedText(payload.kind ?? "converse", "kind", 80),
-      subject: boundedText(payload.subject, "subject", 500, false), conversationId: boundedText(payload.conversationId, "conversationId", 160, false),
-      stream: payload.stream !== false, speechRequested: payload.speechRequested !== false, presentation, metadata
-    };
   }
   if (runtimePath.endsWith("/interrupt")) {
     strictKeys(payload, new Set(["reason"]));
@@ -1369,20 +1451,64 @@ function validateLocalPayload(runtimePath, payload, maximumBytes) {
   throw new GatewayFailure("route_not_allowlisted", "This local capability route is not allowlisted.", "Unknown", 404);
 }
 
+function bindExecutiveInteractionIdentity(payload, identity) {
+  if (!payload || !identity) {
+    throw new GatewayFailure("identity_binding_required", "Canonical interaction identity is unavailable.", "Unauthorized", 403);
+  }
+  const actorId = boundedText(identity.actorId, "actor.actor_id", 160);
+  const tenantId = boundedText(identity.tenantId, "actor.tenant_id", 160);
+  const workspaceId = boundedText(identity.workspaceId, "context.workspace_id", 160);
+  const role = boundedText(identity.role, "actor.roles", 160);
+  for (const [label, value] of [["actor.actor_id", actorId], ["actor.tenant_id", tenantId], ["context.workspace_id", workspaceId], ["actor.roles", role]]) {
+    if (!OPERATIONAL_RECORD_ID_PATTERN.test(value)) {
+      throw new GatewayFailure("identity_binding_invalid", `${label} is not a stable server identity.`, "Unauthorized", 403);
+    }
+  }
+  return {
+    ...payload,
+    actor: {
+      actor_id: actorId,
+      tenant_id: tenantId,
+      roles: [role],
+    },
+    context: {
+      ...payload.context,
+      workspace_id: workspaceId,
+    },
+  };
+}
+
 async function fetchLocalCapability(resolved, payload, request, config, localFetch) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.localTimeoutMs);
+  const timeoutMs = resolved.runtimePath === "/executive/interactions" ? config.reasoningTimeoutMs : config.localTimeoutMs;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     let response;
     try {
       const baseUrl = resolved.target === "platform" ? config.platformRuntimeBaseUrl : config.localApiBaseUrl;
-      const forwardedPayload = sanitizedMutationPayload(payload);
+      const canonicalPayload = resolved.runtimePath === "/executive/interactions"
+        ? bindExecutiveInteractionIdentity(payload, {
+          actorId: config.operationalUserId,
+          tenantId: config.operationalTenantId,
+          workspaceId: config.operationalWorkspaceId,
+          role: config.operationalRole,
+        })
+        : payload;
+      const forwardedPayload = sanitizedMutationPayload(canonicalPayload);
+      const canonicalIdentityHeaders = resolved.runtimePath === "/executive/interactions" ? {
+        "X-NEXUS-User-ID": config.operationalUserId,
+        "X-NEXUS-Tenant-ID": config.operationalTenantId,
+        "X-NEXUS-Workspace-ID": config.operationalWorkspaceId,
+        "X-NEXUS-Role": config.operationalRole,
+        "X-NEXUS-Scopes": config.operationalScopes.join(","),
+      } : {};
       response = await localFetch(`${baseUrl}${resolved.runtimePath}`, {
         method: resolved.method,
         headers: {
           Accept: "application/json",
           ...(resolved.method === "POST" ? { "Content-Type": "application/json" } : {}),
           ...(resolved.method === "POST" && request.headers["idempotency-key"] ? { "Idempotency-Key": String(request.headers["idempotency-key"]) } : {}),
+          ...canonicalIdentityHeaders,
         },
         ...(resolved.method === "POST" ? { body: JSON.stringify(forwardedPayload) } : {}),
         signal: controller.signal,
@@ -1409,25 +1535,63 @@ async function fetchLocalCapability(resolved, payload, request, config, localFet
 
 async function fetchOperationalCapability(resolved, payload, claims, request, config, operationalFetch) {
   if (resolved.target === "platform") throw new GatewayFailure("operational_route_staged", "This platform interaction route is not yet bound to the hosted execution Runtime.", "Unavailable", 501);
+  if (
+    claims.principalType !== "named_operator"
+    && (
+      resolved.runtimePath === "/executive/interactions"
+      || /^\/approvals\/.+\/(approve|deny)$/.test(resolved.runtimePath)
+    )
+  ) {
+    throw new GatewayFailure(
+      "named_operator_required",
+      "Human interaction and approval require an explicitly authenticated named operator.",
+      "Unauthorized",
+      403,
+    );
+  }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.localTimeoutMs);
+  const timeoutMs = resolved.runtimePath === "/executive/interactions" ? config.reasoningTimeoutMs : config.localTimeoutMs;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const requestId = String(request.headers["x-request-id"] ?? randomUUID());
+    const authoritativeInteraction = resolved.runtimePath === "/executive/interactions"
+      || /^\/approvals\/.+\/(approve|deny)$/.test(resolved.runtimePath);
+    const assertion = authoritativeInteraction
+      ? createTenantContextAssertion(config, claims, "nexus-web")
+      : "";
+    if (authoritativeInteraction && !assertion) {
+      throw new GatewayFailure(
+        "identity_assertion_unavailable",
+        "The hosted gateway cannot bind this named operator to Runtime Authority.",
+        "Unavailable",
+        503,
+      );
+    }
     const headers = {
       Accept: "application/json", Authorization: `Bearer ${config.operationalRuntimeToken}`,
       "X-Request-ID": requestId, "X-NEXUS-User-ID": claims.sub,
       "X-NEXUS-Tenant-ID": claims.tenantId, "X-NEXUS-Workspace-ID": claims.workspaceId,
-      "X-NEXUS-Role": claims.role, "X-NEXUS-Scopes": claims.scopes.join(",")
+      "X-NEXUS-Role": claims.role,
+      "X-NEXUS-Scopes": [...new Set(claims.scopes)].sort().join(","),
+      ...(assertion ? { "X-NEXUS-Context-Assertion": assertion } : {}),
     };
     if (resolved.method === "POST") {
       headers["Content-Type"] = "application/json";
       headers["Idempotency-Key"] = String(payload?.idempotencyKey ?? request.headers["idempotency-key"] ?? "");
     }
+    const forwardedPayload = resolved.runtimePath === "/executive/interactions"
+      ? bindExecutiveInteractionIdentity(payload, {
+        actorId: claims.sub,
+        tenantId: claims.tenantId,
+        workspaceId: claims.workspaceId,
+        role: claims.role,
+      })
+      : payload;
     let response;
     try {
       response = await operationalFetch(`${config.operationalApiBaseUrl}${resolved.runtimePath}`, {
         method: resolved.method, headers,
-        ...(resolved.method === "POST" ? { body: JSON.stringify(sanitizedMutationPayload(payload)) } : {}),
+        ...(resolved.method === "POST" ? { body: JSON.stringify(sanitizedMutationPayload(forwardedPayload)) } : {}),
         signal: controller.signal, redirect: "error"
       });
     } catch (error) {
@@ -1536,10 +1700,22 @@ async function handleOperationalApi(request, response, config, operationalFetch,
   }
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
-    if (resolved.method === "POST") rejectUntrustedOperationalFields(rawPayload);
+    if (resolved.method === "POST") {
+      // Hosted approval continuation is available only through the exact
+      // approval decision route. A browser cannot resubmit an objective with
+      // approval-like fields or assert Authority through executive intents.
+      rejectUntrustedOperationalFields(
+        rawPayload,
+        [],
+        resolved.runtimePath === "/executive/interactions" ? new Set(["approvalid"]) : new Set(),
+      );
+    }
     const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
     if (resolved.method === "POST" && payload?.idempotencyKey && payload.idempotencyKey !== request.headers["idempotency-key"]) {
       throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match the request body.", "Unknown", 400);
+    }
+    if (resolved.runtimePath === "/executive/interactions" && payload.interaction_id !== request.headers["idempotency-key"]) {
+      throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match interaction_id.", "Unknown", 400);
     }
     const data = await fetchOperationalCapability(resolved, payload, claims, request, config, operationalFetch);
     structuredLog("experience_gateway_hosted_operation", { route: url.pathname, runtimePath: resolved.runtimePath, method: resolved.method, userId: claims.sub, tenantId: claims.tenantId, workspaceId: claims.workspaceId, scope, status: 200 });
@@ -1565,6 +1741,24 @@ async function handleLocalApi(request, response, config, localFetch) {
   try {
     const rawPayload = resolved.method === "POST" ? await readJsonBody(request, config.localMaxRequestBytes) : undefined;
     const payload = resolved.method === "POST" ? validateLocalPayload(resolved.runtimePath, rawPayload, config.localMaxRequestBytes) : undefined;
+    if (resolved.runtimePath === "/executive/interactions") {
+      const requestKey = String(request.headers["idempotency-key"] ?? "");
+      if (!IDEMPOTENCY_KEY_PATTERN.test(requestKey)) {
+        throw new GatewayFailure("idempotency_key_required", "A valid Idempotency-Key is required for canonical interactions.", "Unknown", 400);
+      }
+      if (payload.interaction_id !== requestKey) {
+        throw new GatewayFailure("idempotency_key_mismatch", "Idempotency-Key must exactly match interaction_id.", "Unknown", 400);
+      }
+    }
+    if (
+      resolved.method === "POST"
+      && (
+        /^\/missions\/[A-Za-z0-9_.:-]+\/execute-step$/.test(resolved.runtimePath)
+      )
+      && !IDEMPOTENCY_KEY_PATTERN.test(String(request.headers["idempotency-key"] ?? ""))
+    ) {
+      throw new GatewayFailure("idempotency_key_required", "A valid Idempotency-Key is required for execution mutations.", "Unknown", 400);
+    }
     if (resolved.method === "POST" && /^\/runtime-coordination\/admissions(?:\/[^/]+\/(?:cancel|challenge\/reissue))?$/.test(resolved.runtimePath)) {
       const requestKey = String(request.headers["idempotency-key"] ?? "");
       if (!IDEMPOTENCY_KEY_PATTERN.test(requestKey)) throw new GatewayFailure("idempotency_key_required", "A valid Idempotency-Key is required for admission mutations.", "Unknown", 400);
@@ -1700,117 +1894,6 @@ async function fetchRuntime(runtimePath, config, runtimeFetch) {
   }
 }
 
-async function handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, clock) {
-  const url = new URL(request.url, "http://portal.invalid");
-  if (!requestOriginAllowed(request, config, config.operationalEnabled)) return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("origin_denied", "Request origin is not allowed.", "Unknown", 403)));
-  const runtimePath = resolveRuntimeMutation(url.pathname);
-  if (!runtimePath) return sendJson(response, 404, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("route_not_allowlisted", "This Runtime mutation is not allowlisted.", "Unknown", 404)));
-  const expectedMethod = runtimePath.endsWith("/events") ? "GET" : "POST";
-  if (request.method !== expectedMethod) return sendJson(response, 405, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("method_not_allowed", `This bounded Runtime route requires ${expectedMethod}.`, "Unknown", 405)), { Allow: expectedMethod });
-  const claims = sessionAuthority.authenticate(request);
-  if (config.operationalEnabled && !claims) {
-    return sendJson(response, 401, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("session_required", "An authenticated operational session is required.", "Unauthorized", 401)));
-  }
-  const scope = requiredScope(runtimePath, expectedMethod);
-  if (config.operationalEnabled && !claims.scopes.includes(scope)) {
-    return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("scope_denied", `Session lacks required scope: ${scope}.`, "Unauthorized", 403)));
-  }
-  if (config.operationalEnabled && expectedMethod === "POST" && !sessionAuthority.csrfValid(request, claims)) {
-    return sendJson(response, 403, failureEnvelope(config, tracker, url.pathname, new GatewayFailure("csrf_invalid", "CSRF verification failed.", "Unauthorized", 403)));
-  }
-  if (expectedMethod === "GET") {
-    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), config.timeoutMs);
-    try {
-      const assertion = createTenantContextAssertion(config, claims, "nexus-web", clock);
-      const upstream = await runtimeFetch(`${config.runtimeBaseUrl}${runtimePath}`, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${config.runtimeToken}`,
-          ...(assertion ? { "X-NEXUS-Context-Assertion": assertion } : {})
-        },
-        signal: controller.signal,
-        redirect: "error"
-      });
-      if ([401, 403].includes(upstream.status)) throw new GatewayFailure("runtime_unauthorized", "Runtime rejected the server credential.", "Unauthorized", 502);
-      if (!upstream.ok) throw new GatewayFailure("runtime_unavailable", `Runtime returned status ${upstream.status}.`, "Unavailable", 503);
-      const body = validateRuntimeEnvelope(JSON.parse(Buffer.from(await upstream.arrayBuffer()).toString("utf8")));
-      tracker.lastSuccessfulConnection = nowIso(); tracker.lastSuccessfulRefresh = nowIso();
-      structuredLog("experience_gateway_bounded_runtime_read", { route: url.pathname, runtimePath, status: 200 });
-      return sendJson(response, 200, successfulEnvelope(config, tracker, url.pathname, body, null, false, false, 1));
-    } catch (error) {
-      const failure = error instanceof GatewayFailure ? error
-        : error?.name === "AbortError" ? new GatewayFailure("runtime_timed_out", "Runtime request timed out.", "Timed Out", 504)
-        : new GatewayFailure("runtime_unavailable", "Runtime interaction request failed safely.", "Unavailable", 503);
-      return sendJson(response, failure.status, failureEnvelope(config, tracker, url.pathname, failure));
-    } finally { clearTimeout(timer); }
-  }
-  const raw = await readJsonBody(request, 16_384);
-  let payload;
-  if (runtimePath.endsWith("/interrupt")) {
-    strictKeys(raw, new Set(["reason"])); payload = { reason: boundedText(raw.reason ?? "user_barge_in", "reason", 200) };
-  } else if (runtimePath.endsWith("/resume") || runtimePath.endsWith("/presentation-complete")) {
-    strictKeys(raw, new Set()); payload = {};
-  } else if (runtimePath === "/runtime/interactions") {
-    strictKeys(raw, new Set(["clientId", "inputText", "modality", "kind", "subject", "conversationId", "stream", "speechRequested", "presentation", "metadata"]));
-    const clientId = boundedText(raw.clientId, "clientId", 128);
-    const metadata = raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? { ...raw.metadata } : {};
-    for (const reserved of ["tenantId", "trustedTenantContext", "operator", "roles", "subjectId", "issuer", "assertionId"]) delete metadata[reserved];
-    const assertion = createTenantContextAssertion(config, claims, clientId, clock);
-    payload = {
-      clientId,
-      inputText: boundedText(raw.inputText, "inputText", 20_000),
-      modality: boundedText(raw.modality ?? "text", "modality", 40),
-      kind: boundedText(raw.kind ?? "converse", "kind", 80),
-      speechRequested: raw.speechRequested !== false,
-      stream: raw.stream !== false,
-      ...(raw.subject ? { subject: boundedText(raw.subject, "subject", 240) } : {}),
-      ...(raw.conversationId ? { conversationId: boundedText(raw.conversationId, "conversationId", 160) } : {}),
-      ...(raw.presentation && typeof raw.presentation === "object" && !Array.isArray(raw.presentation) ? { presentation: raw.presentation } : {}),
-      metadata: {
-        ...metadata,
-        contextAssemblyOwner: "nexus-runtime",
-        ...(assertion ? { tenantId: claims?.tenantId ?? config.operationalTenantId } : {})
-      }
-    };
-  } else if (runtimePath === "/runtime/conclave/reviews") {
-    strictKeys(raw, new Set(["clientId", "proposal"]));
-    payload = {
-      clientId: boundedText(raw.clientId, "clientId", 128),
-      proposal: boundedText(raw.proposal, "proposal", 8_000),
-    };
-  } else {
-    strictKeys(raw, new Set(["clientId", "modality", "speechRequested"]));
-    payload = { clientId: boundedText(raw.clientId, "clientId", 128), modality: boundedText(raw.modality ?? "text", "modality", 40), speechRequested: raw.speechRequested !== false };
-  }
-  const timeoutMs = runtimePath === "/runtime/interactions" ? config.reasoningTimeoutMs : config.timeoutMs;
-  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const clientId = typeof payload.clientId === "string" ? payload.clientId : "nexus-web";
-    const assertion = createTenantContextAssertion(config, claims, clientId, clock);
-    const upstream = await runtimeFetch(`${config.runtimeBaseUrl}${runtimePath}`, {
-      method: "POST", headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.runtimeToken}`,
-        ...(assertion ? { "X-NEXUS-Context-Assertion": assertion } : {})
-      },
-      body: JSON.stringify(payload), signal: controller.signal, redirect: "error"
-    });
-    if ([401, 403].includes(upstream.status)) throw new GatewayFailure("runtime_unauthorized", "Runtime rejected the server credential.", "Unauthorized", 502);
-    if (!upstream.ok) throw new GatewayFailure("runtime_unavailable", `Runtime returned status ${upstream.status}.`, "Unavailable", 503);
-    const body = validateRuntimeEnvelope(JSON.parse(Buffer.from(await upstream.arrayBuffer()).toString("utf8")));
-    tracker.lastSuccessfulConnection = nowIso(); tracker.lastSuccessfulRefresh = nowIso();
-    structuredLog("experience_gateway_bounded_runtime_mutation", { route: url.pathname, runtimePath, status: 200 });
-    return sendJson(response, 200, successfulEnvelope(config, tracker, url.pathname, body, null, false, false, 1));
-  } catch (error) {
-    const failure = error instanceof GatewayFailure ? error
-      : error?.name === "AbortError" ? new GatewayFailure("runtime_reasoning_timeout", "Runtime reasoning exceeded its bounded response window.", "Timed Out", 504)
-      : new GatewayFailure("runtime_unavailable", "Runtime interaction request failed safely.", "Unavailable", 503);
-    return sendJson(response, failure.status, failureEnvelope(config, tracker, url.pathname, failure));
-  } finally { clearTimeout(timer); }
-}
-
 async function handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, clock) {
   const url = new URL(request.url, "http://portal.invalid");
   if (!requestOriginAllowed(request, config, config.operationalEnabled)) return sendJson(response, 403, { ok: false, error: { code: "origin_denied", message: "Request origin is not allowed." }, truth: TRUTH });
@@ -1880,12 +1963,25 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
     if (answer.byteLength > 262_144 || !answer.toString("utf8").trimStart().startsWith("v=0")) {
       throw new GatewayFailure("realtime_response_invalid", "Runtime returned an invalid Realtime response.", "Unknown", 502);
     }
+    const promptEchoSignature = upstream.headers.get(REALTIME_PROMPT_ECHO_HEADER)?.trim() ?? "";
+    if (!promptEchoSignature || promptEchoSignature.length > 512 || !/^[\x20-\x7e]+$/.test(promptEchoSignature)) {
+      throw new GatewayFailure(
+        "realtime_response_invalid",
+        "Runtime omitted the governed Realtime transcript-admission boundary.",
+        "Unknown",
+        502,
+      );
+    }
     structuredLog("experience_gateway_realtime_session", { route: url.pathname, status: upstream.status });
     response.writeHead(upstream.status, {
       "Content-Type": "application/sdp",
       "Content-Length": answer.byteLength,
       "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff"
+      "X-Content-Type-Options": "nosniff",
+      // Runtime owns this non-secret, per-session boundary. The Experience must
+      // forward it unchanged so the browser can reject a transcription prompt
+      // echo before it becomes a message or requests a provider response.
+      [REALTIME_PROMPT_ECHO_HEADER]: promptEchoSignature,
     });
     return response.end(answer);
   } catch (error) {
@@ -2044,6 +2140,22 @@ export function createPortalServer(options = {}) {
   const cache = new Map();
   const tracker = { lastSuccessfulConnection: null, lastSuccessfulRefresh: null };
   const server = createServer((request, response) => {
+    const pathname = new URL(request.url ?? "/", "http://portal.invalid").pathname;
+    if (retiredInteractionRoute(pathname)) {
+      return sendJson(response, 410, {
+        ok: false,
+        error: {
+          code: "canonical_interaction_required",
+          message: "This direct interaction or execution route is retired. Submit user input through POST /executive/interactions.",
+          details: {
+            canonical_endpoint: "/executive/interactions",
+            local_gateway_endpoint: "/api/local/executive-interactions",
+            hosted_gateway_endpoint: "/api/operations/executive-interactions",
+          },
+        },
+        truth: TRUTH,
+      });
+    }
     if (request.url?.startsWith("/api/session")) {
       handleSessionApi(request, response, config, sessionAuthority)
         .catch(() => sendJson(response, 500, operationalFailure(config, request.url, "session_gateway_error", "The session request failed safely.", "Unknown")));
@@ -2053,12 +2165,6 @@ export function createPortalServer(options = {}) {
     } else if (request.url?.startsWith("/api/runtime/realtime/call")) {
       handleRealtimeCall(request, response, config, runtimeFetch, sessionAuthority, options.clock)
         .catch(() => sendJson(response, 500, { ok: false, error: { code: "realtime_gateway_error", message: "Realtime session creation failed safely." }, truth: TRUTH }));
-    } else if (request.url?.startsWith("/api/runtime/executive-briefing") || request.url === "/api/runtime/conclave/reviews" || request.url === "/api/runtime/interactions" || request.url?.startsWith("/api/runtime/interactions/")) {
-      handleRuntimeMutation(request, response, config, runtimeFetch, tracker, sessionAuthority, options.clock)
-        .catch((error) => {
-          const failure = error instanceof GatewayFailure ? error : new GatewayFailure("gateway_error", "The bounded Runtime request failed safely.", "Unknown", 500);
-          sendJson(response, failure.status, failureEnvelope(config, tracker, request.url, failure));
-        });
     } else if (request.url?.startsWith("/api/runtime")) {
       handleApi(request, response, config, runtimeFetch, cache, tracker)
         .catch(() => sendJson(response, 500, failureEnvelope(config, tracker, request.url, new GatewayFailure("gateway_error", "The Experience Gateway could not complete the read request.", "Unknown", 500))));

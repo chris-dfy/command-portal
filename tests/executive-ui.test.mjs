@@ -63,11 +63,12 @@ test("Replit publishes the fixed hosted binding without committing server secret
   for (const binding of [
     'COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"',
     'COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"',
-    'COMMAND_PORTAL_OPERATOR_USER_ID = "nexus-workspace-service"',
+    'COMMAND_PORTAL_SESSION_MODE = "access_key"',
+    'COMMAND_PORTAL_OPERATOR_USER_ID = "chris-whiskin"',
     'COMMAND_PORTAL_TENANT_ID = "nexicron"',
     'COMMAND_PORTAL_WORKSPACE_ID = "primary"',
-    'COMMAND_PORTAL_OPERATOR_ROLE = "operator"',
-    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,actions:simulate,evidence:write,edge:node_admission:request"',
+    'COMMAND_PORTAL_OPERATOR_ROLE = "admin"',
+    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,repository:metadata:read,approvals:decide,evidence:write,edge:node_admission:request"',
   ]) assert.match(replit, new RegExp(binding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   for (const secretName of [
     "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN",
@@ -77,7 +78,7 @@ test("Replit publishes the fixed hosted binding without committing server secret
   ]) assert.doesNotMatch(replit, new RegExp(secretName));
 });
 
-test("hosted workspaces bootstrap automatically without a browser credential form", async () => {
+test("hosted workspaces require explicit named-operator authentication", async () => {
   const [gate, client, app, operations] = await Promise.all([
     read("../src/components/OperationalAccessGate.tsx"),
     read("../src/lib/local-client.ts"),
@@ -85,29 +86,25 @@ test("hosted workspaces bootstrap automatically without a browser credential for
     read("../src/components/OperationsWorkspace.tsx"),
   ]);
   assert.match(app, /operationalSessionClient\.status\(\)/);
-  assert.match(gate, /Retry secure connection/);
-  assert.match(gate, /private deployment admits the user/i);
-  assert.match(gate, /Connection grants API access—not operational Authority/i);
-  assert.doesNotMatch(gate, /password|accessKey|Operator access key|current-password|KeyRound/);
-  for (const forbidden of ['sessionRequest("/login"', "login:", "accessKey"]) {
-    assert.equal(client.includes(forbidden), false);
-  }
-  assert.match(operations, /Private workspace managed/);
+  assert.match(gate, /Operator access key/);
+  assert.match(gate, /named operator/i);
+  assert.match(gate, /current-password|KeyRound/);
+  assert.match(client, /login: \(accessKey: string\)/);
+  assert.match(operations, /Operator established/);
   assert.match(operations, /Authentication and access scope do not create operational Authority/);
 });
 
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
-  const [app, intake, projects, voice, realtime, client, hif] = await Promise.all([
+  const [app, intake, projects, voice, realtime, client] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/components/DocumentIntake.tsx"),
     read("../src/components/ProjectStudio.tsx"),
     read("../src/components/VoiceWorkspace.tsx"),
     read("../src/lib/realtime-voice-client.ts"),
     read("../src/lib/local-client.ts"),
-    read("../src/lib/hif-client.ts"),
   ]);
   for (const label of ["Document Intelligence", "Projects", "Voice Operations"]) assert.match(app, new RegExp(label));
-  for (const contract of ["/intake/upload", "/intake/query", "/projects", "/scope", "/estimate", "/planning-model", "/compile", "/voice-operator/route-transcript"]) assert.match(client, new RegExp(contract));
+  for (const contract of ["/executive-interactions", "/intake/upload", "/intake/query", "/projects", "/scope", "/estimate", "/planning-model", "/compile"]) assert.match(client, new RegExp(contract));
   assert.match(intake, /FileReader/);
   assert.match(intake, /projectId/);
   assert.match(intake, /Ask ingested sources/);
@@ -120,18 +117,114 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /setMicrophoneMuted/);
   assert.match(realtime, /track\.enabled = !this\.microphoneMuted/);
   assert.match(realtime, /setOutputMuted/);
-  assert.match(realtime, /this\.audio\.muted = muted/);
+  assert.match(realtime, /this\.audio\.muted = this\.outputMuted \|\| this\.narrationResponseGate\.activeResponse\(\) === null/);
   for (const control of ["Mute microphone", "Mute NEXUS", "Unmute microphone", "Unmute NEXUS"]) assert.match(voice, new RegExp(control));
   assert.match(voice, /Runtime owns the provider session and truth boundaries/i);
   assert.match(voice, /model-native knowledge/i);
   assert.equal(/SpeechRecognition|speechSynthesis/.test(voice + realtime), false);
-  for (const event of ["SpeechStarted", "SpeechInterrupted", "ConversationStarted", "AvatarMoveRequested", "NavigationRequested", "FocusRequested", "PresentationStarted", "StreamingChunk"]) assert.match(hif, new RegExp(event));
-  assert.match(voice, /localNexusClient\.routeTranscript\(transcript\.trim\(\), "text_fallback"\)/);
-  assert.match(voice, /governed NEXUS Runtime Voice Operator/);
-  assert.match(hif, /clientId: "nexus-web"/);
-  for (const source of [app, intake, projects, voice, realtime, client, hif]) {
+  assert.match(voice, /await admitExecutiveInteraction\(request, "text", conversationId\.current\)/);
+  assert.doesNotMatch(voice, /routeTranscript\(transcript|"text_fallback"/);
+  assert.match(voice, /governed request for NEXUS/);
+  assert.doesNotMatch(client, /executiveIntent|routeTranscript|executeAction/);
+  for (const source of [app, intake, projects, voice, realtime, client]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
   }
+});
+
+test("live voice admits every finalized transcript through Runtime before provider narration", async () => {
+  const [realtime, admission, policy, copilot, voice, server, client] = await Promise.all([
+    read("../src/lib/realtime-voice-client.ts"),
+    read("../src/lib/runtime-voice-admission.ts"),
+    read("../src/lib/runtime-admission-policy.ts"),
+    read("../src/components/NexusCopilot.tsx"),
+    read("../src/components/VoiceWorkspace.tsx"),
+    read("../server/portal-server.mjs"),
+    read("../src/lib/local-client.ts"),
+  ]);
+
+  const promptGate = realtime.indexOf("looksLikeRuntimePromptEcho(text, this.promptEchoSignature)");
+  const runtimeAdmission = realtime.indexOf("this.turnAdmissions.admit(");
+  const providerResponse = realtime.indexOf('type: "response.create"');
+  assert.ok(promptGate > 0, "prompt echoes must be checked");
+  assert.ok(runtimeAdmission > promptGate, "Runtime admission must follow the prompt-echo boundary");
+  assert.ok(providerResponse > runtimeAdmission, "provider response.create must follow authoritative Runtime admission");
+  assert.match(realtime, /Speak exactly the JSON spokenSummary string below/);
+  assert.match(realtime, /conversation: "none"/);
+  assert.match(realtime, /this\.narrationResponseGate\.authorize\(event\.response\)/);
+  assert.match(realtime, /this\.narrationResponseGate\.allows\(event\.response_id\)/);
+  assert.match(realtime, /NEXUS_NARRATION_CORRELATION_METADATA_KEY/);
+  assert.match(realtime, /response_id: authorization\.responseId/);
+  assert.doesNotMatch(realtime, /admittedResponseCount/);
+  assert.match(realtime, /conversation\.item\.delete/);
+  assert.match(server, /\[REALTIME_PROMPT_ECHO_HEADER\]: promptEchoSignature/);
+
+  for (const surface of [copilot, voice]) {
+    assert.match(surface, /await admitRuntimeVoiceTranscript\(text, conversationId\.current, idempotencyKey\)/);
+  }
+  assert.match(admission, /localNexusClient\.executiveInteraction\(request\)/);
+  assert.match(admission, /projectExecutiveInteraction\(result, request, request\.interaction_id\)/);
+  assert.match(admission, /result\.verification\.verified !== true/);
+  assert.match(admission, /result\.authority_decision\.decision !== "allow"/);
+  assert.match(admission, /result\.receipt_id/);
+  assert.doesNotMatch(admission, /hifClient|routeTranscript|executiveIntentEndpointIsAbsent|voiceOperatorEndpointIsAbsent/);
+  assert.doesNotMatch(policy, /fallback|route_not_allowlisted|voice_operator/);
+  assert.match(realtime, /this\.turnAdmissions\.beginTurn\(\)/);
+  assert.match(realtime, /const turnIdempotencyKey = this\.turnAdmissions\.activeTurnKey\(\)/);
+  assert.match(realtime, /this\.callbacks\.onUserTranscript\(text, stableIdempotencyKey\)/);
+  assert.match(client, /post<ExecutiveInteractionResult>[\s\S]*interaction\.interaction_id/);
+  assert.match(copilot, /await admitExecutiveInteraction\(request, "text", conversationId\.current\)/);
+  for (const surface of [copilot, voice]) assert.doesNotMatch(surface, /onAssistantTranscript/);
+  assert.match(realtime, /provider is an audio renderer/i);
+});
+
+test("Copilot and Voice Workspace resume human approvals only from the Runtime-owned continuation", async () => {
+  const [admission, approval, copilot, voice, client] = await Promise.all([
+    read("../src/lib/runtime-voice-admission.ts"),
+    read("../src/components/ExecutiveInteractionApproval.tsx"),
+    read("../src/components/NexusCopilot.tsx"),
+    read("../src/components/VoiceWorkspace.tsx"),
+    read("../src/lib/local-client.ts"),
+  ]);
+
+  assert.match(approval, /Human approval required/);
+  assert.match(approval, /Approve and continue/);
+  assert.match(approval, /this browser does not recreate the action or grant Authority/);
+  for (const surface of [copilot, voice]) {
+    assert.match(surface, /<ExecutiveInteractionApproval/);
+    assert.match(surface, /await localNexusClient\.approve\(approvalId\)/);
+    assert.match(surface, /admitApprovedExecutiveInteraction\(response, pending\)/);
+    assert.match(surface, /await localNexusClient\.deny\(/);
+    assert.match(surface, /validateExecutiveInteractionDenial\(response, approvalId\)/);
+  }
+  assert.match(client, /`approve:\$\{approvalId\}`/);
+  assert.match(admission, /decisionRecorded/);
+  assert.match(admission, /executionAlreadyConsumed/);
+  assert.match(admission, /localNexusClient\.executiveInteraction\(pendingAdmission\.interactionRequest, approvalId\)/);
+  assert.match(admission, /pendingAdmission\.interactionResult\.interaction_id/);
+  assert.match(admission, /recoverPendingExecutiveApproval/);
+  assert.match(admission, /localNexusClient\.executiveInteractionLookup\(interactionId\)/);
+  assert.match(admission, /Browser storage contains a UUID pointer, never the action envelope/);
+  assert.match(copilot, /recoverPendingExecutiveApproval\(\)/);
+  assert.match(voice, /recoverPendingExecutiveApproval\(\)/);
+  assert.match(admission, /admission\.status === "approval_required"/);
+  assert.match(admission, /never[\s\S]*reconstructs or reclassifies/);
+  assert.doesNotMatch(admission, /executiveIntent|routeTranscript|hifClient/);
+});
+
+test("NEXUS Command preserves Runtime-owned voice behavior across assistant surfaces", async () => {
+  const [copilot, voice, contract] = await Promise.all([
+    read("../src/components/NexusCopilot.tsx"),
+    read("../src/components/VoiceWorkspace.tsx"),
+    read("../docs/nexus-command-experience-contract.json"),
+  ]);
+  assert.match(copilot, /RealtimeVoiceClient/);
+  assert.match(voice, /RealtimeVoiceClient/);
+  assert.match(copilot, /admitRuntimeVoiceTranscript/);
+  assert.match(voice, /admitRuntimeVoiceTranscript/);
+  assert.match(voice, /admitExecutiveInteraction\(request, "text", conversationId\.current\)/);
+  assert.match(contract, /"contract": "nexus-command-experience"/);
+  assert.match(contract, /"runtimeOwner": "NEXUS Runtime"/);
+  assert.match(contract, /"canonicalEndpoint": "POST \/executive\/interactions"/);
 });
 
 test("mission control consumes the versioned Runtime parity contract", async () => {
@@ -211,10 +304,10 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
 });
 
 test("NEXUS remains a Runtime-governed conversational copilot across every portal area", async () => {
-  const [app, copilot, hif, realtime, styles, platformStyles] = await Promise.all([
+  const [app, copilot, admission, realtime, styles, platformStyles] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/components/NexusCopilot.tsx"),
-    read("../src/lib/hif-client.ts"),
+    read("../src/lib/runtime-voice-admission.ts"),
     read("../src/lib/realtime-voice-client.ts"),
     read("../src/styles.css"),
     read("../src/platform/nexus-platform.css"),
@@ -224,16 +317,15 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.doesNotMatch(app, /className="nx-platform"/);
   assert.match(app, /open=\{copilotOpen\}/);
   assert.match(copilot, /open: boolean/);
-  assert.match(copilot, /Enterprise executive operating intelligence/);
-  assert.match(copilot, /hifClient\.start\(request, "text", \{\}, conversationId\.current\)/);
+  assert.match(copilot, /NEXUS/);
+  assert.match(copilot, /admitExecutiveInteraction\(request, "text", conversationId\.current\)/);
   assert.match(copilot, /RealtimeVoiceClient/);
   assert.match(copilot, /Model-native reasoning is labeled\. Runtime evidence remains authoritative/);
-  assert.match(copilot, /plan, scope, and price a Nexicron project/i);
+  assert.match(copilot, /plan, scope, and price a NEXUS project/i);
   for (const control of ["Mute mic", "Mute NEXUS", "Unmute mic", "Unmute NEXUS"]) assert.match(copilot, new RegExp(control));
   assert.match(copilot, /if \(voiceConnected\) stopVoice\(\)/);
-  assert.match(hif, /conversationId/);
-  assert.match(hif, /return gateway\.data/);
-  assert.doesNotMatch(hif, /gateway\.data\.data/);
+  assert.match(admission, /The sole browser admission path for both text and finalized voice input/);
+  assert.doesNotMatch(admission, /hifClient|routeTranscript|executiveIntentEndpointIsAbsent|voiceOperatorEndpointIsAbsent/);
   assert.match(realtime, /RTCPeerConnection/);
   assert.doesNotMatch(app, /Begin Executive Briefing/);
   assert.match(styles, /Persistent NEXUS executive copilot/);
@@ -242,7 +334,7 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.match(platformStyles, /container-name: portal-main/);
   assert.match(styles, /@container portal-main/);
   assert.match(styles, /Modules respond to the workspace width/);
-  for (const source of [app, copilot, hif]) {
+  for (const source of [app, copilot, admission]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
   }
 });
@@ -343,8 +435,8 @@ test("canonical shell bootstraps the hosted operational session before mounting 
   assert.match(app, /const requiresOperationalSession = OPERATIONAL_AREAS\.has\(active\) \|\| \(hostedOperationalConfigured && HOSTED_CONTRACT_AREAS\.has\(active\)\)/);
   assert.match(app, /requiresOperationalSession && !operationalSession\.authenticated/);
   assert.match(app, /<OperationalAccessGate workspace=\{current\.label\}/);
-  assert.match(gate, /operationalSessionClient\.status\(\)/);
-  assert.doesNotMatch(gate, /accessKey|type="password"|Operator access key/);
+  assert.match(gate, /operationalSessionClient\.login\(accessKey\)/);
+  assert.match(gate, /accessKey|type="password"|Operator access key/);
   assert.match(gate, /HttpOnly, scoped session/);
   assert.doesNotMatch(gate, /localStorage|sessionStorage/);
   for (const mapping of ['replay: "replay"', 'missions: "missions"', 'knowledge: "knowledge"', 'edge: "edge"']) assert.match(app, new RegExp(mapping));

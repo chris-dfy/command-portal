@@ -108,13 +108,75 @@ export type CompiledArtifact = {
   };
 };
 
-export type VoiceRouteResult = {
+export type ExecutiveInteractionClassification = "question" | "action" | "clarification" | "blocked";
+export type ExecutiveInteractionStatus = "answered" | "approval_required" | "executed" | "failed" | "blocked";
+export type ExecutiveInteractionAuthorityDecision =
+  | "allow"
+  | "deny"
+  | "approval_required"
+  | "insufficient_context"
+  | "capability_unavailable"
+  | "withhold"
+  | "not_applicable";
+
+export type ExecutiveInteractionResult = {
+  interaction_id: string;
+  classification: ExecutiveInteractionClassification;
+  status: ExecutiveInteractionStatus;
+  response_text: string;
+  intent: Record<string, unknown>;
+  mission_id: string | null;
+  authority_decision: {
+    decision?: ExecutiveInteractionAuthorityDecision;
+    approval_id?: string | null;
+    [key: string]: unknown;
+  };
+  execution: Record<string, unknown>;
+  verification: {
+    verified?: boolean;
+    [key: string]: unknown;
+  };
+  receipt_id: string | null;
+  execution_scope?: "runtime" | "client_presentation" | null;
+  presentation?: {
+    action: "navigate";
+    target: string;
+  } | null;
+  proof_ids?: string[];
+  limitations?: string[];
+  [key: string]: unknown;
+};
+
+export type ExecutiveInteractionRequest = {
+  interaction_id: string;
+  session_id: string;
+  input: {
+    modality: "text" | "voice" | "api";
+    text: string;
+    source_client: "nexus-command";
+  };
+  context: {
+    active_object_ids: string[];
+    conversation_id: string | null;
+  };
+};
+
+export type ExecutiveInteractionApprovalResponse = {
+  approval_id?: string;
   status?: string;
-  spokenSummary?: string;
-  event?: { resolvedIntent?: string; routedCapability?: string; proofId?: string; receiptId?: string; failureReason?: string };
-  proof?: { proofId?: string };
-  receipt?: { receiptId?: string };
-  result?: unknown;
+  interaction_id?: string;
+  resume_required?: boolean;
+  [key: string]: unknown;
+};
+
+export type ExecutiveInteractionLookup = {
+  record_type: "nexus_interaction_lookup";
+  interaction_id: string;
+  found: boolean;
+  state: string | null;
+  transitions: Array<Record<string, unknown>>;
+  latest_response: ExecutiveInteractionResult | null;
+  original_envelope: Record<string, unknown> | null;
 };
 
 export type ClientCapabilityContract = {
@@ -415,7 +477,7 @@ async function request<T>(path: string, options: RequestInit = {}, idempotencyKe
     ].filter((item): item is string => Boolean(item));
     throw Object.assign(
       new Error([...new Set(explanation)].join(" ") || `${hosted ? "Hosted" : "Local"} NEXUS request failed (${response.status})`),
-      { envelope, details },
+      { envelope, details, status: response.status },
     );
   }
   return envelope.data;
@@ -475,6 +537,7 @@ async function sessionRequest(path: string, options: RequestInit = {}): Promise<
 
 export const operationalSessionClient = Object.freeze({
   status: () => sessionRequest(""),
+  login: (accessKey: string) => sessionRequest("/login", { method: "POST", body: JSON.stringify({ accessKey }) }),
   logout: () => sessionRequest("/logout", { method: "POST", headers: { "X-CSRF-Token": capabilityTransport.csrfToken }, body: JSON.stringify({}) }),
   use: (session: OperationalSession) => {
     capabilityTransport.mode = session.authenticated ? "hosted" : "local";
@@ -490,7 +553,49 @@ const post = <T, B extends object = Record<string, unknown>>(path: string, body:
   idempotencyKey,
 );
 
+export function newExecutiveInteractionId(): string {
+  if (typeof globalThis.crypto?.randomUUID !== "function") {
+    throw new Error("NEXUS Command requires secure UUID generation for canonical interaction admission.");
+  }
+  return globalThis.crypto.randomUUID();
+}
+
+export function newExecutiveInteractionRequest(
+  text: string,
+  modality: "text" | "voice" | "api",
+  sessionId: string,
+  interactionId = newExecutiveInteractionId(),
+): ExecutiveInteractionRequest {
+  return {
+    interaction_id: interactionId,
+    session_id: sessionId,
+    input: {
+      modality,
+      text,
+      source_client: "nexus-command",
+    },
+    context: {
+      active_object_ids: [],
+      conversation_id: sessionId,
+    },
+  };
+}
+
 export const localNexusClient = Object.freeze({
+  executiveInteraction: (
+    interaction: ExecutiveInteractionRequest,
+    approvalId?: string,
+  ) => post<ExecutiveInteractionResult>(
+    "/executive-interactions",
+    {
+      ...interaction,
+      ...(approvalId ? { approval_id: approvalId } : {}),
+    },
+    interaction.interaction_id,
+  ),
+  executiveInteractionLookup: (interactionId: string) => request<ExecutiveInteractionLookup>(
+    `/executive-interactions/${encodeURIComponent(interactionId)}`,
+  ),
   status: () => request<Record<string, unknown>>("/status"),
   capabilityReadiness: () => request<Record<string, unknown>>("/capabilities/readiness"),
   clientCapabilities: () => request<ClientCapabilityContract>("/client-capabilities"),
@@ -505,7 +610,6 @@ export const localNexusClient = Object.freeze({
   projectCompile: (projectId: string, artifactType: string, options: Record<string, unknown>) => post<CompiledArtifact>(`/projects/${encodeURIComponent(projectId)}/compile`, { artifactType, options }),
   voiceStatus: () => request<Record<string, unknown>>("/voice-operator/status"),
   voiceHistory: () => request<{ events?: Array<Record<string, unknown>> }>("/voice-operator/history"),
-  routeTranscript: (transcript: string, source: "browser_speech" | "text_fallback") => post<VoiceRouteResult>("/voice-operator/route-transcript", { transcript, source }),
   missions: () => request<Record<string, unknown>>("/missions"),
   mission: (missionId: string) => request<Record<string, unknown>>(
     `/missions/${encodeURIComponent(missionId)}`,
@@ -519,7 +623,11 @@ export const localNexusClient = Object.freeze({
     : post<Record<string, unknown>>("/missions/plan", { objective }),
   executeMissionStep: (missionId: string, stepId: string) => capabilityTransport.mode === "hosted"
     ? Promise.reject(new Error("Hosted Mission execution is unavailable until a canonical governed execution route is registered."))
-    : post<Record<string, unknown>>(`/missions/${encodeURIComponent(missionId)}/execute-step`, { stepId }),
+    : post<Record<string, unknown>>(
+      `/missions/${encodeURIComponent(missionId)}/execute-step`,
+      { stepId },
+      `mission-step-${globalThis.crypto.randomUUID()}`,
+    ),
   conclaveWorkspaces: () => request<ConclaveWorkspaceList>("/conclave/workspaces"),
   createConclaveWorkspace: (proposal: string, idempotencyKey: string) => post<ConclaveWorkspaceRecord>(
     "/conclave/workspaces",
@@ -551,15 +659,48 @@ export const localNexusClient = Object.freeze({
   ),
   workSessions: () => request<Record<string, unknown>>("/work-sessions"),
   planWorkSession: (objective: string) => post<Record<string, unknown>>("/work-sessions/plan", { objective }),
-  startWorkSession: (objective: string) => post<Record<string, unknown>>("/work-sessions/start", { objective }),
+  startWorkSession: (
+    objective: string,
+    idempotencyKey = `work-session-start-${globalThis.crypto.randomUUID()}`,
+  ) => post<Record<string, unknown>>(
+    "/work-sessions/start",
+    { objective },
+    idempotencyKey,
+  ),
   workSession: (sessionId: string) => request<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}`),
-  controlWorkSession: (sessionId: string, action: "step" | "continue" | "pause" | "cancel") => post<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}/${action}`, {}),
+  controlWorkSession: (
+    sessionId: string,
+    action: "step" | "continue" | "pause" | "cancel",
+    idempotencyKey = `work-session-${action}-${globalThis.crypto.randomUUID()}`,
+  ) => post<Record<string, unknown>>(
+    `/work-sessions/${encodeURIComponent(sessionId)}/${action}`,
+    {},
+    idempotencyKey,
+  ),
   workSessionReceipt: (sessionId: string) => request<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}/receipt`),
+  workSessionBudget: (sessionId: string) => request<Record<string, unknown>>(
+    `/work-sessions/${encodeURIComponent(sessionId)}/budget`,
+  ),
+  setWorkSessionBudget: (
+    sessionId: string,
+    payload: Record<string, number>,
+    idempotencyKey = `work-session-budget-${globalThis.crypto.randomUUID()}`,
+  ) => post<Record<string, unknown>>(
+    `/work-sessions/${encodeURIComponent(sessionId)}/budget`,
+    payload,
+    idempotencyKey,
+  ),
   approvals: () => request<Record<string, unknown>>("/approvals"),
-  approve: (approvalId: string) => post<Record<string, unknown>>(`/approvals/${encodeURIComponent(approvalId)}/approve`, {}),
-  deny: (approvalId: string, reason: string) => post<Record<string, unknown>>(`/approvals/${encodeURIComponent(approvalId)}/deny`, { reason }),
-  dryRunAction: (action: string) => post<Record<string, unknown>>("/actions/dry-run", { action }),
-  executeAction: (action: string) => post<Record<string, unknown>>("/actions/execute", { action, explicitRequest: true }),
+  approve: (approvalId: string) => post<ExecutiveInteractionApprovalResponse>(
+    `/approvals/${encodeURIComponent(approvalId)}/approve`,
+    {},
+    `approve:${approvalId}`,
+  ),
+  deny: (approvalId: string, reason: string) => post<ExecutiveInteractionApprovalResponse>(
+    `/approvals/${encodeURIComponent(approvalId)}/deny`,
+    { reason },
+    `deny:${approvalId}`,
+  ),
   connectors: () => request<Record<string, unknown>>("/connectors"),
   connectorHealth: () => request<Record<string, unknown>>("/connectors/health"),
   runtimeNodes: () => request<RuntimeNodeFleet>("/runtime-coordination/nodes"),

@@ -2,8 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Send, Volume2, VolumeX, Waves } from "lucide-react";
 import { DataPanel } from "./DataPanel";
 import { displayLabel } from "../lib/presentation";
-import { localNexusClient, type VoiceRouteResult } from "../lib/local-client";
+import { localNexusClient, newExecutiveInteractionId } from "../lib/local-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
+import {
+  admitApprovedExecutiveInteraction,
+  admitExecutiveInteraction,
+  admitRuntimeVoiceTranscript,
+  clearPendingExecutiveApproval,
+  pendingExecutiveApprovalId,
+  recoverPendingExecutiveApproval,
+  rememberPendingExecutiveApproval,
+  runtimeInteractionTrace,
+  type RuntimeInteractionAdmission,
+  validateExecutiveInteractionDenial,
+} from "../lib/runtime-voice-admission";
+import { ExecutiveInteractionApproval } from "./ExecutiveInteractionApproval";
 
 type VoiceStatus = {
   state?: string;
@@ -30,15 +43,26 @@ export function VoiceWorkspace() {
   const [history, setHistory] = useState<TranscriptEntry[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [routeResult, setRouteResult] = useState<VoiceRouteResult | null>(null);
+  const [latestAdmission, setLatestAdmission] = useState<RuntimeInteractionAdmission | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<RuntimeInteractionAdmission | null>(null);
+  const [approvalBusy, setApprovalBusy] = useState<"approve" | "deny" | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const liveClient = useRef<RealtimeVoiceClient | null>(null);
+  const conversationId = useRef(newExecutiveInteractionId());
 
   const connected = !["idle", "error"].includes(voiceState);
   const supported = RealtimeVoiceClient.supported();
-
   useEffect(() => {
     void refreshStatus();
+    void recoverPendingExecutiveApproval()
+      .then((admission) => {
+        if (!admission) return;
+        setLatestAdmission(admission);
+        setPendingApproval(admission);
+        setAssistantTranscript(admission.spokenSummary);
+        setMessage(`Recovered from the Runtime interaction ledger. ${runtimeInteractionTrace(admission)}`);
+      })
+      .catch((error) => setMessage(messageFrom(error)));
     return () => liveClient.current?.stop();
   }, []);
 
@@ -53,6 +77,59 @@ export function VoiceWorkspace() {
     }
   }
 
+  function presentAdmission(admission: RuntimeInteractionAdmission, operatorText?: string) {
+    setLatestAdmission(admission);
+    rememberPendingExecutiveApproval(admission);
+    setPendingApproval(pendingExecutiveApprovalId(admission) ? admission : null);
+    setAssistantTranscript(admission.spokenSummary);
+    setHistory((items) => [
+      { speaker: "NEXUS", text: admission.spokenSummary } as TranscriptEntry,
+      ...(operatorText ? [{ speaker: "You", text: operatorText } as TranscriptEntry] : []),
+      ...items,
+    ].slice(0, 10));
+    setMessage(["Runtime returned the canonical governed interaction result.", runtimeInteractionTrace(admission)].join(" "));
+  }
+
+  async function approvePendingIntent() {
+    const pending = pendingApproval;
+    const approvalId = pendingExecutiveApprovalId(pending);
+    if (!pending || !approvalId || approvalBusy) return;
+    setMessage(null);
+    setApprovalBusy("approve");
+    try {
+      const response = await localNexusClient.approve(approvalId);
+      presentAdmission(await admitApprovedExecutiveInteraction(response, pending));
+    } catch (error) {
+      setMessage(messageFrom(error));
+    } finally {
+      setApprovalBusy(null);
+    }
+  }
+
+  async function denyPendingIntent() {
+    const approvalId = pendingExecutiveApprovalId(pendingApproval);
+    if (!approvalId || approvalBusy) return;
+    setMessage(null);
+    setApprovalBusy("deny");
+    try {
+      const response = await localNexusClient.deny(
+        approvalId,
+        "Denied by the authenticated operator in NEXUS Command Voice Workspace.",
+      );
+      validateExecutiveInteractionDenial(response, approvalId);
+      clearPendingExecutiveApproval(pendingApproval?.interactionResult.interaction_id);
+      setPendingApproval(null);
+      const denial = `Runtime recorded the denial for approval ${approvalId}. No approval continuation was admitted.`;
+      setAssistantTranscript(denial);
+      setHistory((items) => [{ speaker: "NEXUS", text: denial } as TranscriptEntry, ...items].slice(0, 10));
+      setMessage(denial);
+    } catch (error) {
+      setMessage(messageFrom(error));
+    } finally {
+      setApprovalBusy(null);
+    }
+  }
+
   async function startLiveVoice() {
     if (!audio.current) return;
     setMessage(null);
@@ -63,11 +140,14 @@ export function VoiceWorkspace() {
     const client = new RealtimeVoiceClient(audio.current, {
       onState: setVoiceState,
       onAmplitude: setAmplitude,
-      onUserTranscript: (text) => {
+      onUserTranscript: async (text, idempotencyKey) => {
+        setAssistantTranscript("");
         setTranscript(text);
         setHistory((items) => [{ speaker: "You", text } as TranscriptEntry, ...items].slice(0, 10));
+        const admission = await admitRuntimeVoiceTranscript(text, conversationId.current, idempotencyKey);
+        presentAdmission(admission);
+        return admission;
       },
-      onAssistantTranscript: (text) => setAssistantTranscript(text),
       onError: setMessage,
     });
     liveClient.current = client;
@@ -81,7 +161,6 @@ export function VoiceWorkspace() {
   }
 
   function stopLiveVoice() {
-    if (assistantTranscript.trim()) setHistory((items) => [{ speaker: "NEXUS", text: assistantTranscript.trim() } as TranscriptEntry, ...items].slice(0, 10));
     liveClient.current?.stop();
     liveClient.current = null;
     setMicrophoneMuted(false);
@@ -104,28 +183,13 @@ export function VoiceWorkspace() {
   }
 
   async function sendText() {
-    if (!transcript.trim()) return;
+    const request = transcript.trim();
+    if (!request) return;
     setBusy(true);
     setMessage(null);
     try {
-      const response = await localNexusClient.routeTranscript(transcript.trim(), "text_fallback");
-      const responseText = response.spokenSummary?.trim()
-        || response.event?.failureReason?.trim()
-        || "NEXUS recorded the request without a spoken summary.";
-      const proofId = response.proof?.proofId ?? response.event?.proofId;
-      const receiptId = response.receipt?.receiptId ?? response.event?.receiptId;
-      setRouteResult(response);
-      setAssistantTranscript(responseText);
-      setHistory((items) => [
-        { speaker: "NEXUS", text: responseText } as TranscriptEntry,
-        { speaker: "You", text: transcript.trim() } as TranscriptEntry,
-        ...items,
-      ].slice(0, 10));
-      setMessage([
-        "Text request was processed by the governed NEXUS Runtime Voice Operator.",
-        proofId ? `Proof ${proofId}.` : "",
-        receiptId ? `Receipt ${receiptId}.` : "",
-      ].filter(Boolean).join(" "));
+      const admission = await admitExecutiveInteraction(request, "text", conversationId.current);
+      presentAdmission(admission, request);
     } catch (error) {
       setMessage(messageFrom(error));
     } finally {
@@ -155,10 +219,16 @@ export function VoiceWorkspace() {
         </button>}
       </div>
       <div className="voice-text-fallback">
-        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder="Or type a request for the governed Runtime Voice Operator" />
+        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder="Or type a governed request for NEXUS" />
         <button onClick={() => void sendText()} disabled={busy || !transcript.trim()}><Send size={17} /> Send text</button>
       </div>
       {message && <p className="workspace-message" role="status">{message}</p>}
+      <ExecutiveInteractionApproval
+        admission={pendingApproval}
+        busy={approvalBusy}
+        onApprove={() => void approvePendingIntent()}
+        onDeny={() => void denyPendingIntent()}
+      />
       <p className="boundary-note">Realtime conversation may use model-native knowledge. Organization-specific facts, live operational state, completed actions, and authoritative evidence still require registered Runtime context, connectors, proofs, and receipts.</p>
     </DataPanel>
 
@@ -169,7 +239,7 @@ export function VoiceWorkspace() {
         <div><dt>Voice / transport</dt><dd>{status?.voice && status?.transport ? `${status.voice} · ${status.transport}` : "Not reported"}</dd></div>
         <div><dt>Conversation</dt><dd>{status?.serverVAD ? "Server voice detection" : "Not verified"}{status?.interruptResponse ? " · interruption enabled" : ""}</dd></div>
         <div><dt>Context owner</dt><dd>{status?.contextAssemblyOwner ?? "NEXUS Runtime"}</dd></div>
-        <div><dt>Governed text state</dt><dd>{displayLabel(routeResult?.status ?? "idle")}</dd></div>
+        <div><dt>Governed interaction state</dt><dd>{displayLabel(latestAdmission?.status ?? "idle")}</dd></div>
       </dl>
     </DataPanel>
 
