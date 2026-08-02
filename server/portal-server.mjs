@@ -72,7 +72,7 @@ export const CONTEXT_ASSERTION_ALGORITHM = "hmac-sha256";
 export const REALTIME_PROMPT_ECHO_HEADER = "X-NEXUS-Prompt-Echo-Signature";
 const CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime";
 const CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway";
-const CONTEXT_ASSERTION_KEY_ID = "context-assertion-current";
+const CONTEXT_ASSERTION_KEY_ID = "context-assertion-command-portal-v1";
 const RUNTIME_CREDENTIAL_KEY_ID = "runtime-read-current";
 const TRUST_BINDING_ID = "runtime-experience-trust-bootstrap";
 const CONTEXT_ASSERTION_ROLES = Object.freeze(["observer"]);
@@ -500,7 +500,7 @@ export function createTenantContextAssertion(config, claims, clientId, clock = (
   if (!config.contextAssertionSecret) return "";
   const issuer = config.contextAssertionIssuer ?? CONTEXT_ASSERTION_ISSUER;
   const audience = config.contextAssertionAudience ?? CONTEXT_ASSERTION_AUDIENCE;
-  const keyId = config.contextAssertionKeyId ?? CONTEXT_ASSERTION_KEY_ID;
+  const keyId = CONTEXT_ASSERTION_KEY_ID;
   const allowedClientIds = config.contextAssertionClientIds ?? ["nexus-web"];
   if (!allowedClientIds.includes(clientId)) {
     throw new Error("The Runtime client identity is not provisioned for this Experience Gateway.");
@@ -509,6 +509,12 @@ export function createTenantContextAssertion(config, claims, clientId, clock = (
   const humanOperatorVerified = claims?.principalType === "named_operator";
   if (claims && !humanOperatorVerified) {
     throw new Error("An authoritative context assertion requires an explicitly authenticated named operator.");
+  }
+  if (
+    humanOperatorVerified
+    && (claims.sub === issuer || allowedClientIds.includes(claims.sub))
+  ) {
+    throw new Error("A registered gateway issuer or client identity cannot be asserted as a human operator.");
   }
   const roles = humanOperatorVerified ? [claims.role] : [...CONTEXT_ASSERTION_ROLES];
   const scopes = humanOperatorVerified ? [...new Set(claims.scopes)].sort() : undefined;
@@ -579,13 +585,13 @@ export function loadConfig(overrides = {}) {
   );
   const contextAssertionSecret = optionalSecret(
     overrides.contextAssertionSecret
-      ?? process.env.NEXUS_CONTEXT_ASSERTION_SECRET,
-    "NEXUS_CONTEXT_ASSERTION_SECRET"
+      ?? process.env.NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET,
+    "NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET"
   );
   const contextAssertionSecretRef = optionalSecretReference(
     overrides.contextAssertionSecretRef
-      ?? process.env.NEXUS_CONTEXT_ASSERTION_SECRET_REF,
-    "NEXUS_CONTEXT_ASSERTION_SECRET_REF"
+      ?? process.env.NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET_REF,
+    "NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET_REF"
   );
   const contextAssertionIssuer = stablePublicIdentifier(
     overrides.contextAssertionIssuer
@@ -599,12 +605,13 @@ export function loadConfig(overrides = {}) {
       ?? CONTEXT_ASSERTION_AUDIENCE,
     "COMMAND_PORTAL_CONTEXT_ASSERTION_AUDIENCE"
   );
-  const contextAssertionKeyId = stablePublicIdentifier(
-    overrides.contextAssertionKeyId
-      ?? process.env.NEXUS_CONTEXT_ASSERTION_KEY_ID
-      ?? CONTEXT_ASSERTION_KEY_ID,
-    "NEXUS_CONTEXT_ASSERTION_KEY_ID"
-  );
+  if (
+    overrides.contextAssertionKeyId !== undefined
+    && overrides.contextAssertionKeyId !== CONTEXT_ASSERTION_KEY_ID
+  ) {
+    throw new Error("Command Portal context assertions require the registered product-specific key id.");
+  }
+  const contextAssertionKeyId = CONTEXT_ASSERTION_KEY_ID;
   const contextAssertionClientIds = String(
     overrides.contextAssertionClientIds
       ?? process.env.COMMAND_PORTAL_CONTEXT_ASSERTION_CLIENT_IDS
@@ -634,7 +641,7 @@ export function loadConfig(overrides = {}) {
   }
   if (trustBootstrapRequired) {
     requiredSecret(runtimeToken, "COMMAND_PORTAL_RUNTIME_READ_TOKEN", 32);
-    requiredSecret(contextAssertionSecret, "NEXUS_CONTEXT_ASSERTION_SECRET", 32);
+    requiredSecret(contextAssertionSecret, "NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET", 32);
     if (!runtimeTokenRef || !contextAssertionSecretRef) {
       throw new Error("Trust bootstrap requires both opaque secret-provider references.");
     }
@@ -1008,6 +1015,7 @@ export function loadConfig(overrides = {}) {
       metadata.some((item) => (
         item.providerIssuer !== replitAuthIssuer
         || item.principalId === humanSessionServiceBindingId
+        || item.principalId === humanSessionAssertionClientId
         || item.tenantId !== operationalTenantId
         || item.workspaceId !== operationalWorkspaceId
         || item.policyId !== executiveSessionPolicyId

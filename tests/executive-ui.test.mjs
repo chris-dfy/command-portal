@@ -119,7 +119,7 @@ test("Replit publishes the fixed hosted binding without committing server secret
     "COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET",
     "COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON",
     "NEXUS_HUMAN_SESSION_ASSERTION_SECRET",
-    "NEXUS_CONTEXT_ASSERTION_SECRET",
+    "NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET",
   ]) assert.doesNotMatch(replit, new RegExp(`^${secretName}\\s*=`, "m"));
 });
 
@@ -193,21 +193,26 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(projects, /never fabricates a price/i);
   assert.match(realtime, /RTCPeerConnection/);
   assert.match(realtime, /echoCancellation: true/);
-  assert.match(realtime, /output_audio_buffer\.clear/);
+  assert.match(realtime, /conversation\.item\.input_audio_transcription\.completed/);
+  assert.match(realtime, /direction: "sendonly"/);
   assert.match(realtime, /setMicrophoneMuted/);
   assert.match(realtime, /track\.enabled = !this\.microphoneMuted/);
   assert.match(realtime, /setOutputMuted/);
-  assert.match(realtime, /this\.audio\.muted = this\.outputMuted \|\| this\.narrationResponseGate\.activeResponse\(\) === null/);
+  assert.doesNotMatch(realtime, /HTMLAudioElement|document\.createElement\(["']audio/);
+  assert.match(realtime, /attempted to attach output media to a transcription-only session/);
+  assert.match(realtime, /onRuntimeResponse\(responseText\)/);
+  assert.doesNotMatch(realtime, /type:\s*"response\.create"/);
+  assert.doesNotMatch(realtime, /\.play\(/);
   for (const control of ["Mute microphone", "Mute NEXUS", "Unmute microphone", "Unmute NEXUS"]) assert.match(voice, new RegExp(control));
-  assert.match(voice, /Runtime owns the provider session and truth boundaries/i);
+  assert.match(voice, /WebRTC carries microphone input only/i);
   assert.match(voice, /model-native knowledge/i);
   assert.match(browserSpeech, /SpeechRecognition/);
   assert.match(browserSpeech, /speechSynthesis\.speak\(utterance\)/);
   assert.match(browserSpeech, /Browser microphone did not capture speech within/);
   assert.match(voice, /speakBrowserResponse\(responseText\)/);
+  assert.match(voice, /if \(!nexusMutedRef\.current\) speakBrowserResponse\(responseText\)/);
   assert.match(voice, /actual Runtime response locally/);
-  assert.match(realtime, /REALTIME_RESPONSE_TIMEOUT_MS = 10_000/);
-  assert.match(realtime, /Live voice did not narrate the admitted Runtime response within 10 seconds/);
+  assert.match(realtime, /forbidden output event/);
   assert.match(voice, /admitRuntimeVoiceTranscript\(/);
   assert.match(admission, /The sole browser admission path for both text and finalized voice input/);
   assert.match(admission, /localNexusClient\.executiveInteraction\(request\)/);
@@ -798,7 +803,7 @@ test("copilot and voice controls fail closed on canonical interaction availabili
   assert.match(copilot, /disabled=\{!interactionAction\.available/);
   assert.match(copilot, /disabled=\{!voiceAvailable \|\| !realtimeAction\.available/);
   assert.ok(
-    voice.indexOf("if (!audio.current || !liveProviderAvailable)") < voice.indexOf("await client.connect()"),
+    voice.indexOf("if (!liveProviderAvailable)") < voice.indexOf("await client.connect()"),
     "VoiceWorkspace must reject unavailable Realtime before connection",
   );
   assert.match(voice, /const liveProviderAvailable = realtimeAction\.available[\s\S]*status\?\.state === "available"/);
@@ -813,10 +818,10 @@ test("copilot and voice controls fail closed on canonical interaction availabili
   assert.match(voice, /The captured transcript has not been sent/);
   assert.doesNotMatch(voice, /response_timeout/);
   assert.match(voice, /Send captured transcript through governed Voice/);
-  assert.match(realtime, /REALTIME_RESPONSE_TIMEOUT_MS = 10_000/);
-  assert.match(realtime, /Live voice did not narrate the admitted Runtime response within 10 seconds/);
-  assert.match(realtime, /this\.startResponseBoundary\(\)/);
-  assert.match(realtime, /private fail\(message: string\) \{[\s\S]*?this\.clearResponseBoundary\(\);[\s\S]*?this\.narrationResponseGate\.reset\(\);[\s\S]*?this\.applyOutputMuteGate\(\);[\s\S]*?this\.callbacks\.onState\("error"\)/);
+  assert.match(realtime, /direction: "sendonly"/);
+  assert.match(realtime, /isProviderOutputEvent\(type\)/);
+  assert.match(realtime, /forbidden output event/);
+  assert.doesNotMatch(realtime, /RealtimeNarrationResponseGate|requestResponse/);
 });
 
 test("canonical execution exposes only registered-session-backed read-only evidence", async () => {

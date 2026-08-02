@@ -11,6 +11,7 @@ import {
   CAPABILITY_REGISTRY_VALIDATOR_VERSION,
   CANONICAL_OPERATIONAL_ROUTES,
   createPortalServer,
+  createTenantContextAssertion,
   FIXED_RUNTIME_ACTION_ALIASES,
   loadConfig,
   LOCAL_CAPABILITY_ROUTES,
@@ -1768,7 +1769,7 @@ test("Experience Gateway signs authoritative Runtime tenant context without expo
   assert.equal(assertion.v, 3);
   assert.equal(assertion.contract, "nexus.context-assertion@3.0.0");
   assert.equal(assertion.alg, "hmac-sha256");
-  assert.equal(assertion.kid, "context-assertion-current");
+  assert.equal(assertion.kid, "context-assertion-command-portal-v1");
   assert.equal(assertion.iss, "command-portal-experience-gateway");
   assert.equal(assertion.aud, "nexus-runtime");
   assert.equal(assertion.tid, "nexicron");
@@ -1789,6 +1790,61 @@ test("Experience Gateway signs authoritative Runtime tenant context without expo
   assert.equal(JSON.stringify(await response.json()).includes(secret), false);
 });
 
+test("Command Portal assertions cannot fall back to a shared secret or cross-product key id", { concurrency: false }, () => {
+  const priorShared = process.env.NEXUS_CONTEXT_ASSERTION_SECRET;
+  const priorPortal = process.env.NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET;
+  try {
+    process.env.NEXUS_CONTEXT_ASSERTION_SECRET = "legacy-shared-context-assertion-secret-material-0001";
+    delete process.env.NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET;
+    const withoutPortalKey = loadConfig({
+      runtimeToken: "runtime-token-material-at-least-thirty-two-chars",
+    });
+    assert.equal(withoutPortalKey.contextAssertionSecret, "");
+
+    assert.throws(() => loadConfig({
+      runtimeToken: "runtime-token-material-at-least-thirty-two-chars",
+      contextAssertionSecret: "portal-context-assertion-secret-material-000001",
+      contextAssertionKeyId: "context-assertion-current",
+    }), /registered product-specific key id/);
+
+    const token = createTenantContextAssertion({
+      contextAssertionSecret: "portal-context-assertion-secret-material-000001",
+      contextAssertionKeyId: "context-assertion-demo-factory-v1",
+      operationalTenantId: "nexicron",
+      operationalWorkspaceId: "primary",
+    }, {
+      principalType: "named_operator",
+      role: "admin",
+      scopes: ["operations:read"],
+      tenantId: "nexicron",
+      workspaceId: "primary",
+      sub: "operator-1",
+    }, "nexus-web", () => 1_753_000_000_000);
+    const payload = JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString("utf8"));
+    assert.equal(payload.kid, "context-assertion-command-portal-v1");
+    assert.equal(payload.authorityGranted, false);
+    for (const serviceIdentity of ["command-portal-experience-gateway", "nexus-web"]) {
+      assert.throws(() => createTenantContextAssertion({
+        contextAssertionSecret: "portal-context-assertion-secret-material-000001",
+        operationalTenantId: "nexicron",
+        operationalWorkspaceId: "primary",
+      }, {
+        principalType: "named_operator",
+        role: "admin",
+        scopes: ["operations:read"],
+        tenantId: "nexicron",
+        workspaceId: "primary",
+        sub: serviceIdentity,
+      }, "nexus-web"), /cannot be asserted as a human operator/);
+    }
+  } finally {
+    if (priorShared === undefined) delete process.env.NEXUS_CONTEXT_ASSERTION_SECRET;
+    else process.env.NEXUS_CONTEXT_ASSERTION_SECRET = priorShared;
+    if (priorPortal === undefined) delete process.env.NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET;
+    else process.env.NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET = priorPortal;
+  }
+});
+
 test("redacted trust bootstrap requires secret-manager references but never returns material", () => {
   const runtimeCredential = randomBytes(48).toString("base64url");
   const assertionKey = randomBytes(48).toString("base64url");
@@ -1797,7 +1853,7 @@ test("redacted trust bootstrap requires secret-manager references but never retu
     runtimeToken: runtimeCredential,
     runtimeTokenRef: "secret-manager:nexus/runtime/experience-gateway-read",
     contextAssertionSecret: assertionKey,
-    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-current",
+    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-command-portal-v1",
     trustBootstrapRequired: true
   });
   const trust = publicTrustBootstrap(config);
@@ -1833,7 +1889,7 @@ test("redacted trust bootstrap requires secret-manager references but never retu
     runtimeToken: runtimeCredential,
     runtimeTokenRef: "secret-manager:nexus/runtime/experience-gateway-read",
     contextAssertionSecret: assertionKey,
-    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-current",
+    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-command-portal-v1",
     contextAssertionIssuer: "unregistered-experience-gateway",
     trustBootstrapRequired: true
   }), /registered Mission 1 binding/);
@@ -1842,7 +1898,7 @@ test("redacted trust bootstrap requires secret-manager references but never retu
     runtimeToken: runtimeCredential,
     runtimeTokenRef: "secret-manager:nexus/runtime/experience-gateway-read",
     contextAssertionSecret: assertionKey,
-    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-current",
+    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-command-portal-v1",
     trustBootstrapRequired: true
   }), /HTTPS Runtime endpoint/);
   assert.throws(() => loadConfig({
@@ -1850,7 +1906,7 @@ test("redacted trust bootstrap requires secret-manager references but never retu
     runtimeToken: runtimeCredential,
     runtimeTokenRef: "file:local/runtime-read",
     contextAssertionSecret: assertionKey,
-    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-current"
+    contextAssertionSecretRef: "secret-manager:nexus/runtime/context-assertion-command-portal-v1"
   }), /opaque secret-provider reference/);
 
   const disabled = publicTrustBootstrap({

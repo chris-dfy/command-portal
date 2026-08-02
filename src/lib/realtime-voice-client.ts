@@ -1,8 +1,4 @@
 import { OPERATIONAL_SESSION_INVALID_EVENT, operationalSessionClient } from "./local-client.ts";
-import {
-  NEXUS_NARRATION_CORRELATION_METADATA_KEY,
-  RealtimeNarrationResponseGate,
-} from "./realtime-narration-response-gate.ts";
 import { RealtimeTurnAdmissionLedger } from "./runtime-admission-policy.ts";
 
 export type RealtimeVoiceState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "interrupted" | "error";
@@ -16,23 +12,18 @@ export type RealtimeTranscriptAdmission =
 export type RealtimeVoiceCallbacks = {
   onState: (state: RealtimeVoiceState) => void;
   onAmplitude: (amplitude: number) => void;
-  /**
-   * Admit one finalized transcript through a Runtime-owned interaction path.
-   * The provider remains silent until this callback returns an authoritative
-   * spoken summary; rejected or failed admissions are deleted fail-closed.
-   */
+  /** Submit one finalized provider transcript to the canonical Runtime path. */
   onUserTranscript: (text: string, idempotencyKey: string) => Promise<RealtimeTranscriptAdmission>;
+  /** Narrate only the Runtime-returned response after current-turn admission. */
+  onRuntimeResponse: (responseText: string) => void;
   onError: (message: string) => void;
 };
 
 type RealtimeEvent = {
   type?: string;
   transcript?: string;
-  delta?: string;
   item_id?: string;
-  response_id?: string;
   item?: { id?: string };
-  response?: { id?: string; metadata?: Record<string, unknown> };
   error?: { message?: string };
 };
 
@@ -43,14 +34,7 @@ const normalizeTranscript = (value: string) => value
   .replace(/[^a-z0-9]+/g, " ")
   .trim();
 
-const REALTIME_RESPONSE_TIMEOUT_MS = 10_000;
 const REALTIME_ITEM_ID_PATTERN = /^[A-Za-z0-9._:-]{1,200}$/;
-
-type QueuedNarration = {
-  spokenSummary: string;
-  turnIdempotencyKey: string;
-  itemId: string;
-};
 
 export function runtimePromptEchoSignatureFromHeaders(headers: Pick<Headers, "get">): string | null {
   const value = headers.get(RUNTIME_PROMPT_ECHO_HEADER)?.trim() ?? "";
@@ -61,8 +45,6 @@ export function runtimePromptEchoSignatureFromHeaders(headers: Pick<Headers, "ge
 /**
  * Reject the exact Runtime signature and substantial ordered fragments before
  * they can become user-visible messages, commands, memory, or response input.
- * A candidate must contain only signature vocabulary, so real requests such as
- * "NEXUS, explain enterprise operations" remain admissible.
  */
 export function looksLikeRuntimePromptEcho(candidateText: string, signatureText: string): boolean {
   const neutral = new Set(["and", "the", "of"]);
@@ -80,34 +62,36 @@ export function looksLikeRuntimePromptEcho(candidateText: string, signatureText:
   return true;
 }
 
+function isProviderOutputEvent(type: string): boolean {
+  return type === "response.create"
+    || type === "output_audio_buffer.started"
+    || type === "output_audio_buffer.stopped"
+    || type === "output_audio_buffer.cleared"
+    || type.startsWith("response.");
+}
+
+/**
+ * WebRTC is a microphone-to-transcript transport only. It never requests,
+ * accepts, attaches, or plays provider output. Every final transcript is
+ * submitted once to Runtime, and only Runtime response_text may be narrated.
+ */
 export class RealtimeVoiceClient {
-  private readonly audio: HTMLAudioElement;
   private readonly callbacks: RealtimeVoiceCallbacks;
   private peer: RTCPeerConnection | null = null;
   private channel: RTCDataChannel | null = null;
   private stream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
   private animationFrame: number | null = null;
-  private speaking = false;
   private microphoneMuted = false;
-  private outputMuted = false;
   private promptEchoSignature: string | null = null;
   private admissionQueue: Promise<void> = Promise.resolve();
   private admittedItemIds = new Set<string>();
   private readonly turnKeyByItemId = new Map<string, string>();
   private activeSpeechItemId: string | null = null;
-  private readonly turnAdmissions: RealtimeTurnAdmissionLedger<RealtimeTranscriptAdmission>;
-  private readonly narrationResponseGate = new RealtimeNarrationResponseGate();
-  private cancellingResponseId: string | null = null;
-  private discardNextCreatedResponse = false;
-  private queuedNarration: QueuedNarration | null = null;
-  private responseTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly turnAdmissions = new RealtimeTurnAdmissionLedger<RealtimeTranscriptAdmission>();
 
-  constructor(audio: HTMLAudioElement, callbacks: RealtimeVoiceCallbacks) {
-    this.audio = audio;
+  constructor(callbacks: RealtimeVoiceCallbacks) {
     this.callbacks = callbacks;
-    this.turnAdmissions = new RealtimeTurnAdmissionLedger();
-    this.applyOutputMuteGate();
   }
 
   static supported() {
@@ -122,19 +106,22 @@ export class RealtimeVoiceClient {
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
       });
       this.applyMicrophoneMute();
-      this.applyOutputMuteGate();
       this.startAmplitudeMeter(this.stream);
 
       const peer = new RTCPeerConnection();
       this.peer = peer;
       peer.ontrack = (event) => {
-        this.audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        void this.audio.play().catch(() => this.callbacks.onError("Browser audio playback is blocked. Allow audio for this site and reconnect."));
+        event.track.stop();
+        event.streams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
+        this.stop();
+        this.fail("Realtime provider attempted to attach output media to a transcription-only session.");
       };
       peer.onconnectionstatechange = () => {
         if (["failed", "disconnected"].includes(peer.connectionState)) this.fail("The live voice connection was interrupted.");
       };
-      for (const track of this.stream.getTracks()) peer.addTrack(track, this.stream);
+      for (const track of this.stream.getAudioTracks()) {
+        peer.addTransceiver(track, { direction: "sendonly", streams: [this.stream] });
+      }
 
       const channel = peer.createDataChannel("oai-events");
       this.channel = channel;
@@ -177,7 +164,6 @@ export class RealtimeVoiceClient {
   }
 
   stop() {
-    this.clearResponseBoundary();
     if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
     this.animationFrame = null;
     this.stream?.getTracks().forEach((track) => track.stop());
@@ -186,17 +172,9 @@ export class RealtimeVoiceClient {
     this.channel = null;
     this.peer?.close();
     this.peer = null;
-    this.audio.pause();
-    this.audio.srcObject = null;
-    this.audio.muted = false;
     void this.audioContext?.close();
     this.audioContext = null;
-    this.speaking = false;
     this.promptEchoSignature = null;
-    this.narrationResponseGate.reset();
-    this.cancellingResponseId = null;
-    this.discardNextCreatedResponse = false;
-    this.queuedNarration = null;
     this.admittedItemIds.clear();
     this.turnKeyByItemId.clear();
     this.activeSpeechItemId = null;
@@ -212,23 +190,35 @@ export class RealtimeVoiceClient {
   }
 
   setOutputMuted(muted: boolean) {
-    this.outputMuted = muted;
-    this.applyOutputMuteGate();
+    // Provider output is structurally absent. This control only cancels browser
+    // narration of a Runtime response already in progress.
+    if (muted && typeof window !== "undefined") window.speechSynthesis?.cancel();
   }
 
   private applyMicrophoneMute() {
     this.stream?.getAudioTracks().forEach((track) => { track.enabled = !this.microphoneMuted; });
   }
 
-  private applyOutputMuteGate() {
-    this.audio.muted = this.outputMuted || this.narrationResponseGate.activeResponse() === null;
-  }
-
   private handleEvent(raw: unknown) {
     let event: RealtimeEvent;
     try { event = JSON.parse(String(raw)) as RealtimeEvent; }
-    catch { return; }
-    switch (event.type) {
+    catch {
+      this.stop();
+      this.fail("Realtime provider emitted malformed protocol data.");
+      return;
+    }
+    const type = typeof event.type === "string" ? event.type : "";
+    if (!type) {
+      this.stop();
+      this.fail("Realtime provider emitted malformed protocol data without an event type.");
+      return;
+    }
+    if (isProviderOutputEvent(type)) {
+      this.stop();
+      this.fail(`Realtime provider emitted forbidden output event ${type || "(missing type)"}.`);
+      return;
+    }
+    switch (type) {
       case "input_audio_buffer.speech_started": {
         const itemId = this.providerItemId(event);
         if (!itemId) {
@@ -245,28 +235,7 @@ export class RealtimeVoiceClient {
         }
         this.turnKeyByItemId.set(itemId, turnIdempotencyKey);
         this.activeSpeechItemId = itemId;
-        const queued = this.queuedNarration;
-        if (queued && queued.turnIdempotencyKey !== turnIdempotencyKey) {
-          this.queuedNarration = null;
-          if (!this.discardSupersededTranscript(queued.itemId)) break;
-        }
-        if (this.speaking || this.narrationResponseGate.hasPendingResponse() || this.narrationResponseGate.activeResponse()) {
-          const activeResponseId = this.narrationResponseGate.reset();
-          this.clearResponseBoundary();
-          this.applyOutputMuteGate();
-          if (activeResponseId && !this.cancellingResponseId) {
-            this.cancellingResponseId = activeResponseId;
-            this.send({ type: "response.cancel", response_id: activeResponseId });
-          } else if (!activeResponseId && !this.cancellingResponseId) {
-            // response.create was sent but response.created has not supplied an
-            // exact response id yet. Cancel that response immediately when its
-            // first event arrives; never issue an untargeted cancellation.
-            this.discardNextCreatedResponse = true;
-          }
-          this.send({ type: "output_audio_buffer.clear" });
-          this.speaking = false;
-          this.callbacks.onState("interrupted");
-        } else this.callbacks.onState("listening");
+        this.callbacks.onState("listening");
         break;
       }
       case "input_audio_buffer.speech_stopped": {
@@ -285,83 +254,18 @@ export class RealtimeVoiceClient {
         this.callbacks.onState("thinking");
         break;
       }
-      case "response.created":
-        // The server's response.created event is the first event for a response
-        // and echoes response metadata. Only the exact high-entropy correlation
-        // created after Runtime admission may open the remote-audio gate.
-        {
-          const authorization = this.narrationResponseGate.authorize(event.response);
-          if (!authorization.authorized) {
-            this.narrationResponseGate.reset();
-            this.applyOutputMuteGate();
-            if (authorization.responseId) {
-              this.send({ type: "response.cancel", response_id: authorization.responseId });
-            }
-            this.send({ type: "output_audio_buffer.clear" });
-            if (this.discardNextCreatedResponse && authorization.responseId) {
-              this.discardNextCreatedResponse = false;
-              this.cancellingResponseId = authorization.responseId;
-              this.callbacks.onState("interrupted");
-              break;
-            }
-            this.fail("Realtime attempted an unbound response before Runtime-authorized narration.");
-            break;
-          }
-          this.startResponseBoundary();
-          this.applyOutputMuteGate();
-          this.callbacks.onState("thinking");
-        }
-        break;
       case "conversation.item.input_audio_transcription.completed":
         this.queueFinalizedTranscript(event);
         break;
-      case "response.output_audio.delta":
-      case "response.audio.delta":
-        if (event.response_id && event.response_id === this.cancellingResponseId) break;
-        if (!this.narrationResponseGate.allows(event.response_id)) {
-          this.narrationResponseGate.reset();
-          this.applyOutputMuteGate();
-          if (event.response_id) this.send({ type: "response.cancel", response_id: event.response_id });
-          this.send({ type: "output_audio_buffer.clear" });
-          this.fail("Realtime emitted audio for a response not bound to Runtime authorization.");
-          break;
-        }
-        this.clearResponseBoundary();
-        this.speaking = true;
-        this.callbacks.onState("speaking");
+      case "conversation.item.input_audio_transcription.failed":
+      case "error":
+        this.stop();
+        this.fail(event.error?.message || "The live transcription provider reported an error.");
         break;
-      case "response.output_audio_transcript.delta":
-      case "response.audio_transcript.delta":
-        // The provider is an audio renderer. Its transcript is never rendered
-        // as a second assistant result; the canonical Runtime response already
-        // supplied the one authoritative text for this turn.
-        if (event.response_id && event.response_id === this.cancellingResponseId) break;
-        if (!this.narrationResponseGate.allows(event.response_id)) break;
-        this.clearResponseBoundary();
-        this.speaking = true;
-        this.callbacks.onState("speaking");
+      default:
+        // Session, rate-limit, buffer-commit, and transcription-delta events
+        // carry no final answer and require no client-side action.
         break;
-      case "response.done":
-        if ((event.response?.id ?? event.response_id) === this.cancellingResponseId) {
-          this.settleCancellation();
-          break;
-        }
-        if (this.narrationResponseGate.complete(event.response?.id ?? event.response_id)) {
-          this.clearResponseBoundary();
-          this.speaking = false;
-          this.applyOutputMuteGate();
-          this.callbacks.onState("listening");
-        }
-        break;
-      case "error": {
-        const message = event.error?.message ?? "";
-        if (this.cancellingResponseId && /cancell?ation failed|no active response/i.test(message)) {
-          this.settleCancellation();
-          break;
-        }
-        this.fail(message || "The live voice provider reported an error.");
-        break;
-      }
     }
   }
 
@@ -375,7 +279,7 @@ export class RealtimeVoiceClient {
 
   private async admitFinalizedTranscript(event: RealtimeEvent, turnIdempotencyKey: string | null) {
     const text = event.transcript?.trim() ?? "";
-    const itemId = event.item_id?.trim() || event.item?.id?.trim() || "";
+    const itemId = this.providerItemId(event);
     if (!text || !this.promptEchoSignature || looksLikeRuntimePromptEcho(text, this.promptEchoSignature)) {
       this.rejectFinalizedTranscript(itemId, text ? "Runtime prompt echo rejected." : "Empty finalized transcript rejected.");
       return;
@@ -384,7 +288,7 @@ export class RealtimeVoiceClient {
       this.rejectFinalizedTranscript(itemId, "Finalized transcript had no detected speech-turn binding.");
       return;
     }
-    if (itemId && this.admittedItemIds.has(itemId)) return;
+    if (this.admittedItemIds.has(itemId)) return;
     if (!this.turnAdmissions.isActiveTurn(turnIdempotencyKey)) {
       this.discardSupersededTranscript(itemId);
       return;
@@ -398,10 +302,7 @@ export class RealtimeVoiceClient {
         normalizeTranscript(text),
         (stableIdempotencyKey) => this.callbacks.onUserTranscript(text, stableIdempotencyKey),
       );
-      if (turnAdmission.duplicate) {
-        this.rejectFinalizedTranscript(itemId, "Duplicate finalized transcript suppressed.");
-        return;
-      }
+      if (turnAdmission.duplicate) return;
       admission = turnAdmission.value;
     } catch (error) {
       if (!this.turnAdmissions.isActiveTurn(turnIdempotencyKey)) {
@@ -412,90 +313,21 @@ export class RealtimeVoiceClient {
       return;
     }
     if (!this.turnAdmissions.isActiveTurn(turnIdempotencyKey)) {
-      // A later speech_started event owns the microphone now. The completed
-      // Runtime result remains authoritative text, but it must never open an
-      // audio response after the operator has superseded this turn.
       this.discardSupersededTranscript(itemId);
       return;
     }
-    const spokenSummary = admission.admitted ? admission.spokenSummary.trim() : "";
-    if (!admission.admitted || !spokenSummary || spokenSummary.length > 4_000) {
-      this.rejectFinalizedTranscript(itemId, admission.admitted ? "Runtime returned no bounded spoken summary." : admission.reason);
+    const responseText = admission.admitted ? admission.spokenSummary.trim() : "";
+    if (!admission.admitted || !responseText || responseText.length > 4_000) {
+      this.rejectFinalizedTranscript(itemId, admission.admitted ? "Runtime returned no bounded response text." : admission.reason);
       return;
     }
-    if (itemId) this.admittedItemIds.add(itemId);
-
-    if (this.cancellingResponseId || this.discardNextCreatedResponse) {
-      this.queuedNarration = { spokenSummary, turnIdempotencyKey, itemId };
-      return;
-    }
-    this.requestNarration(spokenSummary);
-  }
-
-  private requestNarration(spokenSummary: string) {
-    // The provider is an audio renderer for the already-governed Runtime result,
-    // not an independent decision-maker for this turn. JSON quoting preserves
-    // the summary as data while the instruction requires exact narration.
-    const narrationInstruction = [
-      "NEXUS Runtime has already governed this admitted voice turn.",
-      "Speak exactly the JSON spokenSummary string below, with no additions, omissions, contradiction, inference, or action claim.",
-      JSON.stringify({ spokenSummary }),
-    ].join("\n");
-    const narrationCorrelationId = this.createNarrationCorrelationId();
-    try {
-      this.narrationResponseGate.begin(narrationCorrelationId);
-      this.applyOutputMuteGate();
-    } catch (error) {
-      this.fail(error instanceof Error ? error.message : "Realtime narration gate could not be established.");
-      return;
-    }
-    if (!this.send({
-      type: "response.create",
-      response: {
-        // Out-of-band narration prevents the provider from consulting the raw
-        // user conversation item as a second, ungoverned reasoning input.
-        conversation: "none",
-        instructions: narrationInstruction,
-        output_modalities: ["audio"],
-        metadata: {
-          [NEXUS_NARRATION_CORRELATION_METADATA_KEY]: narrationCorrelationId,
-        },
-      },
-    })) {
-      this.narrationResponseGate.reset();
-      this.applyOutputMuteGate();
-      this.fail("Realtime could not request narration of the admitted Runtime result.");
-      return;
-    }
-    this.startResponseBoundary();
-  }
-
-  private settleCancellation() {
-    this.cancellingResponseId = null;
-    this.discardNextCreatedResponse = false;
-    this.speaking = false;
-    const queued = this.queuedNarration;
-    this.queuedNarration = null;
-    if (queued && this.turnAdmissions.isActiveTurn(queued.turnIdempotencyKey)) {
-      this.requestNarration(queued.spokenSummary);
-      return;
-    }
-    if (queued && !this.discardSupersededTranscript(queued.itemId)) return;
+    this.admittedItemIds.add(itemId);
+    this.callbacks.onRuntimeResponse(responseText);
     this.callbacks.onState("listening");
   }
 
-  private createNarrationCorrelationId(): string {
-    if (typeof crypto === "undefined" || typeof crypto.randomUUID !== "function") {
-      throw new Error("Secure narration correlation is unavailable in this browser.");
-    }
-    return `nexus-narration-${crypto.randomUUID()}`;
-  }
-
   private rejectFinalizedTranscript(itemId: string, reason = "Finalized transcript was not admitted.") {
-    const validItemId = REALTIME_ITEM_ID_PATTERN.test(itemId);
-    if (!validItemId || !this.send({ type: "conversation.item.delete", item_id: itemId })) {
-      // A rejected item must not remain in provider conversation context where a
-      // later admitted response could observe it. Close on ambiguous deletion.
+    if (!itemId || !this.send({ type: "conversation.item.delete", item_id: itemId })) {
       this.stop();
       this.fail(`${reason} Unable to remove it from the Realtime session.`);
       return;
@@ -505,11 +337,7 @@ export class RealtimeVoiceClient {
   }
 
   private discardSupersededTranscript(itemId: string): boolean {
-    const validItemId = REALTIME_ITEM_ID_PATTERN.test(itemId);
-    if (!validItemId || !this.send({ type: "conversation.item.delete", item_id: itemId })) {
-      // Never retain a superseded raw utterance where a later provider event
-      // could observe it. Do not clear the input buffer here: it now belongs to
-      // the newer active speech turn.
+    if (!itemId || !this.send({ type: "conversation.item.delete", item_id: itemId })) {
       this.stop();
       this.fail("A superseded Runtime-admitted transcript could not be removed from the Realtime session.");
       return false;
@@ -532,27 +360,7 @@ export class RealtimeVoiceClient {
     }
   }
 
-  private startResponseBoundary() {
-    this.clearResponseBoundary();
-    this.responseTimer = setTimeout(() => {
-      this.responseTimer = null;
-      const activeResponseId = this.narrationResponseGate.reset();
-      this.applyOutputMuteGate();
-      if (activeResponseId) this.send({ type: "response.cancel", response_id: activeResponseId });
-      this.send({ type: "output_audio_buffer.clear" });
-      this.fail("Live voice did not narrate the admitted Runtime response within 10 seconds. The canonical result remains visible as text.");
-    }, REALTIME_RESPONSE_TIMEOUT_MS);
-  }
-
-  private clearResponseBoundary() {
-    if (this.responseTimer !== null) clearTimeout(this.responseTimer);
-    this.responseTimer = null;
-  }
-
   private fail(message: string) {
-    this.clearResponseBoundary();
-    this.narrationResponseGate.reset();
-    this.applyOutputMuteGate();
     this.callbacks.onState("error");
     this.callbacks.onError(message);
   }

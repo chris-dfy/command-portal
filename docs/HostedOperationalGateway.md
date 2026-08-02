@@ -42,7 +42,7 @@ The execution Runtime enables hosted ingress enforcement only when `NEXUS_HOSTED
 NEXUS_HOSTED_TENANT_ID=nexicron
 NEXUS_HOSTED_WORKSPACE_ID=primary
 NEXUS_HOSTED_SERVICE_ID=nexus-workspace-service
-NEXUS_CONTEXT_ASSERTION_SECRET=<same HMAC secret as the portal>
+NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET=<same Command Portal-only HMAC secret as the portal>
 NEXUS_CONTEXT_ASSERTION_ISSUERS=command-portal-experience-gateway
 NEXUS_CONTEXT_ASSERTION_CLIENT_IDS=nexus-web
 NEXUS_HOSTED_GATEWAY_AUDIT_PATH=data/team/hosted_gateway_audit.jsonl
@@ -52,7 +52,7 @@ When enabled, Runtime verifies the bearer transport credential and then independ
 
 ## Portal configuration
 
-Set every `COMMAND_PORTAL_OPERATIONAL_*` value documented in `.env.example`, provision the shared assertion secret on both servers, and configure Runtime's explicit issuer/client allowlists. The operational Runtime URL must use HTTPS except in loopback test/development environments.
+Set every `COMMAND_PORTAL_OPERATIONAL_*` value documented in `.env.example`, provision the Command Portal-only assertion secret on both servers under key ID `context-assertion-command-portal-v1`, and configure Runtime's explicit issuer/client allowlists. The operational Runtime URL must use HTTPS except in loopback test/development environments.
 
 Published human-interaction deployments use `access_key` and issue a session only after an explicit named-operator login. Replit private ingress may add a network boundary, but it is not a human identity and cannot mint execution or approval authority. Automatic private-workspace sessions remain read-only compatibility sessions and are rejected from `/executive/interactions` and approval decisions.
 

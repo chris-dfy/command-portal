@@ -81,6 +81,6 @@ test("voice, mute, interruption, and Runtime truth contracts are preserved", asy
   assert.match(copilot, /setMicrophoneMuted/);
   assert.match(copilot, /setOutputMuted/);
   assert.match(realtime, /"interrupted"/);
-  assert.match(voice, /Runtime owns the provider session and truth boundaries/i);
+  assert.match(voice, /WebRTC carries microphone input only/i);
   assert.match(copilot, /Runtime evidence remains authoritative/);
 });

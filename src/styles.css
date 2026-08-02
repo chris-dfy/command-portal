@@ -165,7 +165,6 @@
 .voice-facts dd { margin: 0; overflow-wrap: anywhere; color: #c0d5df; font-size: .67rem; }
 .voice-history article { grid-template-columns: 1fr; }
 .voice-history article strong { font-size: .7rem; line-height: 1.45; }
-.voice-audio { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .realtime-voice-stage { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 18px; margin: 16px 0 12px; padding: 18px; border: 1px solid rgba(var(--accent-rgb), .2); border-radius: 12px; background: linear-gradient(135deg, rgba(var(--accent-rgb), .09), rgba(2, 9, 14, .72)); }
 .voice-stage-copy { min-width: 0; }
 .voice-stage-copy small { color: var(--accent); font-size: .56rem; font-weight: 800; letter-spacing: .16em; }

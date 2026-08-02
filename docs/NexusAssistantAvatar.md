@@ -11,7 +11,7 @@ The avatar renders exactly six states, each mapped to actual interaction state â
 | `idle` | No live voice session and no governed text request in flight |
 | `listening` | A Realtime voice session is capturing operator audio |
 | `thinking` | NEXUS is forming a response after canonical Runtime admission, or the voice session is negotiating (`connecting`) |
-| `speaking` | Realtime audio output is streaming |
+| `speaking` | Governed browser narration of the canonical Runtime response is active |
 | `interrupted` | The operator interrupted NEXUS mid-response (`response.cancel` + output buffer clear) |
 | `error` | The voice session or governed request failed; presentation fails closed |
 

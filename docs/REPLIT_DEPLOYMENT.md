@@ -6,7 +6,7 @@ Configure these server-only secrets and variables in the hosting environment:
 
 - `COMMAND_PORTAL_RUNTIME_API_BASE_URL=https://nexus-runtime-dev.fly.dev`
 - `COMMAND_PORTAL_RUNTIME_READ_TOKEN` as a scoped server secret
-- `NEXUS_CONTEXT_ASSERTION_SECRET` as the same randomly generated, minimum-32-character secret stored in the Runtime secret manager
+- `NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET` as a randomly generated, minimum-32-character Command Portal-only secret stored under the matching Runtime key ID `context-assertion-command-portal-v1`
 - `COMMAND_PORTAL_CONTEXT_PRINCIPAL_ID=command-portal-observer` as a non-human service principal used only when no authenticated operational session is present
 - `COMMAND_PORTAL_REQUEST_TIMEOUT_MS=8000`
 - `COMMAND_PORTAL_REASONING_TIMEOUT_MS=35000`
@@ -92,7 +92,7 @@ Their provider references and public key IDs are
 presence, and provider metadata. Do not read values. The provider-session
 secret, Registered Executive cookie secret, human-assertion secret, Hosted
 Operational session secret, Runtime bearer tokens, and Mission 1
-context-assertion secret must be purpose-bound and distinct.
+Command Portal context-assertion secret must be purpose-bound, client-specific, and distinct.
 
 The implementation supports a fail-closed recovery/bootstrap configuration in
 which `COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED=true` while

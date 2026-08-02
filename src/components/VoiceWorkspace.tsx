@@ -64,6 +64,7 @@ export function VoiceWorkspace({
   const [voiceState, setVoiceState] = useState<RealtimeVoiceState>("idle");
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [nexusMuted, setNexusMuted] = useState(false);
+  const nexusMutedRef = useRef(false);
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [amplitude, setAmplitude] = useState(0);
   const [transcript, setTranscript] = useState("");
@@ -76,7 +77,6 @@ export function VoiceWorkspace({
   const [pendingApproval, setPendingApproval] = useState<RuntimeInteractionAdmission | null>(null);
   const [approvalBusy, setApprovalBusy] = useState<"approve" | "deny" | null>(null);
   const [pendingRequest, setPendingRequest] = useState<PendingVoiceRequest | null>(null);
-  const audio = useRef<HTMLAudioElement | null>(null);
   const liveClient = useRef<RealtimeVoiceClient | null>(null);
   const latestUserTranscript = useRef("");
   const conversationId = useRef(newExecutiveInteractionId());
@@ -185,7 +185,7 @@ export function VoiceWorkspace({
   }
 
   async function startLiveVoice() {
-    if (!audio.current || !liveProviderAvailable) {
+    if (!liveProviderAvailable) {
       setMessage(liveProviderReason);
       return;
     }
@@ -194,8 +194,8 @@ export function VoiceWorkspace({
     latestUserTranscript.current = "";
     setMicrophoneMuted(false);
     setNexusMuted(false);
-    audio.current.muted = false;
-    const client = new RealtimeVoiceClient(audio.current, {
+    nexusMutedRef.current = false;
+    const client = new RealtimeVoiceClient({
       onState: setVoiceState,
       onAmplitude: setAmplitude,
       onUserTranscript: async (text, idempotencyKey) => {
@@ -205,6 +205,9 @@ export function VoiceWorkspace({
         presentAdmission(admission);
         latestUserTranscript.current = "";
         return admission;
+      },
+      onRuntimeResponse: (responseText) => {
+        if (!nexusMutedRef.current) speakBrowserResponse(responseText);
       },
       onError: (errorMessage) => {
         setMessage(errorMessage);
@@ -248,6 +251,7 @@ export function VoiceWorkspace({
     latestUserTranscript.current = "";
     setMicrophoneMuted(false);
     setNexusMuted(false);
+    nexusMutedRef.current = false;
     setMessage("Live voice session ended. No provider credential was stored in the browser.");
   }
 
@@ -262,6 +266,7 @@ export function VoiceWorkspace({
     const muted = !nexusMuted;
     liveClient.current?.setOutputMuted(muted);
     setNexusMuted(muted);
+    nexusMutedRef.current = muted;
     setMessage(muted ? "NEXUS audio is muted. Responses remain visible as text." : "NEXUS audio playback is restored.");
   }
 
@@ -364,9 +369,8 @@ export function VoiceWorkspace({
   }
 
   return <div className="experience-grid local-workspace">
-    <audio ref={audio} autoPlay muted={nexusMuted} className="voice-audio" aria-hidden="true" />
     <DataPanel eyebrow="Runtime-managed Realtime voice" title="Speak with NEXUS" icon={<Mic size={18} />} className="span-2">
-      <p className="workspace-intro">A natural, full-duplex voice session with server voice detection, streaming audio, and interruption. The Runtime owns the provider session and truth boundaries; this browser owns only microphone capture and playback.</p>
+      <p className="workspace-intro">A governed voice session with server turn detection and finalized transcription. WebRTC carries microphone input only; each transcript enters the canonical Runtime once, and browser narration speaks only Runtime response text.</p>
       <div className="realtime-voice-stage">
         <NexusAvatar state={deriveAssistantAvatarState({ voiceState, textBusy: busy, hasError: false })} amplitude={amplitude} size="lg" micMuted={microphoneMuted && connected} unavailable={!connected && !liveProviderAvailable} />
         <div className="voice-stage-copy">

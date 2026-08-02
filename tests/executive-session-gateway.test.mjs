@@ -78,8 +78,8 @@ const configOverrides = (overrides = {}) => ({
   contextAssertionSecret:
     "mission-one-context-assertion-secret-material-00001",
   contextAssertionSecretRef:
-    "secret-manager:experience/context-assertion-current",
-  contextAssertionKeyId: "context-assertion-current",
+    "secret-manager:experience/context-assertion-command-portal-v1",
+  contextAssertionKeyId: "context-assertion-command-portal-v1",
   contextAssertionIssuer: "command-portal-experience-gateway",
   contextAssertionAudience: "nexus-runtime",
   contextAssertionClientIds: "nexus-web",

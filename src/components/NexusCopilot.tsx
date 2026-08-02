@@ -82,6 +82,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   const [voiceState, setVoiceState] = useState<RealtimeVoiceState>("idle");
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [nexusMuted, setNexusMuted] = useState(false);
+  const nexusMutedRef = useRef(false);
   const [amplitude, setAmplitude] = useState(0);
   const [pendingApproval, setPendingApproval] = useState<RuntimeInteractionAdmission | null>(null);
   const [approvalBusy, setApprovalBusy] = useState<"approve" | "deny" | null>(null);
@@ -90,7 +91,6 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   const [messages, setMessages] = useState<Message[]>([
     { speaker: "nexus", text: "NEXUS is online. I can help you understand registered operational context, frame decisions, govern bounded work, and identify what evidence is still missing." },
   ]);
-  const audio = useRef<HTMLAudioElement | null>(null);
   const liveClient = useRef<RealtimeVoiceClient | null>(null);
   const latestUserTranscript = useRef("");
   const conversationId = useRef(newExecutiveInteractionId());
@@ -226,15 +226,15 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   }
 
   async function startVoice() {
-    if (!audio.current || !voiceAvailable || !realtimeAction.available) {
+    if (!voiceAvailable || !realtimeAction.available) {
       setError(realtimeAction.reason);
       return;
     }
     setError(null);
     setMicrophoneMuted(false);
     setNexusMuted(false);
-    audio.current.muted = false;
-    const client = new RealtimeVoiceClient(audio.current, {
+    nexusMutedRef.current = false;
+    const client = new RealtimeVoiceClient({
       onState: setVoiceState,
       onAmplitude: setAmplitude,
       onUserTranscript: async (text, idempotencyKey) => {
@@ -248,6 +248,9 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
         presentAdmission(admission);
         latestUserTranscript.current = "";
         return admission;
+      },
+      onRuntimeResponse: (responseText) => {
+        if (!nexusMutedRef.current) speakBrowserResponse(responseText);
       },
       onError: (message) => {
         setError(message);
@@ -344,6 +347,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     latestUserTranscript.current = "";
     setMicrophoneMuted(false);
     setNexusMuted(false);
+    nexusMutedRef.current = false;
   }
 
   function toggleMicrophoneMute() {
@@ -356,6 +360,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     const muted = !nexusMuted;
     liveClient.current?.setOutputMuted(muted);
     setNexusMuted(muted);
+    nexusMutedRef.current = muted;
   }
 
   function useSkill(skill: typeof SKILLS[number]) {
@@ -375,7 +380,6 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
 
   return <>
     <aside id="nexus-copilot" className={`nexus-copilot${expanded ? " is-expanded" : ""}`} aria-label="NEXUS executive copilot">
-      <audio ref={audio} autoPlay muted={nexusMuted} className="voice-audio" aria-hidden="true" />
       <header className="nexus-copilot__header">
         <div className="nexus-copilot__mark"><NexusAvatar state={avatarState} amplitude={amplitude} size="sm" micMuted={microphoneMuted && voiceConnected} unavailable={!runtimeHealthy && !voiceConnected && !busy} /></div>
         <div><strong>NEXUS</strong><span>Enterprise executive operating intelligence</span></div>
@@ -447,7 +451,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
         <span>Meet NEXUS</span>
         <h2 id="nexus-introduction-title">Your enterprise executive operating intelligence</h2>
         <p>NEXUS observes registered operational context, explains what it understands, recommends governed next steps, and coordinates bounded work across the platform.</p>
-        <ul><li>Natural text and full-duplex voice conversation</li><li>Runtime-owned context shared across web, desktop, mobile, and edge clients</li><li>Project planning, document intelligence, executive briefing, and governed orchestration</li><li>Explicit truth boundaries, approvals, proofs, and receipts</li></ul>
+        <ul><li>Natural text and governed transcript-only voice input</li><li>Runtime-owned context shared across web, desktop, mobile, and edge clients</li><li>Project planning, document intelligence, executive briefing, and governed orchestration</li><li>Explicit truth boundaries, approvals, proofs, and receipts</li></ul>
         <div className="nexus-introduction__boundary">NEXUS will not fabricate tenant facts, live state, capabilities, or completed actions. Model-native knowledge is reasoning—not operational evidence.</div>
         <button className="nexus-introduction__start" onClick={dismissIntroduction}>Start using NEXUS</button>
       </section>

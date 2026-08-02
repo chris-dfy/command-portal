@@ -27,8 +27,7 @@ COMMAND_PORTAL_RUNTIME_READ_TOKEN_REF = "secret-manager:experience-gateway/missi
 COMMAND_PORTAL_CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway"
 COMMAND_PORTAL_CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime"
 COMMAND_PORTAL_CONTEXT_ASSERTION_CLIENT_IDS = "nexus-web"
-NEXUS_CONTEXT_ASSERTION_KEY_ID = "context-assertion-current"
-NEXUS_CONTEXT_ASSERTION_SECRET_REF = "secret-manager:experience-gateway/mission-1/context-assertion-current"
+NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET_REF = "secret-manager:experience-gateway/mission-1/context-assertion-command-portal-v1"
 COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"
 COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"
 COMMAND_PORTAL_SESSION_MODE = "access_key"
@@ -57,4 +56,4 @@ COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION = "1.0.0"
 COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST = "sha256:b1f6a2cdf2153ac48236867e5e1aeab794842256410f3f314fc2655008a2be78"
 
 [userenv.production]
-COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED = "true"
+COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED = "false"
