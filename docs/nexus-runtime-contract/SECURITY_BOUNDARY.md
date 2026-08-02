@@ -12,8 +12,10 @@ This boundary enforces the [NEXUS Platform Constitution](../architecture/NEXUS_P
 - Requests with an `Origin` header must match the request origin or an exact configured origin.
 - Wildcard CORS is not emitted.
 - Observation routes under `/api/runtime` accept only GET and OPTIONS.
-- Only the explicitly registered Human Interaction Framework, Conclave review, executive briefing, and Realtime SDP routes accept POST.
-- In hosted operational mode, Human Interaction Framework and Realtime SDP mutations require the signed operational session and CSRF proof.
+- Conversational input, Mission and Work Session planning intent, executive briefing requests, Conclave review prompts, typed NEXUS Command, and finalized voice transcripts all enter through the canonical interaction gateway, which alone forwards to `POST /executive/interactions`.
+- Former direct interaction, generic action, free-form planning, and Mission 4 create/action routes return `410 canonical_interaction_required` and never contact Runtime. Mission 4 status and retained Mission evidence are GET-only.
+- Realtime SDP negotiation accepts POST only to establish provider transport; it cannot produce an admitted final response until the finalized transcript has completed canonical Runtime interaction admission.
+- In hosted operational mode, canonical interactions and Realtime SDP mutations require the signed operational session and CSRF proof.
 - Unknown portal paths return 404 and never contact the runtime.
 - All query parameters return 400.
 
@@ -40,6 +42,6 @@ This boundary enforces the [NEXUS Platform Constitution](../architecture/NEXUS_P
 
 `/api/local` is a separate, disabled-by-default boundary for a loopback-only private Runtime. It uses exact method/path mappings, payload allowlists, request and response size limits, timeouts, safe error normalization, and registered artifact-type validation. It never receives the hosted Runtime credential.
 
-The browser may submit document, project, and transcript inputs, but the Runtime owns ingestion, context assembly, project intelligence, intent routing, governance, proof, receipts, and execution decisions. High-risk actions remain approval-gated and cannot be approved by the browser request itself.
+The browser may submit document, project, and interaction inputs, but Runtime owns ingestion, context assembly, classification, intent construction, governance, proof, receipts, and execution decisions. The gateway injects canonical interaction actor and workspace fields from server identity; client-supplied identity or Authority fields fail closed. Approval continuation preserves the original interaction and returns through the same endpoint.
 
-Hosted `/api/operations` exposes authenticated, scope-checked Runtime capability contracts through an exact allowlist. Its Document Intelligence, Projects, and Voice Operator routes derive identity and workspace scope on the server, require CSRF and idempotency for mutations, and never infer Authority from the session. Local `/api/local` exposes only the governed capabilities documented in its endpoint allowlist. None of these boundaries is a generic proxy.
+Hosted `/api/operations` exposes authenticated, scope-checked Runtime capability contracts through an exact allowlist. Its canonical interaction, Document Intelligence, and Project routes derive identity and workspace scope on the server, require CSRF and idempotency for mutations, and never infer Authority from the session. Local `/api/local` exposes only the governed capabilities documented in its endpoint allowlist. None of these boundaries is a generic proxy.

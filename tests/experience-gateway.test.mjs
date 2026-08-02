@@ -21,7 +21,6 @@ import {
   ROOT_RUNTIME_ACTION_TEMPLATES,
   RUNTIME_BOOTSTRAP_ROUTE,
   RUNTIME_BOOTSTRAP_ROUTES,
-  RUNTIME_MUTATION_ROUTES,
   RUNTIME_ROUTES,
 } from "../server/portal-server.mjs";
 import { portalClient } from "../src/lib/portal-client.ts";
@@ -372,24 +371,10 @@ function liveCapabilityRegistryProjection() {
 }
 
 const CONTEXT_ACTION_CLASSIFICATIONS = Object.freeze({
-  "context.runtime.route.post.runtime.interactions": "live_verified",
-  "context.runtime.route.get.runtime.interactions.events": "live_verified",
-  "context.runtime.route.post.runtime.interactions.interrupt": "staged",
-  "context.runtime.route.post.runtime.interactions.resume": "staged",
-  "context.runtime.route.post.runtime.interactions.presentation_complete": "staged",
-  "context.runtime.route.post.runtime.executive_operating_loop.briefing": "staged",
-  "context.runtime.route.post.runtime.conclave.reviews": "unavailable",
   "context.runtime.route.post.runtime.voice.realtime.call": "unavailable",
 });
 
 const EXPLICIT_CONTEXT_ADMISSION_ACTIONS = Object.freeze([
-  ["context.runtime.route.post.runtime.interactions", "POST", "/runtime/interactions", ["api", "assistant", "ui", "voice"], "live_verified"],
-  ["context.runtime.route.get.runtime.interactions.events", "GET", "/runtime/interactions/{interaction_id}/events", ["api", "assistant", "ui", "voice"], "live_verified"],
-  ["context.runtime.route.post.runtime.interactions.interrupt", "POST", "/runtime/interactions/{interaction_id}/interrupt", ["api", "assistant", "ui", "voice"], "staged"],
-  ["context.runtime.route.post.runtime.interactions.resume", "POST", "/runtime/interactions/{interaction_id}/resume", ["api", "assistant", "ui", "voice"], "staged"],
-  ["context.runtime.route.post.runtime.interactions.presentation_complete", "POST", "/runtime/interactions/{interaction_id}/presentation-complete", ["api", "ui"], "staged"],
-  ["context.runtime.route.post.runtime.executive_operating_loop.briefing", "POST", "/runtime/executive-operating-loop/briefing", ["api", "assistant", "ui", "voice"], "staged"],
-  ["context.runtime.route.post.runtime.conclave.reviews", "POST", "/runtime/conclave/reviews", ["api", "assistant", "ui"], "unavailable"],
   ["context.runtime.route.post.runtime.voice.realtime.call", "POST", "/runtime/voice/realtime/call", ["api", "voice"], "unavailable"],
 ]);
 
@@ -581,6 +566,15 @@ const localResponse = (data, status = 200) => new Response(JSON.stringify(data),
   headers: { "Content-Type": "application/json" }
 });
 
+const CANONICAL_INTERACTION_ID = "11111111-1111-4111-8111-111111111111";
+const CANONICAL_SESSION_ID = "22222222-2222-4222-8222-222222222222";
+const canonicalInteraction = (text = "Assess operational readiness", modality = "text") => ({
+  interaction_id: CANONICAL_INTERACTION_ID,
+  session_id: CANONICAL_SESSION_ID,
+  input: { modality, text, source_client: "nexus-command" },
+  context: { active_object_ids: [], conversation_id: CANONICAL_SESSION_ID },
+});
+
 test("every Experience Gateway route maps to exactly one literal runtime endpoint", async () => {
   const observed = [];
   const runtimeFetch = async (url, options) => {
@@ -612,7 +606,7 @@ test("every Experience Gateway route maps to exactly one literal runtime endpoin
   assert.equal(observed.length, Object.keys(RUNTIME_ROUTES).length - 1);
 });
 
-test("every fixed Runtime and local interaction alias resolves to one exact canonical action", () => {
+test("every remaining fixed Runtime alias resolves exactly and retired interaction aliases resolve nowhere", () => {
   for (const [path, methods] of Object.entries(FIXED_RUNTIME_ACTION_ALIASES)) {
     for (const [method, expected] of Object.entries(methods)) {
       assert.deepEqual(resolveGatewayRuntimeActionAlias(method, path), expected, `${method} ${path}`);
@@ -620,14 +614,13 @@ test("every fixed Runtime and local interaction alias resolves to one exact cano
   }
   assert.equal(resolveGatewayRuntimeActionAlias("POST", "/api/runtime/not-registered"), null);
   assert.equal(resolveGatewayRuntimeActionAlias("GET", "/api/runtime/interactions/ambiguous/events"), null);
-  assert.equal(
-    resolveGatewayRuntimeActionAlias("GET", "/api/runtime/interactions/INT-1/events").actionId,
-    "context.runtime.route.get.runtime.interactions.events",
-  );
-  assert.equal(
-    resolveGatewayRuntimeActionAlias("POST", "/api/local/interactions/INT-1/interrupt").forwarding,
-    "unavailable_adapter",
-  );
+  for (const [method, path] of [
+    ["POST", "/api/runtime/interactions"],
+    ["GET", "/api/runtime/interactions/INT-1/events"],
+    ["POST", "/api/runtime/executive-briefing"],
+    ["POST", "/api/runtime/conclave/reviews"],
+    ["POST", "/api/local/interactions/INT-1/interrupt"],
+  ]) assert.equal(resolveGatewayRuntimeActionAlias(method, path), null, `${method} ${path}`);
 });
 
 test("Capability Registry uses one exact static read-only Runtime mapping", async () => {
@@ -967,7 +960,7 @@ test("arbitrary routes, queries, and every mutation method are rejected", async 
   assert.equal(calls, 0);
 });
 
-test("only live canonical HIF actions cross the signed Runtime boundary", async () => {
+test("retired direct interaction routes cannot cross the signed Runtime boundary", async () => {
   const observed = [];
   const runtimeFetch = async (url, options) => {
     observed.push({ url, options });
@@ -975,26 +968,8 @@ test("only live canonical HIF actions cross the signed Runtime boundary", async 
   };
   const base = await start(withActionRegistry(runtimeFetch));
   await primeActionAdmission(base);
-  assert.deepEqual(RUNTIME_MUTATION_ROUTES, {
-    "/api/runtime/executive-briefing": "/runtime/executive-operating-loop/briefing",
-    "/api/runtime/conclave/reviews": "/runtime/conclave/reviews",
-    "/api/runtime/interactions": "/runtime/interactions"
-  });
-  const response = await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: "nexus-web", inputText: "Brief me", modality: "text" })
-  });
-  assert.equal(response.status, 200);
-  assert.equal(observed[0].url, "https://runtime.invalid/runtime/interactions");
-  assert.equal(observed[0].options.method, "POST");
-  assert.equal(observed[0].options.headers.Authorization, "Bearer server-only-test-token");
-  assert.equal(JSON.stringify(await response.json()).includes("server-only-test-token"), false);
-  const events = await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`);
-  assert.equal(events.status, 200);
-  assert.equal(observed.at(-1).url, "https://runtime.invalid/runtime/interactions/INT-EOX-1/events");
-  assert.equal(observed.at(-1).options.method, "GET");
-  const callsBeforeUnavailable = observed.length;
   for (const [path, body] of [
+    ["/api/runtime/interactions", { clientId: "nexus-web", inputText: "Brief me", modality: "text" }],
     ["/api/runtime/executive-briefing", { clientId: "nexus-web", modality: "text", speechRequested: true }],
     ["/api/runtime/conclave/reviews", { clientId: "nexus-web", proposal: "Challenge this proposal" }],
     ["/api/runtime/interactions/INT-EOX-1/resume", {}],
@@ -1006,14 +981,17 @@ test("only live canonical HIF actions cross the signed Runtime boundary", async 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    assert.equal(blocked.status, 503, path);
-    assert.equal((await blocked.json()).error.code, "canonical_action_unavailable");
+    assert.equal(blocked.status, 410, path);
+    assert.equal((await blocked.json()).error.code, "canonical_interaction_required");
   }
-  assert.equal(observed.length, callsBeforeUnavailable);
+  const events = await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`);
+  assert.equal(events.status, 410);
+  assert.equal((await events.json()).error.code, "canonical_interaction_required");
+  assert.equal(observed.length, 0);
 });
 
 test("configured, staged, simulated, and unavailable actions fail closed without upstream calls", async () => {
-  const actionId = "context.runtime.route.post.runtime.interactions";
+  const actionId = "context.runtime.route.get.runtime.status";
   for (const classification of ["configured_unverified", "staged", "simulated", "unavailable"]) {
     let calls = 0;
     const projection = actionAdmissionProjection({ classifications: { [actionId]: classification } });
@@ -1022,11 +1000,7 @@ test("configured, staged, simulated, and unavailable actions fail closed without
       return runtimeResponse({});
     }, projection));
     await primeActionAdmission(base);
-    const response = await fetch(`${base}/api/runtime/interactions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "nexus-web", inputText: "Do not forward", modality: "text" }),
-    });
+    const response = await fetch(`${base}/api/runtime/status`);
     assert.equal(response.status, 503, classification);
     assert.equal((await response.json()).error.code, "canonical_action_unavailable", classification);
     assert.equal(calls, 0, classification);
@@ -1106,32 +1080,26 @@ test("unavailable read, local, and hosted aliases fail closed before every targe
 });
 
 test("missing, stale, mismatched, or contract-invalid action truth fails closed", async () => {
-  const body = JSON.stringify({ clientId: "nexus-web", inputText: "Do not forward", modality: "text" });
-
   let unprimedCalls = 0;
   const unprimedBase = await start(async () => {
     unprimedCalls += 1;
     return runtimeResponse({});
   }, { testUseProvidedCapabilityRegistry: true });
-  const unprimed = await fetch(`${unprimedBase}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body,
-  });
+  const unprimed = await fetch(`${unprimedBase}/api/runtime/status`);
   assert.equal(unprimed.status, 502);
   assert.equal((await unprimed.json()).error.code, "capability_registry_response_invalid");
   assert.equal(unprimedCalls, 1);
 
   let missingCalls = 0;
   const missingProjection = actionAdmissionProjection({
-    omitActionId: "context.runtime.route.post.runtime.interactions",
+    omitActionId: "context.runtime.route.get.runtime.status",
   });
   const missingBase = await start(withActionRegistry(async () => {
     missingCalls += 1;
     return runtimeResponse({});
   }, missingProjection));
   await primeActionAdmission(missingBase);
-  const missing = await fetch(`${missingBase}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body,
-  });
+  const missing = await fetch(`${missingBase}/api/runtime/status`);
   assert.equal(missing.status, 503);
   assert.equal((await missing.json()).error.code, "canonical_action_identity_invalid");
   assert.equal(missingCalls, 0);
@@ -1139,17 +1107,15 @@ test("missing, stale, mismatched, or contract-invalid action truth fails closed"
   let contractCalls = 0;
   const contractProjection = actionAdmissionProjection();
   contractProjection.actions.find((action) => (
-    action.actionId === "context.runtime.route.post.runtime.interactions"
-  )).invocationPaths = ["api:POST /runtime/interactions"];
+    action.actionId === "context.runtime.route.get.runtime.status"
+  )).invocationPaths = ["api:POST /runtime/status"];
   resignCapabilityProjection(contractProjection);
   const contractBase = await start(withActionRegistry(async () => {
     contractCalls += 1;
     return runtimeResponse({});
   }, contractProjection));
   await primeActionAdmission(contractBase);
-  const invalidContract = await fetch(`${contractBase}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body,
-  });
+  const invalidContract = await fetch(`${contractBase}/api/runtime/status`);
   assert.equal(invalidContract.status, 503);
   assert.equal((await invalidContract.json()).error.code, "canonical_action_contract_mismatch");
   assert.equal(contractCalls, 0);
@@ -1163,9 +1129,7 @@ test("missing, stale, mismatched, or contract-invalid action truth fails closed"
   const scopeResponse = await fetch(`${scopeBase}/api/runtime/capability-registry`);
   assert.equal(scopeResponse.status, 502);
   assert.equal((await scopeResponse.json()).error.code, "capability_registry_scope_mismatch");
-  const scopedAction = await fetch(`${scopeBase}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body,
-  });
+  const scopedAction = await fetch(`${scopeBase}/api/runtime/status`);
   assert.equal(scopedAction.status, 502);
   assert.equal((await scopedAction.json()).error.code, "capability_registry_scope_mismatch");
   assert.equal(scopeCalls, 0);
@@ -1701,19 +1665,15 @@ test("Runtime bootstrap remains an exact same-origin read-only route", async () 
 });
 
 test("a live-degraded typed action remains bounded and grants no Authority", async () => {
-  const actionId = "context.runtime.route.post.runtime.interactions";
+  const actionId = "context.runtime.route.get.runtime.status";
   let calls = 0;
   const projection = actionAdmissionProjection({ classifications: { [actionId]: "live_degraded" } });
   const base = await start(withActionRegistry(async () => {
     calls += 1;
-    return runtimeResponse({ interaction: { responseText: "Degraded but bounded" }, events: [] });
+    return runtimeResponse({ status: "degraded", limitation: "Bounded read-only observation." });
   }, projection));
   await primeActionAdmission(base);
-  const response = await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: "nexus-web", inputText: "Assess", modality: "text" }),
-  });
+  const response = await fetch(`${base}/api/runtime/status`);
   assert.equal(response.status, 200);
   assert.equal(calls, 1);
   assert.equal(projection.actions.find((action) => action.actionId === actionId).authorityGranted, false);
@@ -1721,68 +1681,110 @@ test("a live-degraded typed action remains bounded and grants no Authority", asy
 
 test("hosted conversational reasoning has a dedicated bounded timeout", async () => {
   const started = Date.now();
-  const runtimeFetch = async (_url, options) => new Promise((resolve, reject) => {
-    const completion = setTimeout(() => resolve(runtimeResponse({ interaction: { responseText: "Verified response" }, events: [] })), 18);
+  const operationalFetch = async (_url, options) => new Promise((resolve, reject) => {
+    const completion = setTimeout(() => resolve(localResponse({ interaction: { responseText: "Verified response" } })), 18);
     options.signal.addEventListener("abort", () => { clearTimeout(completion); reject(Object.assign(new Error("aborted"), { name: "AbortError" })); });
   });
-  const base = await start(withActionRegistry(runtimeFetch), { timeoutMs: 5, reasoningTimeoutMs: 60 });
-  await primeActionAdmission(base);
-  const response = await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" })
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    contextAssertionSecret: "context-assertion-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "operations:write"],
+    operationalCookieSecure: false,
+    timeoutMs: 5,
+    reasoningTimeoutMs: 60,
+  };
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), operationalFetch);
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const response = await fetch(`${base}/api/operations/executive-interactions`, {
+    method: "POST",
+    headers: {
+      Cookie: login.headers.get("set-cookie").split(";")[0],
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": CANONICAL_INTERACTION_ID,
+    },
+    body: JSON.stringify(canonicalInteraction("Assess readiness")),
   });
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.ok, true);
   assert.equal(body.data.interaction.responseText, "Verified response");
-  assert.equal("data" in body.data, false);
   assert.ok(Date.now() - started >= 15);
 });
 
 test("Experience Gateway signs authoritative Runtime tenant context without exposing the secret", async () => {
   const secret = randomBytes(48).toString("base64url");
   let observed;
-  const runtimeFetch = async (url, options) => {
+  const operationalFetch = async (url, options) => {
     observed = { url, options };
-    return runtimeResponse({ interaction: { responseText: "Context received" }, events: [] });
+    return localResponse({ interaction: { responseText: "Context received" } });
   };
-  const base = await start(
-    withActionRegistry(runtimeFetch),
-    { contextAssertionSecret: secret, operationalTenantId: "nexicron" },
-  );
-  await primeActionAdmission(base);
-  const response = await fetch(`${base}/api/runtime/interactions`, {
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "nexicron",
+    operationalWorkspaceId: "primary",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:write", "operations:read", "approvals:decide"],
+    operationalCookieSecure: false,
+    contextAssertionSecret: secret,
+  };
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), operationalFetch);
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const response = await fetch(`${base}/api/operations/executive-interactions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      clientId: "nexus-web",
-      inputText: "What is Nexicron's mission?",
-      modality: "text",
-      metadata: { tenantId: "untrusted-browser-tenant", contextAssemblyOwner: "browser" }
-    })
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": CANONICAL_INTERACTION_ID,
+    },
+    body: JSON.stringify(canonicalInteraction("What is Nexicron's mission?")),
   });
   assert.equal(response.status, 200);
   const token = observed.options.headers["X-NEXUS-Context-Assertion"];
   const [encodedPayload, signature] = token.split(".");
   const assertion = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
-  assert.equal(assertion.v, 2);
-  assert.equal(assertion.contract, "nexus.context-assertion@2.0.0");
+  assert.equal(assertion.v, 3);
+  assert.equal(assertion.contract, "nexus.context-assertion@3.0.0");
   assert.equal(assertion.alg, "hmac-sha256");
   assert.equal(assertion.kid, "context-assertion-current");
   assert.equal(assertion.iss, "command-portal-experience-gateway");
   assert.equal(assertion.aud, "nexus-runtime");
   assert.equal(assertion.tid, "nexicron");
   assert.equal(assertion.wid, "primary");
-  assert.equal(assertion.sub, "command-portal-experience-gateway");
-  assert.deepEqual(assertion.roles, ["observer"]);
+  assert.equal(assertion.sub, "operator-1");
+  assert.deepEqual(assertion.roles, ["admin"]);
+  assert.deepEqual(assertion.scopes, ["approvals:decide", "operations:read", "operations:write"]);
+  assert.equal(assertion.humanOperatorVerified, true);
   assert.equal(assertion.clientId, "nexus-web");
   assert.equal(assertion.trustBindingId, "runtime-experience-trust-bootstrap");
-  assert.equal(assertion.authorityGranted, false);
+  assert.equal(assertion.authorityGranted, true);
   assert.equal(assertion.exp - assertion.iat, 60);
   assert.equal(signature, createHmac("sha256", secret).update(encodedPayload).digest("base64url"));
   const forwarded = JSON.parse(observed.options.body);
-  assert.equal(forwarded.metadata.tenantId, "nexicron");
-  assert.equal(forwarded.metadata.contextAssemblyOwner, "nexus-runtime");
+  assert.deepEqual(forwarded.actor, { actor_id: "operator-1", tenant_id: "nexicron", roles: ["admin"] });
+  assert.equal(forwarded.context.workspace_id, "primary");
+  assert.equal(observed.url, "http://127.0.0.1:9876/executive/interactions");
   assert.equal(JSON.stringify(await response.json()).includes(secret), false);
 });
 
@@ -1867,19 +1869,44 @@ test("redacted trust bootstrap requires secret-manager references but never retu
 });
 
 test("hosted conversational reasoning reports its own timeout truthfully", async () => {
-  const runtimeFetch = async (_url, options) => new Promise((_resolve, reject) => {
+  const operationalFetch = async (_url, options) => new Promise((_resolve, reject) => {
     options.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
   });
-  const base = await start(withActionRegistry(runtimeFetch), { timeoutMs: 50, reasoningTimeoutMs: 5 });
-  await primeActionAdmission(base);
-  const response = await fetch(`${base}/api/runtime/interactions`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" })
+  const config = {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    contextAssertionSecret: "context-assertion-secret-at-least-thirty-two-characters",
+    operationalAccessKey: "operator-access-key-strong",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "operator-1",
+    operationalRole: "admin",
+    operationalScopes: ["operations:read", "operations:write"],
+    operationalCookieSecure: false,
+    timeoutMs: 50,
+    reasoningTimeoutMs: 5,
+  };
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), operationalFetch);
+  const login = await fetch(`${base}/api/session/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: config.operationalAccessKey }),
+  });
+  const session = await login.json();
+  const response = await fetch(`${base}/api/operations/executive-interactions`, {
+    method: "POST",
+    headers: {
+      Cookie: login.headers.get("set-cookie").split(";")[0],
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": CANONICAL_INTERACTION_ID,
+    },
+    body: JSON.stringify(canonicalInteraction()),
   });
   const body = await response.json();
   assert.equal(response.status, 504);
-  assert.equal(body.gateway.connectionState, "Timed Out");
-  assert.equal(body.error.code, "runtime_reasoning_timeout");
+  assert.equal(body.operational.connectionState, "Timed Out");
+  assert.equal(body.error.code, "operational_runtime_timed_out");
 });
 
 test("unavailable Realtime WebRTC never crosses the same-origin gateway", async () => {
@@ -1912,13 +1939,14 @@ test("Realtime gateway rejects unavailable actions and unsafe methods before con
   assert.equal(calls, 0);
 });
 
-test("hosted HIF requires session/CSRF while unavailable Realtime remains blocked", async () => {
+test("hosted canonical interaction requires session, CSRF, and exact idempotency while unavailable Realtime remains blocked", async () => {
   const calls = [];
   const config = {
     operationalEnabled: true,
     operationalApiBaseUrl: "http://127.0.0.1:9876",
     operationalRuntimeToken: "runtime-token-at-least-24-characters",
     operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    contextAssertionSecret: "context-assertion-secret-at-least-thirty-two-characters",
     operationalAccessKey: "operator-access-key-strong",
     operationalTenantId: "tenant-alpha",
     operationalWorkspaceId: "workspace-alpha",
@@ -1927,18 +1955,13 @@ test("hosted HIF requires session/CSRF while unavailable Realtime remains blocke
     operationalScopes: ["operations:read", "operations:write"],
     operationalCookieSecure: false,
   };
-  const runtimeFetch = async (url, options) => {
+  const operationalFetch = async (url, options) => {
     calls.push({ url, options });
-    return runtimeResponse({ interaction: { responseText: "Verified response" }, events: [] });
+    return localResponse({ interaction: { responseText: "Verified response" } });
   };
-  const projection = actionAdmissionProjection({
-    tenantId: config.operationalTenantId,
-    workspaceId: config.operationalWorkspaceId,
-  });
-  const base = await start(withActionRegistry(runtimeFetch, projection), config);
-  await primeActionAdmission(base);
-  const interactionBody = JSON.stringify({ clientId: "nexus-web", inputText: "Assess readiness", modality: "text" });
-  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
+  const base = await start(async () => runtimeResponse({}), config, async () => localResponse({}), operationalFetch);
+  const interactionBody = JSON.stringify(canonicalInteraction());
+  assert.equal((await fetch(`${base}/api/operations/executive-interactions`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: interactionBody,
   })).status, 401);
   assert.equal(calls.length, 0);
@@ -1950,16 +1973,21 @@ test("hosted HIF requires session/CSRF while unavailable Realtime remains blocke
   });
   const session = await login.json();
   const cookie = login.headers.get("set-cookie").split(";")[0];
-  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
+  assert.equal((await fetch(`${base}/api/operations/executive-interactions`, {
     method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: interactionBody,
   })).status, 403);
-  assert.equal((await fetch(`${base}/api/runtime/interactions`, {
+  assert.equal((await fetch(`${base}/api/operations/executive-interactions`, {
     method: "POST",
-    headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": session.session.csrfToken },
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": session.session.csrfToken,
+      "Idempotency-Key": CANONICAL_INTERACTION_ID,
+    },
     body: interactionBody,
   })).status, 200);
-  assert.equal((await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`)).status, 401);
-  assert.equal((await fetch(`${base}/api/runtime/interactions/INT-EOX-1/events`, {
+  assert.equal((await fetch(`${base}/api/operations/executive-interactions/${CANONICAL_INTERACTION_ID}`)).status, 401);
+  assert.equal((await fetch(`${base}/api/operations/executive-interactions/${CANONICAL_INTERACTION_ID}`, {
     headers: { Cookie: cookie },
   })).status, 200);
 
@@ -2279,35 +2307,33 @@ test("local capability allowlist maps only literal governed Runtime operations",
   }, localFetch);
 
   const postBodies = {
+    "/api/local/executive-interactions": canonicalInteraction("Summarize project Alpha"),
     "/api/local/intake/upload": { filename: "brief.txt", contentBase64: "SGVsbG8=" },
     "/api/local/intake/query": { question: "What is in the brief?" },
     "/api/local/projects": { name: "Nexicron Alpha" },
-    "/api/local/missions/plan": { objective: "Plan a governed launch" },
-    "/api/local/work-sessions/plan": { objective: "Plan a bounded audit" },
     "/api/local/work-sessions/start": { objective: "Start a bounded audit" },
-    "/api/local/actions/dry-run": { action: "inspect local project status" },
-    "/api/local/actions/execute": { action: "run approved local test", explicitRequest: true },
-    "/api/local/voice-operator/route-transcript": { transcript: "Summarize project Alpha", source: "text_fallback" },
-    "/api/local/interactions": { clientId: "nexus-web", inputText: "Summarize project Alpha", modality: "text" }
   };
   for (const [route, definition] of Object.entries(LOCAL_CAPABILITY_ROUTES)) {
     const callsBefore = observed.length;
     const response = await fetch(`${base}${route}`, {
       method: definition.method,
-      headers: definition.method === "POST" ? { "Content-Type": "application/json" } : {},
+      headers: definition.method === "POST" ? {
+        "Content-Type": "application/json",
+        ...(route === "/api/local/executive-interactions" ? { "Idempotency-Key": CANONICAL_INTERACTION_ID } : {}),
+      } : {},
       ...(definition.method === "POST" ? { body: JSON.stringify(postBodies[route]) } : {})
     });
-    if (route.startsWith("/api/local/interactions")) {
-      assert.equal(response.status, 503, route);
-      assert.equal((await response.json()).error.code, "canonical_action_unavailable");
-      assert.equal(observed.length, callsBefore);
-      continue;
-    }
     assert.equal(response.status, 200, route);
     const expectedBase = definition.target === "platform" ? "http://127.0.0.1:8080" : "http://127.0.0.1:8765";
     assert.equal(observed.at(-1).url, `${expectedBase}${definition.runtimePath}`);
     assert.equal(observed.at(-1).options.method, definition.method);
     assert.equal(observed.at(-1).options.headers.Authorization, undefined);
+    if (route === "/api/local/executive-interactions") {
+      const forwarded = JSON.parse(observed.at(-1).options.body);
+      assert.equal(observed.at(-1).options.headers["Idempotency-Key"], CANONICAL_INTERACTION_ID);
+      assert.deepEqual(forwarded.actor, { actor_id: "operator-alpha", tenant_id: "nexicron", roles: ["admin"] });
+      assert.equal(forwarded.context.workspace_id, "primary");
+    }
   }
 });
 
@@ -2616,18 +2642,27 @@ test("Runtime Coordination exposes fleet reads and exact governed admission rout
   assert.equal((await fetch(`${base}/api/local/runtime-coordination/nodes?tenant=other`)).status, 400);
 });
 
-test("operational payloads cannot smuggle client-side governance decisions", async () => {
+test("retired generic execution and free-form planning routes cannot bypass canonical admission", async () => {
   let calls = 0;
   const base = await start(async () => runtimeResponse({}), { localCapabilitiesEnabled: true }, async () => { calls += 1; return localResponse({}); });
-  const response = await fetch(`${base}/api/local/actions/execute`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "change production", explicitRequest: true, approved: true })
-  });
-  assert.equal(response.status, 400);
+  for (const path of [
+    "/api/local/actions/execute",
+    "/api/local/missions/plan",
+    "/api/local/work-sessions/plan",
+    "/api/operations/missions/plan",
+    "/api/operations/work-sessions/plan",
+  ]) {
+    const response = await fetch(`${base}${path}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ objective: "change production", explicitRequest: true, approved: true })
+    });
+    assert.equal(response.status, 410, path);
+    assert.equal((await response.json()).error.code, "canonical_interaction_required", path);
+  }
   assert.equal(calls, 0);
 });
 
-test("unsigned local HIF aliases never forward around the signed Runtime boundary", async () => {
+test("retired unsigned local interaction aliases never forward around the canonical coordinator", async () => {
   const observed = [];
   const base = await start(async () => runtimeResponse({}), {
     localCapabilitiesEnabled: true,
@@ -2640,16 +2675,16 @@ test("unsigned local HIF aliases never forward around the signed Runtime boundar
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clientId: "nexus-web", inputText: "Brief me", presentation: { navigate: "projects", focus: "alpha" } })
   });
-  assert.equal(created.status, 503);
-  assert.equal((await created.json()).error.code, "canonical_action_unavailable");
+  assert.equal(created.status, 410);
+  assert.equal((await created.json()).error.code, "canonical_interaction_required");
   const events = await fetch(`${base}/api/local/interactions/INT-1/events`);
-  assert.equal(events.status, 503);
-  assert.equal((await events.json()).error.code, "canonical_action_unavailable");
+  assert.equal(events.status, 410);
+  assert.equal((await events.json()).error.code, "canonical_interaction_required");
   const interrupted = await fetch(`${base}/api/local/interactions/INT-1/interrupt`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "barge_in" })
   });
-  assert.equal(interrupted.status, 503);
-  assert.equal((await interrupted.json()).error.code, "canonical_action_unavailable");
+  assert.equal(interrupted.status, 410);
+  assert.equal((await interrupted.json()).error.code, "canonical_interaction_required");
   assert.equal(observed.length, 0);
 });
 
@@ -2750,18 +2785,18 @@ test("hosted operational gateway requires a signed session CSRF scope and idempo
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha");
   assert.equal(observed.at(-1).options.headers["X-NEXUS-Role"], "admin");
-  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], "operations:read,operations:write,actions:simulate,evidence:write");
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], [...config.operationalScopes].sort().join(","));
   const callsBeforeMissionPlan = observed.length;
-  assert.equal((await fetch(`${base}/api/operations/missions/plan`, {
-    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ objective: "Plan alpha" })
-  })).status, 403);
-  const missionPlan = await fetch(`${base}/api/operations/missions/plan`, {
-    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken, "Idempotency-Key": "legacy-plan-12345" }, body: JSON.stringify({ objective: "Plan alpha" })
-  });
-  assert.equal(missionPlan.status, 200);
-  assert.equal(observed.length, callsBeforeMissionPlan + 1);
-  assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/missions/plan");
-  assert.deepEqual(JSON.parse(observed.at(-1).options.body), { objective: "Plan alpha" });
+  for (const path of ["/api/operations/missions/plan", "/api/operations/work-sessions/plan"]) {
+    const retiredPlan = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json", "X-CSRF-Token": loginBody.session.csrfToken },
+      body: JSON.stringify({ objective: "Plan alpha" }),
+    });
+    assert.equal(retiredPlan.status, 410, path);
+    assert.equal((await retiredPlan.json()).error.code, "canonical_interaction_required", path);
+  }
+  assert.equal(observed.length, callsBeforeMissionPlan);
 
   const missionStep = await fetch(`${base}/api/operations/missions/MISSION-001/execute-step`, {
     method: "POST",
@@ -2983,6 +3018,7 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
     operationalApiBaseUrl: "http://127.0.0.1:9876",
     operationalRuntimeToken: "runtime-token-at-least-24-characters",
     operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    contextAssertionSecret: "context-assertion-secret-at-least-thirty-two-characters",
     operationalAccessKey: "operator-access-key-strong",
     operationalTenantId: "tenant-alpha",
     operationalWorkspaceId: "workspace-alpha",
@@ -3082,10 +3118,10 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
   assert.equal(replayFallbackCalls, 0);
   assert.equal(localFallbackCalls, 0);
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/missions"].GET, "/missions");
-  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/missions/plan"].POST, "/missions/plan");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/missions/plan"], undefined);
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/work-sessions"].GET, "/work-sessions");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/approvals"].GET, "/approvals");
-  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/actions/dry-run"].POST, "/actions/dry-run");
+  assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/actions/dry-run"], undefined);
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/proofs"].GET, "/proof/recent");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/client-capabilities"].GET, "/client-capabilities");
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/intake/upload"].POST, "/intake/upload");
@@ -3095,7 +3131,6 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
   assert.equal(CANONICAL_OPERATIONAL_ROUTES["/api/operations/knowledge/promotions"].POST, "/knowledge/promotions");
 
   const portableMutations = [
-    ["/work-sessions/plan", "/work-sessions/plan", { objective: "Plan a bounded verification." }],
     ["/work-sessions/start", "/work-sessions/start", { objective: "Start a bounded verification." }],
     ["/work-sessions/WORK-001/step", "/work-sessions/WORK-001/step", {}],
     ["/work-sessions/WORK-001/continue", "/work-sessions/WORK-001/continue", {}],
@@ -3103,8 +3138,6 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
     ["/work-sessions/WORK-001/cancel", "/work-sessions/WORK-001/cancel", {}],
     ["/approvals/APPROVAL-001/approve", "/approvals/APPROVAL-001/approve", {}],
     ["/approvals/APPROVAL-002/deny", "/approvals/APPROVAL-002/deny", { reason: "Required Evidence is absent." }],
-    ["/actions/dry-run", "/actions/dry-run", { action: "Inspect the bounded target." }],
-    ["/actions/execute", "/actions/execute", { action: "Execute the bounded target.", explicitRequest: true }],
   ];
   for (const [index, [portalPath, runtimePath, payload]] of portableMutations.entries()) {
     const key = `portable-operation-${String(index + 1).padStart(4, "0")}`;
@@ -3123,6 +3156,23 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
     assert.equal(observed.at(-1).options.headers["Idempotency-Key"], key, portalPath);
     assert.deepEqual(JSON.parse(observed.at(-1).options.body), payload, portalPath);
   }
+
+  const callsBeforeRetiredActions = observed.length;
+  for (const retiredPath of ["/actions/dry-run", "/actions/execute", "/missions/plan", "/work-sessions/plan"]) {
+    const response = await fetch(`${base}/api/operations${retiredPath}`, {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": session.session.csrfToken,
+        "Idempotency-Key": `retired-action-${retiredPath.endsWith("execute") ? "execute" : "dry-run"}`,
+      },
+      body: JSON.stringify({ action: "Client-classified action must not be admitted." }),
+    });
+    assert.equal(response.status, 410, retiredPath);
+    assert.equal((await response.json()).error.code, "canonical_interaction_required", retiredPath);
+  }
+  assert.equal(observed.length, callsBeforeRetiredActions);
 
   const baselineKey = "runtime-baseline-0001";
   const baseline = await fetch(`${base}/api/operations/runtime/baselines`, {
@@ -3156,7 +3206,7 @@ test("authenticated hosted reads use the canonical Runtime contracts without Rep
   assert.equal(promotion.status, 200);
   assert.equal(observed.at(-1).url, "http://127.0.0.1:9876/knowledge/promotions");
   assert.equal(observed.at(-1).options.headers["Idempotency-Key"], promotionKey);
-  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], config.operationalScopes.join(","));
+  assert.equal(observed.at(-1).options.headers["X-NEXUS-Scopes"], [...config.operationalScopes].sort().join(","));
   assert.deepEqual(JSON.parse(observed.at(-1).options.body), { candidateId: "candidate-runtime-baseline-001" });
 
   const candidateKey = "promotion-candidate-0001";
@@ -3211,6 +3261,7 @@ test("hosted Document, Project, and Voice workspaces use authenticated Runtime-o
     operationalApiBaseUrl: "http://127.0.0.1:9876",
     operationalRuntimeToken: "runtime-token-at-least-24-characters",
     operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    contextAssertionSecret: "context-assertion-secret-at-least-thirty-two-characters",
     operationalAccessKey: "operator-access-key-strong",
     operationalTenantId: "tenant-alpha",
     operationalWorkspaceId: "workspace-alpha",
@@ -3259,7 +3310,7 @@ test("hosted Document, Project, and Voice workspaces use authenticated Runtime-o
     ["/intake/query", "/intake/query", "intake-query-0001", { question: "What requirements are supported?", projectId: "PROJECT-001" }],
     ["/projects", "/projects", "project-create-0001", { name: "Project Alpha" }],
     ["/projects/PROJECT-001/compile", "/projects/PROJECT-001/compile", "project-compile-0001", { artifactType: "roadmap", options: { defaultPhaseDurationWeeks: 2, assumptions: [] } }],
-    ["/voice-operator/route-transcript", "/voice-operator/route-transcript", "voice-route-0001", { transcript: "Summarize project Alpha", source: "text_fallback" }],
+    ["/executive-interactions", "/executive/interactions", CANONICAL_INTERACTION_ID, canonicalInteraction("Summarize project Alpha", "voice")],
   ];
   for (const [portalPath, runtimePath, key, body] of operations) {
     const response = await fetch(`${base}/api/operations${portalPath}`, {
@@ -3273,7 +3324,17 @@ test("hosted Document, Project, and Voice workspaces use authenticated Runtime-o
     assert.equal(call.options.headers["Idempotency-Key"], key, portalPath);
     assert.equal(call.options.headers["X-NEXUS-Tenant-ID"], "tenant-alpha", portalPath);
     assert.equal(call.options.headers["X-NEXUS-Workspace-ID"], "workspace-alpha", portalPath);
-    assert.deepEqual(JSON.parse(call.options.body), body, portalPath);
+    const forwarded = JSON.parse(call.options.body);
+    if (portalPath === "/executive-interactions") {
+      assert.deepEqual(forwarded, {
+        ...body,
+        actor: { actor_id: "operator-1", tenant_id: "tenant-alpha", roles: ["admin"] },
+        context: { ...body.context, workspace_id: "workspace-alpha" },
+      }, portalPath);
+      assert.match(call.options.headers["X-NEXUS-Context-Assertion"], /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+    } else {
+      assert.deepEqual(forwarded, body, portalPath);
+    }
   }
 
   const callsBeforeRejectedIdentity = observed.length;
@@ -3344,13 +3405,14 @@ test("Document query requires operations read without borrowing upload or write 
   assert.equal(observed.length, 1);
 });
 
-test("Voice transcript routing requires operations read without borrowing realtime write scope", async () => {
+test("voice input uses canonical interaction admission with the Runtime-registered read scope", async () => {
   const observed = [];
   const config = {
     operationalEnabled: true,
     operationalApiBaseUrl: "http://127.0.0.1:9876",
     operationalRuntimeToken: "runtime-token-at-least-24-characters",
     operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    contextAssertionSecret: "context-assertion-secret-at-least-thirty-two-characters",
     operationalAccessKey: "operator-access-key-strong",
     operationalTenantId: "tenant-alpha",
     operationalWorkspaceId: "workspace-alpha",
@@ -3366,9 +3428,16 @@ test("Voice transcript routing requires operations read without borrowing realti
     async (url, options) => {
       observed.push({ url, options });
       return localResponse({
-        recordType: "nexus_voice_operator_route_result",
-        routed: true,
-        secretValuesExposed: false,
+        interaction_id: CANONICAL_INTERACTION_ID,
+        classification: "question",
+        status: "answered",
+        response_text: "Project Alpha is ready for review.",
+        intent: { intent_type: "question" },
+        mission_id: null,
+        authority_decision: { decision: "not_applicable" },
+        execution: {},
+        verification: { verified: false },
+        receipt_id: null,
       });
     },
   );
@@ -3383,17 +3452,24 @@ test("Voice transcript routing requires operations read without borrowing realti
     Cookie: cookie,
     "Content-Type": "application/json",
     "X-CSRF-Token": session.session.csrfToken,
-    "Idempotency-Key": "voice-route-read-scope-0001",
+    "Idempotency-Key": CANONICAL_INTERACTION_ID,
   };
-  const transcript = await fetch(`${base}/api/operations/voice-operator/route-transcript`, {
+  const transcript = await fetch(`${base}/api/operations/executive-interactions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(canonicalInteraction("Summarize project Alpha", "voice")),
+  });
+  assert.equal(transcript.status, 200);
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].url, "http://127.0.0.1:9876/executive/interactions");
+  assert.equal(observed[0].options.headers["X-NEXUS-Scopes"], "operations:read");
+  const retired = await fetch(`${base}/api/operations/voice-operator/route-transcript`, {
     method: "POST",
     headers,
     body: JSON.stringify({ transcript: "Summarize project Alpha", source: "text_fallback" }),
   });
-  assert.equal(transcript.status, 200);
-  assert.equal(observed.length, 1);
-  assert.equal(observed[0].url, "http://127.0.0.1:9876/voice-operator/route-transcript");
-  assert.equal(observed[0].options.headers["X-NEXUS-Scopes"], "operations:read");
+  assert.equal(retired.status, 410);
+  assert.equal((await retired.json()).error.code, "canonical_interaction_required");
   const realtime = await fetch(`${base}/api/runtime/realtime/call`, {
     method: "POST",
     headers: {

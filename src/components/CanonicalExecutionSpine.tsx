@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, RefreshCw, RotateCcw, ShieldCheck } from "lucide-react";
+import { CheckCircle2, RefreshCw, ShieldCheck } from "lucide-react";
 import {
   canonicalExecutionClient,
   type CanonicalExecutionGatewayResponse,
 } from "../lib/local-client";
-import { canonicalHostedActionAvailability } from "../lib/hosted-capability-gate";
 import type { CapabilityRegistryProjection } from "../lib/types";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
-
-const EDITED_FIXTURE = `${JSON.stringify({
-  recordType: "nexus.mission4_fixture",
-  state: "edited",
-  value: "NEXUS-M4-VERIFIED",
-})}\n`;
 
 export function CanonicalExecutionSpine({
   capabilityRegistry = null,
@@ -55,26 +48,11 @@ export function CanonicalExecutionSpine({
   const fixture = record?.fixture;
   const ready = registeredExecutiveSessionVerified;
   const completed = record?.state === "completed";
-  const createAction = canonicalHostedActionAvailability(
-    capabilityRegistry,
-    {
-      capabilityId: "canonical_execution_spine",
-      method: "POST",
-      pathTemplate: "/executive-authority/canonical-execution/missions",
-    },
-  );
-  const executeAction = canonicalHostedActionAvailability(
-    capabilityRegistry,
-    {
-      capabilityId: "canonical_execution_spine",
-      method: "POST",
-      pathTemplate: "/executive-authority/canonical-execution/missions/{mission_id}/actions",
-    },
-  );
+  const registryObserved = capabilityRegistry !== null;
 
   return <DataPanel
-    eyebrow="Mission 4 non-production proof"
-    title="Canonical execution spine"
+    eyebrow="Historical Mission 4 evidence"
+    title="Canonical execution evidence"
     icon={<ShieldCheck size={18} />}
   >
     <div className="session-strip">
@@ -91,8 +69,8 @@ export function CanonicalExecutionSpine({
         <strong>{fixture?.version ?? 0}</strong>
       </article>
       <article>
-        <span>Verified actions</span>
-        <strong>{record?.actions.length ?? 0} / 2</strong>
+        <span>Capability Registry</span>
+        <strong>{registryObserved ? "Observed" : "Unavailable"}</strong>
       </article>
       <StatusPill value={record?.state ?? (ready ? "ready" : "unavailable")} />
     </div>
@@ -102,13 +80,13 @@ export function CanonicalExecutionSpine({
         Exact resource: {fixture.path}. Current digest: {fixture.currentDigest}.
       </p>
       <p className="boundary-note">
-        The original effect and compensation each receive a separate Decision,
+        This read-only record shows whether the original effect and compensation received a separate Decision,
         one-use Authority Grant, receipt, independent digest observation, and
-        passive Replay event. The browser supplies no identity or governance fields.
+        passive Replay event. It cannot admit another effect.
       </p>
     </> : <EmptyRecord>
-      Establish a Registered Executive session, then create the exact admitted
-      non-production Mission.
+      No retained Mission 4 evidence was returned. New Mission and Action
+      requests must enter the canonical NEXUS interaction coordinator.
     </EmptyRecord>}
 
     {completed && <section className="operation-success" role="status">
@@ -123,41 +101,6 @@ export function CanonicalExecutionSpine({
     </section>}
 
     <div className="operation-actions">
-      {!record && <button
-        onClick={() => void run(() => canonicalExecutionClient.createMission())}
-        disabled={busy || !ready || !createAction.available}
-        title={createAction.available ? undefined : createAction.reason}
-      >
-        <ShieldCheck size={15} /> Authorize exact Mission
-      </button>}
-      {record?.state === "authorized" && fixture && <button
-        onClick={() => void run(() => canonicalExecutionClient.edit(
-          record.missionId,
-          fixture.path,
-          fixture.currentDigest,
-          EDITED_FIXTURE,
-        ))}
-        disabled={busy || !ready || !executeAction.available}
-        title={!ready
-          ? "Registered Executive session verification is required."
-          : executeAction.available ? undefined : executeAction.reason}
-      >
-        <CheckCircle2 size={15} /> Execute bounded edit
-      </button>}
-      {record?.state === "edited" && fixture && <button
-        onClick={() => void run(() => canonicalExecutionClient.restore(
-          record.missionId,
-          fixture.path,
-          fixture.currentDigest,
-          fixture.baselineDigest,
-        ))}
-        disabled={busy || !ready || !executeAction.available}
-        title={!ready
-          ? "Registered Executive session verification is required."
-          : executeAction.available ? undefined : executeAction.reason}
-      >
-        <RotateCcw size={15} /> Execute compensation
-      </button>}
       <button
         className="secondary-action"
         onClick={() => void run(
@@ -171,12 +114,9 @@ export function CanonicalExecutionSpine({
       </button>
     </div>
     <p className="boundary-note">
-      This surface is non-production and exact-resource only. Capability health
-      never grants Authority; the accepted Mission history remains governed by
-      its recorded gate and receipt lineage.
-    </p>
-    <p className="boundary-note">
-      Mission creation: {createAction.reason} Action edit and compensation: {executeAction.reason}
+      This surface is read-only. Its former Mission creation and direct Action
+      mutations are retired and return 410. Submit typed or spoken intent through
+      POST /executive/interactions; only Runtime may classify and authorize it.
     </p>
   </DataPanel>;
 }

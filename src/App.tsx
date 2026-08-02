@@ -568,7 +568,7 @@ export function App() {
       capabilityRegistryFailure,
     ),
     hostedActionAccess,
-    "operations:write",
+    "operations:read",
   );
   const realtimeVoiceAction = hostedSessionActionAvailability(
     canonicalActionAvailability(

@@ -140,7 +140,7 @@ test("a missing or blocked required read/base action fails closed", () => {
   }
 });
 
-test("Mission planning stays available when only execute-step is unavailable", () => {
+test("canonical interaction admission stays available when execute-step is unavailable", () => {
   const missionProjection = {
     capabilities: [{
       capabilityId: "mission_executor",
@@ -150,10 +150,10 @@ test("Mission planning stays available when only execute-step is unavailable", (
     }],
     actions: [
       action({
-        actionId: "missions.plan",
-        capabilityId: "mission_executor",
+        actionId: "canonical.route.post.executive.interactions",
+        capabilityId: "operational.engagement",
         method: "POST",
-        pathTemplate: "/missions/plan",
+        pathTemplate: "/executive/interactions",
         invocable: true,
         classification: "live_verified",
       }),
@@ -170,9 +170,9 @@ test("Mission planning stays available when only execute-step is unavailable", (
   assert.equal(gate.canonicalHostedActionAvailability(
     missionProjection,
     {
-      capabilityId: "mission_executor",
+      capabilityId: "operational.engagement",
       method: "POST",
-      pathTemplate: "/missions/plan",
+      pathTemplate: "/executive/interactions",
     },
   ).available, true);
   assert.equal(gate.canonicalHostedActionAvailability(
@@ -188,10 +188,10 @@ test("Mission planning stays available when only execute-step is unavailable", (
 test("an exact live action still requires its exact hosted session scope", () => {
   const workSessionProjection = projection([
     action({
-      actionId: "work-sessions.plan",
+      actionId: "work-sessions.start",
       capabilityId: "operational.work_sessions",
       method: "POST",
-      pathTemplate: "/work-sessions/plan",
+      pathTemplate: "/work-sessions/start",
       invocable: true,
       classification: "live_verified",
     }),
@@ -199,7 +199,7 @@ test("an exact live action still requires its exact hosted session scope", () =>
   const requirement = {
     capabilityId: "operational.work_sessions",
     method: "POST",
-    pathTemplate: "/work-sessions/plan",
+    pathTemplate: "/work-sessions/start",
   };
   const denied = gate.canonicalHostedControlAvailability(
     workSessionProjection,
@@ -426,7 +426,7 @@ test("Document history, upload, and query controls cannot borrow sibling action 
   ).state, "unavailable");
 });
 
-test("Project, Knowledge, Edge, and canonical execution mutations retain exact sibling action truth", () => {
+test("Project, Knowledge, and Edge mutations retain exact sibling action truth", () => {
   const exactProjection = {
     capabilities: [],
     actions: [
@@ -494,22 +494,6 @@ test("Project, Knowledge, Edge, and canonical execution mutations retain exact s
         invocable: true,
         classification: "live_verified",
       }),
-      action({
-        actionId: "canonical.create",
-        capabilityId: "canonical_execution_spine",
-        method: "POST",
-        pathTemplate: "/executive-authority/canonical-execution/missions",
-        invocable: true,
-        classification: "live_verified",
-      }),
-      action({
-        actionId: "canonical.execute",
-        capabilityId: "canonical_execution_spine",
-        method: "POST",
-        pathTemplate: "/executive-authority/canonical-execution/missions/{mission_id}/actions",
-        invocable: false,
-        classification: "unavailable",
-      }),
     ],
   };
   const operationsWrite = {
@@ -556,29 +540,13 @@ test("Project, Knowledge, Edge, and canonical execution mutations retain exact s
     "/runtime-coordination/admissions/{admission_id}/challenge/reissue",
     "edge:node_admission:review",
   ).available, false);
-  assert.equal(gate.canonicalHostedActionAvailability(
-    exactProjection,
-    {
-      capabilityId: "canonical_execution_spine",
-      method: "POST",
-      pathTemplate: "/executive-authority/canonical-execution/missions",
-    },
-  ).available, true);
-  assert.equal(gate.canonicalHostedActionAvailability(
-    exactProjection,
-    {
-      capabilityId: "canonical_execution_spine",
-      method: "POST",
-      pathTemplate: "/executive-authority/canonical-execution/missions/{mission_id}/actions",
-    },
-  ).available, false);
 });
 
-test("global HIF and voice actions require the hosted operations write scope independently", () => {
+test("global canonical interaction and voice actions require the hosted operations write scope independently", () => {
   const actionState = {
     available: true,
     state: "live_verified",
-    actionId: "context.runtime.route.post.runtime.interactions",
+    actionId: "canonical.route.post.executive.interactions",
     reason: "The exact canonical action is live verified.",
   };
   const denied = gate.hostedSessionActionAvailability(

@@ -4,28 +4,33 @@ The Hosted Operational Gateway is the authenticated operational lane of the NEXU
 
 ## Current classification
 
-The implemented phase is a **private, fixed-workspace hosted alpha**. Replit's private-deployment boundary authenticates and admits workspace users before the app is reachable. The NEXUS Experience Gateway then issues the browser a signed workspace session automatically; users do not enter or receive an infrastructure credential. This provides meaningful remote-operation security but is not production multi-tenant identity. The current session identifies a bounded workspace service principal rather than a distinct human account.
+The implemented phase is a **private, fixed-workspace hosted alpha**. Human interaction requires an explicit named-operator login. Replit's private-deployment boundary is defense in depth; it is not treated as human identity or approval authority. The gateway binds the named operator to a signed session and to a short-lived Runtime assertion.
 
 ## Request path
 
 ```text
 Browser
   -> Replit private-deployment admission
-  -> same-origin automatic HttpOnly workspace session
+  -> explicit named-operator login
+  -> same-origin HttpOnly operator session
   -> /api/operations exact allowlist
   -> CSRF + scope + idempotency validation
-  -> NEXUS Experience Gateway server credential
+  -> bearer transport credential + signed human assertion
   -> HTTPS
   -> NEXUS execution Runtime hosted ingress policy
-  -> fixed tenant/workspace binding + role enforcement
+  -> tenant/workspace binding + actor role/scope enforcement
   -> Runtime handler, governance, proof, and receipt
 ```
 
-The browser never receives the Runtime bearer token, session-signing secret, or an operator access key. Session state is signed and stored in an HttpOnly, SameSite=Strict, Secure cookie. Automatic issuance requires Replit's deployment marker, an exact configured Replit domain, HTTPS, and a same-origin browser request. Mutations require a session-derived CSRF token and an idempotency key. The gateway forwards deployment-fixed identity, tenant, workspace, role, scope, and request identifiers. Browser-supplied NEXUS identity, role, or scope headers are never forwarded. Arbitrary paths and browser query parameters are rejected.
+The browser never receives the Runtime bearer token or session/assertion signing secrets. The operator access key is exchanged once and is not persisted by the browser. Session state is signed and stored in an HttpOnly, SameSite=Strict, Secure cookie. Mutations require a session-derived CSRF token and an idempotency key. Browser-supplied NEXUS identity, role, scope, and Authority fields are rejected.
 
-The exact allowlist includes capability readiness, the versioned Runtime Client Capability Contract, Missions, Conclave, Operational Replay, Knowledge, Runtime Coordination, Document Intelligence, Projects, and Voice Operator. Document upload requires `evidence:write`; other workspace mutations require `operations:write`. The Human Interaction Framework and Realtime SDP exchange remain exact `/api/runtime` routes, but in hosted operational mode they require the same signed session and CSRF proof before the gateway contacts Runtime.
+The exact allowlist includes the canonical `POST /executive/interactions` route, capability readiness, the versioned Runtime Client Capability Contract, Mission and Work Session evidence/control routes, Conclave, Operational Replay, Knowledge, Runtime Coordination, Document Intelligence, and Projects. Canonical interaction admission requires `operations:read`; the Runtime—not the browser scope—classifies whether the request is informational or requires governed action. Free-form Mission and Work Session planning routes are retired, and their portal controls now enter the coordinator. Document upload requires `evidence:write`, and other workspace mutations require their exact registered scope. Realtime SDP negotiation remains an exact `/api/runtime` transport route and requires the same signed session and CSRF proof. Finalized voice transcripts do not use that transport as a reasoning side channel; they re-enter through `/executive/interactions`.
 
-In this alpha, the portal's `nexus-workspace-service` principal is also the fixed Runtime ingress identity. Replit workspace membership controls who may reach the private app; it does not enlarge the NEXUS service principal's access scope and never creates an Authority Grant. The default automatic session omits Action execution, approval decision, Knowledge Promotion, and Edge admission review scopes. This is not enterprise identity, individual human attribution, multi-user RBAC, or an Authority Grant.
+The former Mission 4 canonical-execution fixture is retained only as authenticated, read-only status and historical Mission evidence. Its Portal Mission-creation and Action endpoints return `410 canonical_interaction_required` without forwarding. They are not an internal execution back door: the browser client exposes no mutation method, and new typed, spoken, or API intent must enter `POST /executive/interactions`.
+
+The browser cannot send `actor`, tenant, role, scope, Authority, verification, or workspace bindings. For canonical interaction admission, the gateway constructs the required `actor` object and `context.workspace_id` from the authenticated session, forwards corroborating `X-NEXUS-*` identity headers, and emits a single-use HMAC-signed `nexus.context-assertion@3.0.0`. Runtime verifies its signature, issuer/client allowlists, audience, lifetime, `jti`, tenant/workspace, actor, role, and scopes before Authority. `Idempotency-Key` must exactly equal `interaction_id`.
+
+The bearer credential identifies the gateway transport principal; it never substitutes for the asserted human. Automatic private-workspace compatibility sessions are rejected from canonical interaction and approval routes. This alpha remains fixed-tenant and single named operator; it is not production multi-tenant identity.
 
 ## Runtime ingress
 
@@ -35,28 +40,23 @@ The execution Runtime enables hosted ingress enforcement only when `NEXUS_HOSTED
 NEXUS_HOSTED_TENANT_ID=nexicron
 NEXUS_HOSTED_WORKSPACE_ID=primary
 NEXUS_HOSTED_SERVICE_ID=nexus-workspace-service
-NEXUS_HOSTED_SERVICE_ROLE=operator
-NEXUS_HOSTED_SERVICE_SCOPES=operations:read,operations:write,actions:simulate,evidence:write,edge:node_admission:request
+NEXUS_CONTEXT_ASSERTION_SECRET=<same HMAC secret as the portal>
+NEXUS_CONTEXT_ASSERTION_ISSUERS=command-portal-experience-gateway
+NEXUS_CONTEXT_ASSERTION_CLIENT_IDS=nexus-web
 NEXUS_HOSTED_GATEWAY_AUDIT_PATH=data/team/hosted_gateway_audit.jsonl
 ```
 
-The service bindings must exactly match the portal deployment:
-
-- `NEXUS_HOSTED_SERVICE_ID` equals `COMMAND_PORTAL_OPERATOR_USER_ID`;
-- `NEXUS_HOSTED_SERVICE_ROLE` equals `COMMAND_PORTAL_OPERATOR_ROLE`; and
-- `NEXUS_HOSTED_SERVICE_SCOPES` equals `COMMAND_PORTAL_OPERATIONAL_SCOPES` using the same comma-separated values.
-
-When enabled, the Runtime verifies the bearer token and requires the request's tenant, workspace, fixed identity, and role to match those server-side bindings. The Runtime supplies the configured scopes rather than trusting forwarded scope claims, and it requires mutation idempotency keys. A missing or mismatched binding fails closed. It writes a secret-free audit record for allowed and rejected requests. `/health` remains available for deployment health checks.
+When enabled, Runtime verifies the bearer transport credential and then independently verifies the v3 human assertion. The assertion issuer/client must be explicitly allowlisted and all corroborating identity headers/body fields must match. Replayed, expired, future-dated, mismatched, or invalid assertions fail closed. Runtime records secret-free admission outcomes. `/health` remains liveness only.
 
 ## Portal configuration
 
-Set every `COMMAND_PORTAL_OPERATIONAL_*` value documented in `.env.example`, then configure the matching `NEXUS_HOSTED_SERVICE_*` values on the execution Runtime. The operational Runtime URL must use HTTPS except in loopback test/development environments.
+Set every `COMMAND_PORTAL_OPERATIONAL_*` value documented in `.env.example`, provision the shared assertion secret on both servers, and configure Runtime's explicit issuer/client allowlists. The operational Runtime URL must use HTTPS except in loopback test/development environments.
 
-On a published Replit deployment, `REPLIT_DEPLOYMENT=1` selects `automatic_private_workspace`. Replit supplies `REPLIT_DOMAINS`; NEXUS refuses automatic issuance if the request is not HTTPS, same-origin, and bound to one of those domains. The deployment itself must remain private and be configured as **Workspace only**. The legacy `access_key` mode remains available only for non-Replit development and compatibility testing; the published browser contains no key form or key-login request.
+Published human-interaction deployments use `access_key` and issue a session only after an explicit named-operator login. Replit private ingress may add a network boundary, but it is not a human identity and cannot mint execution or approval authority. Automatic private-workspace sessions remain read-only compatibility sessions and are rejected from `/executive/interactions` and approval decisions.
 
 ## Remaining production gates
 
-- Add application-level verified human identity and preserve both the Replit/private-ingress actor and gateway service principal in Authority, Decision, proof, receipt, and audit records.
+- Replace the single named-operator bootstrap with enterprise multi-user identity before multi-tenant rollout.
 - Bind Runtime records, retrieval, proof, receipts, connectors, and storage physically to tenant/workspace identifiers.
 - Add persistent distributed session revocation and rate limiting.
 - Add a durable idempotency-result store rather than request-key enforcement alone.

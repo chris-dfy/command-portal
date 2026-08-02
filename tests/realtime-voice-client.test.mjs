@@ -2,16 +2,17 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { RealtimeVoiceClient } from "../src/lib/realtime-voice-client.ts";
 
-// The realtime voice cancellation state machine (barge-in cancel, benign
-// cancellation-race settlement, stale-response filtering, queued creation)
-// must never silently regress into a stuck session or duplicate answers.
+// These tests exercise the live barge-in state machine through the governed
+// Runtime-admission and exact-response-correlation gates. A provider response
+// is never considered active merely because it arrived next.
 
+const CORRELATION_KEY = "nexus_narration_correlation_id";
 const clients = [];
 
-function makeClient() {
+function makeClient({ admit = async (text) => ({ admitted: true, spokenSummary: `Runtime: ${text}` }) } = {}) {
   const states = [];
   const errors = [];
-  const transcripts = { user: [], assistant: [] };
+  const transcripts = [];
   const audio = {
     muted: false,
     srcObject: null,
@@ -21,125 +22,296 @@ function makeClient() {
   const client = new RealtimeVoiceClient(audio, {
     onState: (state) => states.push(state),
     onAmplitude: () => {},
-    onUserTranscript: (text) => transcripts.user.push(text),
-    onAssistantTranscript: (text) => transcripts.assistant.push(text),
-    onError: (message, code) => errors.push({ message, code }),
+    onUserTranscript: async (text, idempotencyKey) => {
+      transcripts.push({ text, idempotencyKey });
+      return admit(text, idempotencyKey);
+    },
+    onError: (message) => errors.push(message),
   });
   const sent = [];
-  // Compile-time private fields are reachable at runtime; install a fake
-  // open data channel so send() records outbound provider events.
+  // TypeScript-private fields are normal properties at runtime. Install the
+  // two server-established prerequisites without opening a network session.
   client.channel = {
     readyState: "open",
     send: (raw) => sent.push(JSON.parse(raw)),
     close() {},
   };
+  client.promptEchoSignature = "nexus governed runtime prompt signature boundary";
   const dispatch = (event) => client.handleEvent(JSON.stringify(event));
   clients.push(client);
-  return { client, dispatch, sent, states, errors, transcripts };
+  return { audio, client, dispatch, sent, states, errors, transcripts };
+}
+
+function narrationRequests(sent) {
+  return sent.filter((event) => event.type === "response.create");
+}
+
+async function admitTurn(fixture, transcript, itemId) {
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: itemId });
+  fixture.dispatch({ type: "input_audio_buffer.speech_stopped", item_id: itemId });
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript,
+    item_id: itemId,
+  });
+  await fixture.client.admissionQueue;
+  return narrationRequests(fixture.sent).at(-1) ?? null;
+}
+
+function authorizeNarration(fixture, responseId, request) {
+  const correlationId = request?.response?.metadata?.[CORRELATION_KEY];
+  assert.match(correlationId ?? "", /^nexus-narration-[0-9a-f-]{36}$/i);
+  fixture.dispatch({
+    type: "response.created",
+    response: {
+      id: responseId,
+      metadata: { [CORRELATION_KEY]: correlationId },
+    },
+  });
 }
 
 afterEach(() => {
-  // Clear any pending response-boundary timers so the test runner exits.
   for (const client of clients.splice(0)) client.stop();
 });
 
-test("barge-in cancels the active response by id and clears output audio", () => {
-  const { dispatch, sent, states } = makeClient();
-  dispatch({ type: "response.created", response: { id: "resp_1" } });
-  dispatch({ type: "input_audio_buffer.speech_started" });
+test("barge-in cancels the exact Runtime-authorized response and clears output audio", async () => {
+  const fixture = makeClient();
+  const request = await admitTurn(fixture, "turn one", "item_1");
+  authorizeNarration(fixture, "resp_1", request);
+  assert.equal(fixture.audio.muted, false);
 
-  assert.deepEqual(sent, [
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_2" });
+
+  assert.deepEqual(fixture.sent.slice(-2), [
     { type: "response.cancel", response_id: "resp_1" },
     { type: "output_audio_buffer.clear" },
   ]);
-  assert.equal(states.at(-1), "interrupted");
+  assert.equal(fixture.states.at(-1), "interrupted");
+  assert.equal(fixture.audio.muted, true);
 
-  // While cancelling, a second speech_started must not send another cancel.
-  dispatch({ type: "input_audio_buffer.speech_started" });
-  assert.equal(sent.filter((e) => e.type === "response.cancel").length, 1);
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_3" });
+  assert.equal(fixture.sent.filter((event) => event.type === "response.cancel").length, 1);
 });
 
-test("benign cancellation-race error settles the cancel and fires the queued response.create", () => {
-  const { dispatch, sent, states, errors } = makeClient();
-  dispatch({ type: "response.created", response: { id: "resp_1" } });
-  dispatch({ type: "input_audio_buffer.speech_started" });
-  // Finalized transcript arrives while cancelling: creation must be queued.
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "next question" });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 0);
+test("benign cancellation race settles and releases one queued governed narration", async () => {
+  const fixture = makeClient();
+  const first = await admitTurn(fixture, "first question", "item_1");
+  authorizeNarration(fixture, "resp_1", first);
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_2" });
+  fixture.dispatch({ type: "input_audio_buffer.speech_stopped", item_id: "item_2" });
 
-  // The response finished before response.cancel arrived: benign race.
-  dispatch({ type: "error", error: { message: "Cancellation failed: no active response found" } });
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "next question",
+    item_id: "item_2",
+  });
+  await fixture.client.admissionQueue;
+  assert.equal(narrationRequests(fixture.sent).length, 1);
 
-  assert.equal(errors.length, 0, "benign cancellation race must not fail the session");
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 1);
-  assert.equal(states.at(-1), "thinking");
+  fixture.dispatch({ type: "error", error: { message: "Cancellation failed: no active response found" } });
+
+  assert.deepEqual(fixture.errors, []);
+  assert.equal(narrationRequests(fixture.sent).length, 2);
+  assert.equal(fixture.states.at(-1), "thinking");
 });
 
-test("non-benign errors still fail the session", () => {
-  const { dispatch, errors, states } = makeClient();
-  dispatch({ type: "error", error: { message: "provider exploded" } });
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0].message, "provider exploded");
-  assert.equal(states.at(-1), "error");
+test("a cancellation-queued narration cannot survive a third superseding speech turn", async () => {
+  const fixture = makeClient();
+  const first = await admitTurn(fixture, "first question", "item_1");
+  authorizeNarration(fixture, "resp_1", first);
+
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_2" });
+  fixture.dispatch({ type: "input_audio_buffer.speech_stopped", item_id: "item_2" });
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "superseded second question",
+    item_id: "item_2",
+  });
+  await fixture.client.admissionQueue;
+  assert.equal(narrationRequests(fixture.sent).length, 1);
+
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_3" });
+  fixture.dispatch({ type: "input_audio_buffer.speech_stopped", item_id: "item_3" });
+  assert.ok(fixture.sent.some((event) => (
+    event.type === "conversation.item.delete" && event.item_id === "item_2"
+  )));
+
+  fixture.dispatch({ type: "error", error: { message: "Cancellation failed: no active response found" } });
+  assert.equal(narrationRequests(fixture.sent).length, 1);
+
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "current third question",
+    item_id: "item_3",
+  });
+  await fixture.client.admissionQueue;
+  assert.equal(narrationRequests(fixture.sent).length, 2);
+  assert.match(
+    narrationRequests(fixture.sent).at(-1).response.instructions,
+    /Runtime: current third question/,
+  );
+  assert.doesNotMatch(
+    narrationRequests(fixture.sent).at(-1).response.instructions,
+    /superseded second question/,
+  );
 });
 
-test("delta and done events from a stale response id are ignored", () => {
-  const { dispatch, states, transcripts } = makeClient();
-  dispatch({ type: "response.created", response: { id: "resp_2" } });
+test("a canonical admission superseded while pending can never request narration", async () => {
+  let releaseFirst;
+  const firstAdmission = new Promise((resolve) => { releaseFirst = resolve; });
+  let calls = 0;
+  const fixture = makeClient({
+    admit: async (text) => {
+      calls += 1;
+      if (calls === 1) return firstAdmission;
+      return { admitted: true, spokenSummary: `Runtime: ${text}` };
+    },
+  });
 
-  dispatch({ type: "response.output_audio_transcript.delta", response_id: "resp_1", delta: "stale " });
-  dispatch({ type: "response.output_audio.delta", response_id: "resp_1" });
-  assert.deepEqual(transcripts.assistant, []);
-  assert.equal(states.includes("speaking"), false);
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_stale" });
+  fixture.dispatch({ type: "input_audio_buffer.speech_stopped", item_id: "item_stale" });
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "stale first turn",
+    item_id: "item_stale",
+  });
+  await Promise.resolve();
 
-  // Stale response.done must not settle the active response.
-  dispatch({ type: "response.done", response: { id: "resp_1" } });
-  assert.notEqual(states.at(-1), "listening");
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_current" });
+  fixture.dispatch({ type: "input_audio_buffer.speech_stopped", item_id: "item_current" });
+  releaseFirst({ admitted: true, spokenSummary: "Stale Runtime result" });
+  await fixture.client.admissionQueue;
 
-  // Active-response events still flow.
-  dispatch({ type: "response.output_audio_transcript.delta", response_id: "resp_2", delta: "fresh" });
-  assert.deepEqual(transcripts.assistant, ["fresh"]);
-  assert.equal(states.at(-1), "speaking");
-  dispatch({ type: "response.done", response: { id: "resp_2" } });
-  assert.equal(states.at(-1), "listening");
+  assert.equal(narrationRequests(fixture.sent).length, 0);
+  assert.ok(fixture.sent.some((event) => (
+    event.type === "conversation.item.delete" && event.item_id === "item_stale"
+  )));
+  assert.equal(fixture.sent.some((event) => event.type === "input_audio_buffer.clear"), false);
+
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "current second turn",
+    item_id: "item_current",
+  });
+  await fixture.client.admissionQueue;
+  assert.equal(narrationRequests(fixture.sent).length, 1);
+  assert.match(
+    narrationRequests(fixture.sent)[0].response.instructions,
+    /Runtime: current second turn/,
+  );
 });
 
-test("deltas arriving while cancelling are suppressed", () => {
-  const { dispatch, transcripts, states } = makeClient();
-  dispatch({ type: "response.created", response: { id: "resp_1" } });
-  dispatch({ type: "input_audio_buffer.speech_started" });
-  dispatch({ type: "response.output_audio_transcript.delta", response_id: "resp_1", delta: "tail" });
-  assert.deepEqual(transcripts.assistant, []);
-  assert.equal(states.at(-1), "interrupted");
+test("a delayed prior completion after newer speech_started remains bound to its prior item", async () => {
+  const fixture = makeClient();
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_old" });
+  fixture.dispatch({ type: "input_audio_buffer.speech_stopped", item_id: "item_old" });
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_new" });
+
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "delayed old question",
+    item_id: "item_old",
+  });
+  await fixture.client.admissionQueue;
+
+  assert.deepEqual(fixture.transcripts, []);
+  assert.equal(narrationRequests(fixture.sent).length, 0);
+  assert.ok(fixture.sent.some((event) => (
+    event.type === "conversation.item.delete" && event.item_id === "item_old"
+  )));
+  assert.equal(fixture.sent.some((event) => event.type === "input_audio_buffer.clear"), false);
+
+  fixture.dispatch({ type: "input_audio_buffer.speech_stopped", item_id: "item_new" });
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "current new question",
+    item_id: "item_new",
+  });
+  await fixture.client.admissionQueue;
+
+  assert.deepEqual(fixture.transcripts.map(({ text }) => text), ["current new question"]);
+  assert.equal(narrationRequests(fixture.sent).length, 1);
+  assert.match(
+    narrationRequests(fixture.sent)[0].response.instructions,
+    /Runtime: current new question/,
+  );
 });
 
-test("repeated turns produce exactly one response.create each", () => {
-  const { dispatch, sent, transcripts } = makeClient();
+test("non-benign provider errors fail the session", () => {
+  const fixture = makeClient();
+  fixture.dispatch({ type: "error", error: { message: "provider exploded" } });
+  assert.deepEqual(fixture.errors, ["provider exploded"]);
+  assert.equal(fixture.states.at(-1), "error");
+});
 
-  // Turn 1: plain finalized transcript with no active response.
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "turn one" });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 1);
-  // A duplicate finalized transcript while the response is active must not create another.
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "turn one again" });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 1);
-  dispatch({ type: "response.created", response: { id: "resp_1" } });
-  dispatch({ type: "response.done", response: { id: "resp_1" } });
+test("stale transcript and completion events cannot consume an authorized response", async () => {
+  const fixture = makeClient();
+  const request = await admitTurn(fixture, "fresh turn", "item_fresh");
+  authorizeNarration(fixture, "resp_fresh", request);
 
-  // Turn 2: barge-in path — queued creation fires once after settlement.
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "turn two" });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 2);
-  dispatch({ type: "response.created", response: { id: "resp_2" } });
-  dispatch({ type: "input_audio_buffer.speech_started" });
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "turn three" });
-  dispatch({ type: "response.done", response: { id: "resp_2" } });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 3);
+  fixture.dispatch({ type: "response.output_audio_transcript.delta", response_id: "resp_stale", delta: "stale" });
+  assert.notEqual(fixture.states.at(-1), "speaking");
+  fixture.dispatch({ type: "response.done", response: { id: "resp_stale" } });
+  assert.notEqual(fixture.states.at(-1), "listening");
 
-  // Empty transcripts never create responses.
-  dispatch({ type: "response.created", response: { id: "resp_3" } });
-  dispatch({ type: "response.done", response: { id: "resp_3" } });
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "   " });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 3);
+  fixture.dispatch({ type: "response.output_audio_transcript.delta", response_id: "resp_fresh", delta: "fresh" });
+  assert.equal(fixture.states.at(-1), "speaking");
+  fixture.dispatch({ type: "response.done", response: { id: "resp_fresh" } });
+  assert.equal(fixture.states.at(-1), "listening");
+  assert.equal(fixture.audio.muted, true);
+});
 
-  // The whitespace transcript is still surfaced to the UI, but never creates a response.
-  assert.deepEqual(transcripts.user, ["turn one", "turn one again", "turn two", "turn three", "   "]);
+test("deltas from a response being cancelled are suppressed", async () => {
+  const fixture = makeClient();
+  const request = await admitTurn(fixture, "interrupt me", "item_1");
+  authorizeNarration(fixture, "resp_1", request);
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_2" });
+  fixture.dispatch({ type: "response.output_audio_transcript.delta", response_id: "resp_1", delta: "tail" });
+  assert.equal(fixture.states.at(-1), "interrupted");
+  assert.deepEqual(fixture.errors, []);
+});
+
+test("repeated turns admit once and create exactly one correlated narration each", async () => {
+  const fixture = makeClient();
+
+  const first = await admitTurn(fixture, "turn one", "item_1");
+  assert.equal(narrationRequests(fixture.sent).length, 1);
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "turn one",
+    item_id: "item_1_duplicate",
+  });
+  await fixture.client.admissionQueue;
+  assert.equal(narrationRequests(fixture.sent).length, 1);
+  assert.equal(fixture.transcripts.length, 1);
+  assert.ok(fixture.sent.some((event) => event.type === "conversation.item.delete" && event.item_id === "item_1_duplicate"));
+  authorizeNarration(fixture, "resp_1", first);
+  fixture.dispatch({ type: "response.done", response: { id: "resp_1" } });
+
+  const second = await admitTurn(fixture, "turn two", "item_2");
+  assert.equal(narrationRequests(fixture.sent).length, 2);
+  authorizeNarration(fixture, "resp_2", second);
+  fixture.dispatch({ type: "input_audio_buffer.speech_started", item_id: "item_3" });
+  fixture.dispatch({ type: "input_audio_buffer.speech_stopped", item_id: "item_3" });
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "turn three",
+    item_id: "item_3",
+  });
+  await fixture.client.admissionQueue;
+  assert.equal(narrationRequests(fixture.sent).length, 2);
+  fixture.dispatch({ type: "response.done", response: { id: "resp_2" } });
+  assert.equal(narrationRequests(fixture.sent).length, 3);
+
+  const third = narrationRequests(fixture.sent).at(-1);
+  authorizeNarration(fixture, "resp_3", third);
+  fixture.dispatch({ type: "response.done", response: { id: "resp_3" } });
+  await admitTurn(fixture, "   ", "item_empty");
+  assert.equal(narrationRequests(fixture.sent).length, 3);
+  assert.equal(fixture.transcripts.length, 3);
+  assert.equal(new Set(fixture.transcripts.map(({ idempotencyKey }) => idempotencyKey)).size, 3);
+  assert.ok(narrationRequests(fixture.sent).every((event) => (
+    event.response.conversation === "none"
+    && typeof event.response.metadata[CORRELATION_KEY] === "string"
+  )));
 });

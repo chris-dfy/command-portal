@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Maximize2, Mic, MicOff, Minimize2, Send, ShieldCheck, Sparkles, Volume2, VolumeX, X } from "lucide-react";
-import { hifClient } from "../lib/hif-client";
-import { localNexusClient } from "../lib/local-client";
+import { localNexusClient, newExecutiveInteractionId } from "../lib/local-client";
 import type { CanonicalActionAvailability } from "../lib/portal-client";
 import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
 import { browserSpeechAvailability, recognizeBrowserSpeech, speakBrowserResponse } from "../lib/browser-speech";
-import { runBoundedTask } from "../lib/request-coordination.mjs";
 import { assistantPresence } from "../lib/assistant-presence";
 import {
   beginAcceptanceBoundDraft,
@@ -22,7 +20,21 @@ import {
   snapshotPrivateDraftOperation,
   type PrivateDraftOperation,
 } from "../lib/private-draft-operation";
+import {
+  admitApprovedExecutiveInteraction,
+  admitExecutiveInteraction,
+  admitRuntimeVoiceTranscript,
+  clearPendingExecutiveApproval,
+  pendingExecutiveApprovalId,
+  recoverPendingExecutiveApproval,
+  rememberPendingExecutiveApproval,
+  runtimeInteractionTrace,
+  runtimePresentationNavigation,
+  type RuntimeInteractionAdmission,
+  validateExecutiveInteractionDenial,
+} from "../lib/runtime-voice-admission";
 import { deriveAssistantAvatarState, NexusAvatar, NEXUS_AVATAR_STATE_LABELS } from "./NexusAvatar";
+import { ExecutiveInteractionApproval } from "./ExecutiveInteractionApproval";
 import "./NexusAvatar.css";
 
 type Message = { speaker: "operator" | "nexus"; text: string; limitation?: string };
@@ -45,6 +57,8 @@ const SKILLS: Array<{ label: string; prompt: string; area: AreaId }> = [
 
 const introductionKey = "nexus-copilot-introduced-v1";
 const messageFrom = (error: unknown) => error instanceof Error ? error.message : String(error);
+const AREA_IDS = new Set<AreaId>(["center", "intake", "projects", "voice", "operations", "replay", "missions", "knowledge", "edge", "conclave", "information", "health", "topology", "providers", "evidence"]);
+const isAreaId = (value: string): value is AreaId => AREA_IDS.has(value as AreaId);
 
 export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate, interactionAction, realtimeAction, textAction, open, expanded, onOpenChange, onExpandedChange }: {
   activeArea: AreaId;
@@ -69,7 +83,8 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [nexusMuted, setNexusMuted] = useState(false);
   const [amplitude, setAmplitude] = useState(0);
-  const [liveAssistant, setLiveAssistant] = useState("");
+  const [pendingApproval, setPendingApproval] = useState<RuntimeInteractionAdmission | null>(null);
+  const [approvalBusy, setApprovalBusy] = useState<"approve" | "deny" | null>(null);
   const [browserListening, setBrowserListening] = useState(false);
   const [pendingVoiceRequest, setPendingVoiceRequest] = useState<PendingCopilotVoiceRequest | null>(null);
   const [messages, setMessages] = useState<Message[]>([
@@ -78,7 +93,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   const audio = useRef<HTMLAudioElement | null>(null);
   const liveClient = useRef<RealtimeVoiceClient | null>(null);
   const latestUserTranscript = useRef("");
-  const conversationId = useRef(`CONV-WEB-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Date.now()}`);
+  const conversationId = useRef(newExecutiveInteractionId());
   const scroll = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -98,11 +113,83 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
 
   useEffect(() => {
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" });
-  }, [messages, liveAssistant, busy]);
+  }, [messages, busy]);
+
+  useEffect(() => {
+    void recoverPendingExecutiveApproval()
+      .then((admission) => {
+        if (!admission) return;
+        setPendingApproval(admission);
+        setMessages((items) => [...items, {
+          speaker: "nexus",
+          text: admission.spokenSummary,
+          limitation: `Recovered from the Runtime interaction ledger · ${runtimeInteractionTrace(admission)}`,
+        }]);
+      })
+      .catch((caught) => setError(messageFrom(caught)));
+  }, []);
 
   function dismissIntroduction() {
     window.localStorage.setItem(introductionKey, "complete");
     setIntroduced(false);
+  }
+
+  function presentAdmission(admission: RuntimeInteractionAdmission) {
+    setMessages((items) => [...items, {
+      speaker: "nexus",
+      text: admission.spokenSummary,
+      limitation: runtimeInteractionTrace(admission),
+    }]);
+    rememberPendingExecutiveApproval(admission);
+    setPendingApproval(pendingExecutiveApprovalId(admission) ? admission : null);
+    const navigation = runtimePresentationNavigation(admission);
+    if (navigation && isAreaId(navigation)) onNavigate(navigation);
+  }
+
+  async function approvePendingIntent() {
+    const pending = pendingApproval;
+    const approvalId = pendingExecutiveApprovalId(pending);
+    if (!pending || !approvalId || approvalBusy) return;
+    setError(null);
+    setApprovalBusy("approve");
+    try {
+      const response = await localNexusClient.approve(approvalId);
+      const admission = await admitApprovedExecutiveInteraction(response, pending);
+      presentAdmission(admission);
+    } catch (caught) {
+      setError(messageFrom(caught));
+    } finally {
+      setApprovalBusy(null);
+    }
+  }
+
+  async function denyPendingIntent() {
+    const pending = pendingApproval;
+    const approvalId = pendingExecutiveApprovalId(pending);
+    if (!pending || !approvalId || approvalBusy) return;
+    setError(null);
+    setApprovalBusy("deny");
+    try {
+      const response = await localNexusClient.deny(
+        approvalId,
+        "Denied by the authenticated operator in NEXUS Command.",
+      );
+      validateExecutiveInteractionDenial(
+        response,
+        approvalId,
+        pending.interactionResult.interaction_id,
+      );
+      clearPendingExecutiveApproval(pending.interactionResult.interaction_id);
+      setPendingApproval(null);
+      setMessages((items) => [...items, {
+        speaker: "nexus",
+        text: `Runtime recorded the denial for approval ${approvalId}. No approval continuation was admitted.`,
+      }]);
+    } catch (caught) {
+      setError(messageFrom(caught));
+    } finally {
+      setApprovalBusy(null);
+    }
   }
 
   async function ask(text?: string) {
@@ -118,16 +205,9 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     setError(null);
     setBusy(true);
     try {
-      const result = await hifClient.start(request, "text", {}, conversationId.current);
-      if (!result.interaction.interactionId?.trim()) {
-        throw new Error("NEXUS did not return a durable interaction identity; the draft remains editable.");
-      }
-      const limitation = result.interaction.limitations.find((item) => item.includes("model_native"));
-      setMessages((items) => [
-        ...items,
-        { speaker: "operator", text: request },
-        { speaker: "nexus", text: result.interaction.responseText, limitation },
-      ]);
+      const result = await admitExecutiveInteraction(request, "text", conversationId.current);
+      setMessages((items) => [...items, { speaker: "operator", text: request }]);
+      presentAdmission(result);
       if (draftOperation) {
         const accepted = clearDraftAfterAcceptance(draftOperation);
         setInput(accepted.draft);
@@ -151,28 +231,31 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       return;
     }
     setError(null);
-    setLiveAssistant("");
     setMicrophoneMuted(false);
     setNexusMuted(false);
     audio.current.muted = false;
     const client = new RealtimeVoiceClient(audio.current, {
       onState: setVoiceState,
       onAmplitude: setAmplitude,
-      onUserTranscript: (text) => {
+      onUserTranscript: async (text, idempotencyKey) => {
         latestUserTranscript.current = text;
         setMessages((items) => [...items, { speaker: "operator", text }]);
+        const admission = await admitRuntimeVoiceTranscript(
+          text,
+          conversationId.current,
+          idempotencyKey,
+        );
+        presentAdmission(admission);
+        latestUserTranscript.current = "";
+        return admission;
       },
-      onAssistantTranscript: (text) => {
-        if (text.trim()) latestUserTranscript.current = "";
-        setLiveAssistant(text);
-      },
-      onError: (message, code) => {
+      onError: (message) => {
         setError(message);
         const captured = latestUserTranscript.current.trim();
-        if (code === "response_timeout" && captured) {
+        if (captured) {
           const staged = snapshotPrivateDraftOperation(
             { transcript: captured, operatorAlreadyVisible: true },
-            `copilot-voice:${globalThis.crypto.randomUUID()}`,
+            newExecutiveInteractionId(),
           );
           setPendingVoiceRequest((current) => (
             current
@@ -201,7 +284,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     }
     const staged = retryRequest ?? snapshotPrivateDraftOperation(
       { transcript: request.trim(), operatorAlreadyVisible },
-      `copilot-voice:${globalThis.crypto.randomUUID()}`,
+      newExecutiveInteractionId(),
     );
     const presentOperatorTranscript = shouldPresentPrivateDraft(
       staged,
@@ -217,21 +300,14 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     try {
       const result = await executeExplicitPrivateDraftAction(
         operation,
-        (explicitOperation) => runBoundedTask(
-          (signal) => localNexusClient.routeTranscript(
-            explicitOperation.payload.transcript,
-            "browser_speech",
-            signal,
-            explicitOperation.idempotencyKey,
-          ),
-          { timeoutMs: 12_000 },
+        (explicitOperation) => admitRuntimeVoiceTranscript(
+          explicitOperation.payload.transcript,
+          conversationId.current,
+          explicitOperation.idempotencyKey,
         ),
       );
-      const responseText = result.spokenSummary?.trim()
-        || result.event?.failureReason?.trim()
-        || "NEXUS recorded the request without a spoken summary.";
-      setMessages((items) => [...items, { speaker: "nexus", text: responseText }]);
-      if (!nexusMuted) speakBrowserResponse(responseText);
+      presentAdmission(result);
+      if (!nexusMuted) speakBrowserResponse(result.spokenSummary);
       setPendingVoiceRequest(clearPrivateDraftAfterSuccess());
       if (latestUserTranscript.current.trim() === operation.payload.transcript) latestUserTranscript.current = "";
     } catch (caught) {
@@ -263,11 +339,9 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   }
 
   function stopVoice() {
-    if (liveAssistant.trim()) setMessages((items) => [...items, { speaker: "nexus", text: liveAssistant.trim(), limitation: "Realtime response may include model_native reasoning; operational claims still require Runtime evidence." }]);
     liveClient.current?.stop();
     liveClient.current = null;
     latestUserTranscript.current = "";
-    setLiveAssistant("");
     setMicrophoneMuted(false);
     setNexusMuted(false);
   }
@@ -285,7 +359,6 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   }
 
   function useSkill(skill: typeof SKILLS[number]) {
-    onNavigate(skill.area);
     void ask(skill.prompt);
   }
 
@@ -343,10 +416,16 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
         {messages.map((message, index) => <article key={`${message.speaker}-${index}`} data-speaker={message.speaker}>
           <span>{message.speaker === "nexus" ? "NEXUS" : "You"}</span><p>{message.text}</p>{message.limitation && <small>{message.limitation}</small>}
         </article>)}
-        {liveAssistant && <article data-speaker="nexus"><span>NEXUS · LIVE</span><p>{liveAssistant}</p></article>}
         {busy && <div className="nexus-copilot__thinking"><i /><i /><i /><span>Reasoning over registered context</span></div>}
         {error && <p className="nexus-copilot__error">{error}</p>}
       </div>
+
+      <ExecutiveInteractionApproval
+        admission={pendingApproval}
+        busy={approvalBusy}
+        onApprove={() => void approvePendingIntent()}
+        onDeny={() => void denyPendingIntent()}
+      />
 
       <section className="nexus-copilot__skills">
         <header><span>Executive skills</span><b>{SKILLS.length}</b></header>

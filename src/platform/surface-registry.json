@@ -600,7 +600,7 @@
         "web": {
           "route": "/settings",
           "state": "functional",
-          "reason": "The hosted surface manages the bounded Registered Executive session and the exact non-production canonical execution proof, while appearance remains client-local."
+          "reason": "The hosted surface manages the bounded Registered Executive session and presents retained non-production execution evidence read-only, while appearance remains client-local."
         }
       },
       "modules": [
@@ -680,7 +680,7 @@
         },
         {
           "moduleId": "settings.canonical-execution",
-          "label": "Canonical execution fixture",
+          "label": "Canonical execution evidence",
           "portability": "hosted_only",
           "capabilityIds": [
             "canonical_execution_spine"
@@ -692,8 +692,8 @@
               "componentKey": null
             },
             "web": {
-              "state": "functional",
-              "reason": "The hosted surface admits only the exact registered non-production Action and separately governed compensation.",
+              "state": "read_only",
+              "reason": "The hosted surface presents retained Mission 4 evidence. Its direct Mission and Action mutations are retired; new intent enters POST /executive/interactions.",
               "componentKey": "web.settings.canonical-execution"
             }
           }

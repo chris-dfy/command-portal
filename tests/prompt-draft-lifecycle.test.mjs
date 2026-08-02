@@ -120,16 +120,16 @@ test("Voice keeps transcripts in history and never rehydrates the typed draft", 
   const source = await read("../src/components/VoiceWorkspace.tsx");
   const userTranscript = source.slice(
     source.indexOf("onUserTranscript:"),
-    source.indexOf("onAssistantTranscript:"),
+    source.indexOf("onError:", source.indexOf("onUserTranscript:")),
   );
   assert.doesNotMatch(userTranscript, /setTranscript/);
   assert.match(userTranscript, /setHistory/);
+  assert.match(userTranscript, /admitRuntimeVoiceTranscript/);
   assertOrder(source, [
     "async function routeGovernedTranscript(",
     'setTranscript("")',
     "await executeExplicitPrivateDraftAction(",
-    "runBoundedTask(",
-    "localNexusClient.routeTranscript(",
+    "admitRuntimeVoiceTranscript(",
   ]);
   const browserMicrophone = source.slice(
     source.indexOf("async function useBrowserMicrophone"),
@@ -144,8 +144,8 @@ test("Voice keeps transcripts in history and never rehydrates the typed draft", 
   assert.match(source, /pendingRequest && <button[\s\S]*Send captured transcript through governed Voice/);
   assert.match(source, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(source, /shouldPresentPrivateDraft\([\s\S]*staged\.payload\.historyAlreadyRecorded/);
-  assert.match(source, /code === "response_timeout" && captured[\s\S]*snapshotPrivateDraftOperation/);
-  assert.doesNotMatch(source, /code === "response_timeout" && captured[\s\S]{0,700}void routeGovernedTranscript/);
+  assert.match(source, /onError: \(errorMessage\) => \{[\s\S]*captured[\s\S]*snapshotPrivateDraftOperation/);
+  assert.doesNotMatch(source, /onError: \(errorMessage\) => \{[\s\S]{0,900}void routeGovernedTranscript/);
   assert.doesNotMatch(source, /value=\{pendingRequest[^}]*\}/);
   assert.match(source, /value=\{transcript\}[\s\S]*autoComplete="off"/);
 });
@@ -169,8 +169,10 @@ test("Document and Work Session submissions retain exact private retry operation
     "matchingPending ?? snapshotPrivateDraftOperation(",
     'setObjective("")',
     "beginPrivateDraftAttempt(staged)",
-    "localNexusClient.planWorkSession(operation.payload.objective, operation.idempotencyKey)",
+    "await admitExecutiveInteraction(",
   ]);
+  assert.match(workSessions, /conversationId\.current,[\s\S]*operation\.idempotencyKey/);
+  assert.doesNotMatch(workSessions, /planWorkSession|\/work-sessions\/plan/);
   assert.match(workSessions, /startWorkSession\(operation\.payload\.objective, operation\.idempotencyKey\)/);
   assert.match(workSessions, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(workSessions, /Retry exact plan/);
@@ -188,21 +190,23 @@ test("both Mission entry points retain exact private retry plans", async () => {
       "pendingPlan ?? snapshotPrivateDraftOperation(",
       'setObjective("")',
       "beginPrivateDraftAttempt(staged)",
-      "await localNexusClient.planMission(operation.payload.objective, operation.idempotencyKey)",
+      "await admitExecutiveInteraction(",
     ]);
+    assert.match(source, /conversationId\.current,[\s\S]*operation\.idempotencyKey/);
+    assert.doesNotMatch(source, /localNexusClient\.planMission|"\/missions\/plan"/);
     assert.match(source, /retainPrivateDraftAfterFailure\(operation\)/);
     assert.match(source, /Retry exact [Mm]ission plan/);
     assert.match(source, /value=\{objective\}[\s\S]{0,300}autoComplete="off"/);
   }
 });
 
-test("Copilot clears its visible HIF draft only after durable acceptance", async () => {
+test("Copilot clears its visible draft only after canonical Runtime acceptance", async () => {
   const source = await read("../src/components/NexusCopilot.tsx");
   assertOrder(source, [
     "const request = (text ?? input).trim()",
     "beginAcceptanceBoundDraft(input)",
-    "await hifClient.start(request",
-    "result.interaction.interactionId?.trim()",
+    "await admitExecutiveInteraction(request",
+    "presentAdmission(result)",
     "clearDraftAfterAcceptance(draftOperation)",
   ]);
   assert.match(source, /retainDraftAfterUnacceptedFailure\(draftOperation\)/);
@@ -213,11 +217,12 @@ test("Copilot clears its visible HIF draft only after durable acceptance", async
   assert.equal((source.match(/localStorage/g) ?? []).length, 2);
   assert.match(source, /introductionKey/);
   assert.match(source, /aria-label="Ask NEXUS" autoComplete="off"/);
-  assert.match(source, /code === "response_timeout" && captured[\s\S]*snapshotPrivateDraftOperation/);
-  assert.doesNotMatch(source, /code === "response_timeout" && captured[\s\S]{0,700}void routeGovernedVoice/);
+  assert.match(source, /onError: \(message\) => \{[\s\S]*captured[\s\S]*snapshotPrivateDraftOperation/);
+  assert.doesNotMatch(source, /onError: \(message\) => \{[\s\S]{0,800}void routeGovernedVoice/);
   assert.match(source, /pendingVoiceRequest && <button[\s\S]*Send captured transcript through governed Voice/);
   assert.match(source, /explicitOperation\.idempotencyKey/);
   assert.match(source, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(source, /shouldPresentPrivateDraft\([\s\S]*staged\.payload\.operatorAlreadyVisible/);
   assert.doesNotMatch(source, /setInput\(captured\)/);
+  assert.doesNotMatch(source, /hifClient|\/api\/hif/);
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Check,
@@ -15,8 +15,10 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
-import { localNexusClient, operationalSessionClient, type OperationalSession } from "../lib/local-client";
-import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import { localNexusClient, newExecutiveInteractionId, operationalSessionClient, type OperationalSession } from "../lib/local-client";
+import { canonicalHostedControlAvailability, hostedSessionActionAvailability } from "../lib/hosted-capability-gate";
+import { canonicalActionAvailability, PORTAL_CANONICAL_ACTIONS } from "../lib/portal-client";
+import { admitExecutiveInteraction, rememberPendingExecutiveApproval } from "../lib/runtime-voice-admission";
 import type { CapabilityRegistryProjection } from "../lib/types";
 import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { nexusModuleById } from "../platform/surfaceRegistry";
@@ -141,6 +143,8 @@ export function MissionDashboard({
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [planOutcome, setPlanOutcome] = useState("");
+  const conversationId = useRef(newExecutiveInteractionId());
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -214,16 +218,24 @@ export function MissionDashboard({
     }
     const staged = pendingPlan ?? snapshotPrivateDraftOperation(
       { objective: objective.trim() },
-      `mission-plan:${globalThis.crypto.randomUUID()}`,
+      newExecutiveInteractionId(),
     );
     if (!pendingPlan) setObjective("");
     const operation = beginPrivateDraftAttempt(staged);
     setPendingPlan(operation);
     setBusy(true);
     setError("");
+    setPlanOutcome("");
     try {
-      await localNexusClient.planMission(operation.payload.objective, operation.idempotencyKey);
+      const admission = await admitExecutiveInteraction(
+        `Plan a governed Mission with this objective: ${operation.payload.objective}`,
+        "text",
+        conversationId.current,
+        operation.idempotencyKey,
+      );
+      rememberPendingExecutiveApproval(admission);
       setPendingPlan(clearPrivateDraftAfterSuccess());
+      setPlanOutcome(admission.spokenSummary);
       await refresh();
     } catch (caught) {
       setPendingPlan(retainPrivateDraftAfterFailure(operation));
@@ -289,15 +301,13 @@ export function MissionDashboard({
     authenticated: session.authenticated,
     scopes: session.scopes,
   };
-  const missionPlanAction = canonicalHostedControlAvailability(
-    capabilityRegistry,
-    {
-      capabilityId: "mission_executor",
-      method: "POST",
-      pathTemplate: "/missions/plan",
-    },
+  const missionPlanAction = hostedSessionActionAvailability(
+    canonicalActionAvailability(
+      capabilityRegistry,
+      PORTAL_CANONICAL_ACTIONS.copilotInteractionStart,
+    ),
     hostedActionAccess,
-    "operations:write",
+    "operations:read",
   );
   const missionStepAction = canonicalHostedControlAvailability(
     capabilityRegistry,
@@ -324,10 +334,10 @@ export function MissionDashboard({
     [missionStepAllowed, missions],
   );
   const missionCreationReason = !hosted
-    ? "Local mission planning remains bounded by the local Runtime contract."
+    ? "Local mission planning enters the canonical Runtime interaction coordinator."
     : !missionPlanAction.available
       ? missionPlanAction.reason
-      : "The exact Runtime Mission contract remains subject to capability admission, policy, Authority, proof, receipt, and postcondition controls.";
+      : "The canonical interaction coordinator will classify the request and apply policy, Authority, proof, receipt, and postcondition controls.";
 
   return <div className="mission-dashboard">
     <section className="nx-workspace-hero"><div><span className="nx-eyebrow">Mission Dashboard</span><h2>Coordinate governed work across independent mission streams.</h2><p>Each mission retains its own objective, task graph, specialist context, replay stream, receipts, and verification boundary.</p></div><NexusButton className="nx-action" size="sm" onClick={() => void refresh()} loading={busy}><RefreshCw size={15} />Refresh</NexusButton></section>
@@ -338,7 +348,8 @@ export function MissionDashboard({
       <NexusMetric label="Mission Health" value={health} detail={selectedMission ? `${progress}% selected progress` : "No selected Runtime mission"} tone={health === "operational" || health === "stable" ? "success" : health === "attention" ? "attention" : "neutral"} />
     </section>
     {error && <section className="operation-error" role="alert"><ShieldAlert size={18} /><span>{error}</span></section>}
-    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => { setObjective(event.target.value); setPendingPlan(null); }} placeholder="Describe the governed outcome NEXUS should coordinate…" autoComplete="off" /></label><button onClick={() => void plan()} disabled={busy || (!objective.trim() && !pendingPlan) || !missionCreationAllowed}><Network size={15} />{pendingPlan ? "Retry exact mission plan" : "Plan governed mission"}</button><small>{missionCreationReason} {missionReadinessNote}</small></div>
+    {planOutcome && <section className="boundary-note" aria-live="polite">{planOutcome}</section>}
+    <div className="mission-compose"><label><span>New mission objective</span><textarea value={objective} onChange={(event) => { setObjective(event.target.value); setPendingPlan(null); setPlanOutcome(""); }} placeholder="Describe the governed outcome NEXUS should coordinate…" autoComplete="off" /></label><button onClick={() => void plan()} disabled={busy || (!objective.trim() && !pendingPlan) || !missionCreationAllowed}><Network size={15} />{pendingPlan ? "Retry exact mission plan" : "Plan governed mission"}</button><small>{missionCreationReason} {missionReadinessNote}</small></div>
     <div className="mission-dashboard__grid">
       <DataPanel eyebrow="Mission portfolio" title="Active, blocked, and completed missions" icon={<CircleGauge size={18} />}>
         <div className="mission-list">{missionState === "loading" ? <p className="replay-loading">Loading mission history from Runtime…</p> : missionState === "unavailable" ? <EmptyRecord>Runtime did not supply mission history. Mission status is unavailable.</EmptyRecord> : missions.length ? missions.map((mission) => { const id = missionId(mission); return <button key={id} data-active={id === selected} onClick={() => setSelected(id)}><div><strong>{text(mission.userObjective ?? mission.objective ?? mission.title, "Mission")}</strong><small>{id}</small></div><StatusPill value={statusOf(mission)} /></button>; }) : <EmptyRecord>No missions have been recorded by Runtime.</EmptyRecord>}</div>

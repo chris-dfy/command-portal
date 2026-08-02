@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pause, Play, ReceiptText, Route, StepForward, XCircle } from "lucide-react";
 import {
   localNexusClient,
+  newExecutiveInteractionId,
   operationalSessionClient,
   type OperationalSession,
 } from "../lib/local-client";
-import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import { canonicalHostedControlAvailability, hostedSessionActionAvailability } from "../lib/hosted-capability-gate";
+import { canonicalActionAvailability, PORTAL_CANONICAL_ACTIONS } from "../lib/portal-client";
+import { admitExecutiveInteraction, rememberPendingExecutiveApproval } from "../lib/runtime-voice-admission";
 import type { CapabilityRegistryProjection } from "../lib/types";
 import { nexusModuleById } from "../platform/surfaceRegistry";
 import {
@@ -80,6 +83,8 @@ export function WorkSessionsWorkspace({
   const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [planOutcome, setPlanOutcome] = useState("");
+  const conversationId = useRef(newExecutiveInteractionId());
 
   const refresh = useCallback(async () => {
     const response = await localNexusClient.workSessions();
@@ -107,18 +112,19 @@ export function WorkSessionsWorkspace({
     return () => { mounted = false; };
   }, []);
 
-  async function run(operation: () => Promise<Record<string, unknown>>): Promise<boolean> {
+  async function run(operation: () => Promise<unknown>): Promise<boolean> {
     setBusy(true);
     setError("");
     setReceipt(null);
     try {
       const result = await operation();
+      const resultRecord = object(result);
       const next = workSession(result);
       if (next) setSelected(next);
-      const recordedReceipt = object(result.receipt);
+      const recordedReceipt = object(resultRecord.receipt);
       if (Object.keys(recordedReceipt).length) setReceipt(recordedReceipt);
-      const failureReason = typeof result.failureReason === "string"
-        ? result.failureReason
+      const failureReason = typeof resultRecord.failureReason === "string"
+        ? resultRecord.failureReason
         : "";
       await refresh();
       if (failureReason) setError(failureReason);
@@ -133,6 +139,7 @@ export function WorkSessionsWorkspace({
 
   async function submitObjective(action: "plan" | "start") {
     if (busy) return;
+    setPlanOutcome("");
     const actionAvailability = action === "plan" ? planAction : startAction;
     if (!actionAvailability.available) {
       setError(actionAvailability.reason);
@@ -142,14 +149,25 @@ export function WorkSessionsWorkspace({
     if (!matchingPending && !objective.trim()) return;
     const staged = matchingPending ?? snapshotPrivateDraftOperation(
       { objective: objective.trim(), action },
-      `work-session-${action}:${globalThis.crypto.randomUUID()}`,
+      newExecutiveInteractionId(),
     );
     if (!matchingPending) setObjective("");
     const operation = beginPrivateDraftAttempt(staged);
     setPendingObjective(operation);
-    const succeeded = await run(() => action === "plan"
-      ? localNexusClient.planWorkSession(operation.payload.objective, operation.idempotencyKey)
-      : localNexusClient.startWorkSession(operation.payload.objective, operation.idempotencyKey));
+    const succeeded = await run(async () => {
+      if (action === "start") {
+        return localNexusClient.startWorkSession(operation.payload.objective, operation.idempotencyKey);
+      }
+      const admission = await admitExecutiveInteraction(
+        `Plan a bounded Work Session with this objective: ${operation.payload.objective}`,
+        "text",
+        conversationId.current,
+        operation.idempotencyKey,
+      );
+      rememberPendingExecutiveApproval(admission);
+      setPlanOutcome(admission.spokenSummary);
+      return admission.interactionResult;
+    });
     setPendingObjective(succeeded
       ? clearPrivateDraftAfterSuccess()
       : retainPrivateDraftAfterFailure(operation));
@@ -189,7 +207,14 @@ export function WorkSessionsWorkspace({
       requiredScope,
     )
   );
-  const planAction = actionGate("POST", "/work-sessions/plan", "operations:write");
+  const planAction = hostedSessionActionAvailability(
+    canonicalActionAvailability(
+      capabilityRegistry,
+      PORTAL_CANONICAL_ACTIONS.copilotInteractionStart,
+    ),
+    { hosted, authenticated: session.authenticated, scopes: session.scopes },
+    "operations:read",
+  );
   const startAction = actionGate("POST", "/work-sessions/start", "operations:write");
   const stepAction = actionGate("POST", "/work-sessions/{session_id}/step", "operations:write");
   const continueAction = actionGate("POST", "/work-sessions/{session_id}/continue", "operations:write");
@@ -239,7 +264,7 @@ export function WorkSessionsWorkspace({
         <span>Objective</span>
         <textarea
           value={objective}
-          onChange={(event) => { setObjective(event.target.value); setPendingObjective(null); }}
+          onChange={(event) => { setObjective(event.target.value); setPendingObjective(null); setPlanOutcome(""); }}
           placeholder="Describe one bounded objective."
           maxLength={4_000}
           disabled={busy}
@@ -255,6 +280,7 @@ export function WorkSessionsWorkspace({
         </button>
       </div>
       {unavailableActionReasons.length > 0 && <p className="boundary-note">{unavailableActionReasons.join(" ")}</p>}
+      {planOutcome && <p className="boundary-note" aria-live="polite">{planOutcome}</p>}
       {error && <p className="work-sessions-workspace__error" role="alert">{error}</p>}
     </DataPanel>
 

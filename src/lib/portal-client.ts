@@ -212,21 +212,9 @@ export function asCapabilityRegistryProjection(value: unknown): CapabilityRegist
 
 export const PORTAL_CANONICAL_ACTIONS = Object.freeze({
   copilotInteractionStart: Object.freeze({
-    actionId: "context.runtime.route.post.runtime.interactions",
+    actionId: "canonical.route.post.executive.interactions",
     method: "POST",
-    pathTemplate: "/runtime/interactions",
-    surface: "assistant",
-  }),
-  hifInteractionEvents: Object.freeze({
-    actionId: "context.runtime.route.get.runtime.interactions.events",
-    method: "GET",
-    pathTemplate: "/runtime/interactions/{interaction_id}/events",
-    surface: "assistant",
-  }),
-  hifInteractionInterrupt: Object.freeze({
-    actionId: "context.runtime.route.post.runtime.interactions.interrupt",
-    method: "POST",
-    pathTemplate: "/runtime/interactions/{interaction_id}/interrupt",
+    pathTemplate: "/executive/interactions",
     surface: "assistant",
   }),
   realtimeVoiceCall: Object.freeze({
@@ -236,9 +224,9 @@ export const PORTAL_CANONICAL_ACTIONS = Object.freeze({
     surface: "voice",
   }),
   voiceOperatorTranscript: Object.freeze({
-    actionId: "canonical.route.post.voice-operator.route-transcript",
+    actionId: "canonical.route.post.executive.interactions",
     method: "POST",
-    pathTemplate: "/voice-operator/route-transcript",
+    pathTemplate: "/executive/interactions",
     surface: "voice",
   }),
 });

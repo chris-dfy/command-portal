@@ -9,7 +9,7 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 const lifecycle = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 
-test("an HIF draft stays visible until known acceptance and remains editable after failure", () => {
+test("a canonical interaction draft stays visible until known acceptance and remains editable after failure", () => {
   const inFlight = lifecycle.beginAcceptanceBoundDraft("  assess the registered context  ");
   assert.equal(inFlight.visibleDraft, "assess the registered context");
 
