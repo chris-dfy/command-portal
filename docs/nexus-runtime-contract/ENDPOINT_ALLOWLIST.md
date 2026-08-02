@@ -30,10 +30,9 @@ Local routes are disabled unless `COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED=true
 | --- | --- | --- |
 | `/api/local/status` | GET | `/health` |
 | `/api/local/executive-interactions` | POST | `/executive/interactions` |
+| `/api/local/approvals/{interaction_id}/approve` | POST | `/approvals/{interaction_id}/approve` |
+| `/api/local/approvals/{interaction_id}/deny` | POST | `/approvals/{interaction_id}/deny` |
 | `/api/local/intake/history` | GET | `/intake/history?limit=30` |
-| `/api/local/intake/upload` | POST | `/intake/upload` |
-| `/api/local/intake/query` | POST | `/intake/query` |
-| `/api/local/projects` | POST | `/projects` |
 | `/api/local/projects/artifact-types` | GET | `/projects/artifact-types` |
 | `/api/local/projects/{id}/sources` | GET | `/projects/{id}/sources` |
 | `/api/local/projects/{id}/evidence` | GET | `/projects/{id}/evidence` |
@@ -41,10 +40,13 @@ Local routes are disabled unless `COMMAND_PORTAL_LOCAL_CAPABILITIES_ENABLED=true
 | `/api/local/projects/{id}/estimate` | GET | `/projects/{id}/estimate` |
 | `/api/local/projects/{id}/planning-model` | GET | `/projects/{id}/planning-model` |
 | `/api/local/projects/{id}/artifacts` | GET | `/projects/{id}/artifacts` |
-| `/api/local/projects/{id}/compile` | POST | `/projects/{id}/compile` |
 | `/api/local/voice/status` | GET | `/voice/status` |
 | `/api/local/voice-operator/status` | GET | `/voice-operator/status` |
 | `/api/local/voice-operator/history` | GET | `/voice-operator/history?limit=8` |
 | `/api/local/voice-operator/receipts` | GET | `/voice-operator/receipts?limit=8` |
 
-Typed NEXUS Command input, finalized voice transcripts, Mission and Work Session planning intent, Executive Briefing prompts, and Conclave review prompts use only `/api/local/executive-interactions` locally or `/api/operations/executive-interactions` when hosted. The former `/api/runtime/executive-briefing`, `/api/runtime/conclave/reviews`, `/api/runtime/interactions`, `/api/local/interactions`, `/api/local/voice-operator/route-transcript`, executive-intent, generic action, `/api/local/missions/plan`, `/api/operations/missions/plan`, `/api/local/work-sessions/plan`, `/api/operations/work-sessions/plan`, and Mission 4 mutation routes are explicit `410` tombstones. Dynamic project IDs must match the Gateway's safe identifier grammar. Queries, unknown methods, unknown routes, unsafe filenames, and unregistered artifact types are rejected before Runtime contact.
+Typed NEXUS Command input, finalized voice transcripts, and every browser-originated domain action use only `/api/local/executive-interactions` locally or `/api/operations/executive-interactions` when hosted. The Runtime coordinator alone classifies the interaction and decides whether it is conversational, requires an exact approval, or may proceed as bounded execution. Approval `approve` and `deny` routes are exact decision-record exceptions; an approval does not create an alternate execution ingress.
+
+Every other POST below `/api/local/*` or `/api/operations/*`, including Document, Project, Mission, Work Session, Conclave, Knowledge, and Runtime Admission mutations, is an explicit `410 canonical_interaction_required` tombstone. The tombstone runs before authentication, request parsing, capability lookup, or upstream resolution and therefore never contacts Runtime. Realtime SDP negotiation at `/api/runtime/realtime/call` remains transport-only, and operational-session, registered-session, and provider-identity endpoints remain identity lifecycle only. None may classify or execute user intent.
+
+Browser-selected attachment bytes currently remain browser-local because the canonical interaction envelope has no governed attachment transport. The browser may submit a bounded description of the requested intake; it must not claim that file ingestion completed unless Runtime returns proof, a receipt, and verified postconditions through the canonical interaction result. Dynamic read identifiers must match the Gateway's safe identifier grammar. Queries, unknown methods, unknown routes, and unsafe identifiers are rejected before Runtime contact.

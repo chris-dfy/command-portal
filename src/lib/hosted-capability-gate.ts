@@ -70,6 +70,48 @@ function actionMatches(
     && action.pathTemplate === requirement.pathTemplate;
 }
 
+function canonicalInteractionAvailability(
+  projection: CapabilityRegistryProjection | null,
+): { available: boolean; reason: string } {
+  if (!projection) {
+    return {
+      available: false,
+      reason: "The Runtime-owned Capability Registry projection is being verified.",
+    };
+  }
+  const matches = projection.actions.filter(
+    (action) => action.actionId === "canonical.route.post.executive.interactions",
+  );
+  if (matches.length !== 1) {
+    return {
+      available: false,
+      reason: "The canonical interaction action is missing or ambiguous.",
+    };
+  }
+  const action = matches[0];
+  const exact = action.method === "POST"
+    && action.pathTemplate === "/executive/interactions"
+    && action.invocationSurfaces?.includes("assistant") === true
+    && action.invocationPaths.includes(
+      "assistant:canonical-adapter:canonical.route.post.executive.interactions",
+    );
+  const available = exact
+    && action.invocable === true
+    && action.operationalAvailability === true
+    && action.authorityGranted === false
+    && live(action.classification);
+  return {
+    available,
+    reason: available
+      ? "User intent will enter the live canonical Runtime interaction coordinator; Authority remains separate."
+      : [
+        exact ? "" : "The canonical interaction action does not match the fixed browser admission contract.",
+        action.requiredNextAction,
+        ...action.limitations,
+      ].filter(Boolean).join(" ") || "The canonical interaction action is unavailable.",
+  };
+}
+
 export function canonicalHostedActionAvailability(
   projection: CapabilityRegistryProjection | null,
   requirement: HostedActionRequirement,
@@ -111,7 +153,9 @@ export function canonicalHostedControlAvailability(
   access: HostedSessionAccess,
   requiredScope?: string,
 ): { available: boolean; reason: string } {
-  const action = canonicalHostedActionAvailability(projection, requirement);
+  const action = requirement.method === "GET"
+    ? canonicalHostedActionAvailability(projection, requirement)
+    : canonicalInteractionAvailability(projection);
   if (!action.available || !access.hosted) return action;
   if (!access.authenticated) {
     return {
@@ -119,10 +163,11 @@ export function canonicalHostedControlAvailability(
       reason: "The hosted operational session is not authenticated.",
     };
   }
-  if (requiredScope && !access.scopes?.includes(requiredScope)) {
+  const admittedScope = requirement.method === "GET" ? requiredScope : "operations:read";
+  if (admittedScope && !access.scopes?.includes(admittedScope)) {
     return {
       available: false,
-      reason: `The hosted session lacks ${requiredScope}.`,
+      reason: `The hosted session lacks ${admittedScope}.`,
     };
   }
   return action;

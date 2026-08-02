@@ -8,7 +8,6 @@ import {
   type OperationalSession,
 } from "../lib/local-client";
 import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
-import { successfulDocumentUploadMessage } from "../lib/document-intake-result";
 import type { CapabilityRegistryProjection } from "../lib/types";
 import {
   beginPrivateDraftAttempt,
@@ -17,6 +16,7 @@ import {
   snapshotPrivateDraftOperation,
   type PrivateDraftOperation,
 } from "../lib/private-draft-operation";
+import { admitCanonicalActionIntent } from "../lib/canonical-action-intent";
 
 type IntakeQueryPayload = { question: string; projectId?: string };
 
@@ -92,25 +92,12 @@ export function DocumentIntake({
     }
     setBusy(true); setMessage(null);
     try {
-      for (let index = 0; index < files.length; index += 1) {
-        const file = files[index];
-        setMessage(`Ingesting ${index + 1} of ${files.length}: ${file.name}`);
-        await localNexusClient.intakeUpload(file.name, await fileAsBase64(file), projectId.trim() || undefined);
-      }
-      if (!historyAction.available) {
-        setMessage(successfulDocumentUploadMessage(files.length, historyAction));
-      } else {
-        try {
-          await refresh();
-          setMessage(successfulDocumentUploadMessage(files.length, historyAction));
-        } catch (error) {
-          setMessage(successfulDocumentUploadMessage(
-            files.length,
-            historyAction,
-            messageFrom(error),
-          ));
-        }
-      }
+      const selected = files.map((file) => ({ name: file.name, size: file.size, type: file.type || "unknown" }));
+      const admission = await admitCanonicalActionIntent(
+        `Ingest these operator-selected documents${projectId.trim() ? ` into NEXUS Project ${JSON.stringify(projectId.trim())}` : " into the current workspace"}: ${JSON.stringify(selected)}. The browser has retained the selected file bytes locally; request the governed canonical attachment transport if their content is required.`,
+      );
+      setMessage(admission.spokenSummary);
+      if (admission.status === "executed" && historyAction.available) await refresh();
     } catch (error) { setMessage(messageFrom(error)); }
     finally { setBusy(false); if (input.current) input.current.value = ""; }
   }
@@ -133,13 +120,12 @@ export function DocumentIntake({
     setPendingQuery(operation);
     setBusy(true); setAnswer(null);
     try {
-      const result = await localNexusClient.intakeQuery(
-        operation.payload.question,
-        operation.payload.projectId,
+      const admission = await admitCanonicalActionIntent(
+        `Answer this question using only ingested source Evidence${operation.payload.projectId ? ` for NEXUS Project ${JSON.stringify(operation.payload.projectId)}` : " in the current workspace"}: ${operation.payload.question}`,
         operation.idempotencyKey,
       );
       setPendingQuery(clearPrivateDraftAfterSuccess());
-      setAnswer(result.answer);
+      setAnswer(admission.spokenSummary);
     }
     catch (error) {
       setPendingQuery(retainPrivateDraftAfterFailure(operation));
@@ -181,15 +167,6 @@ export function DocumentIntake({
       <p className="boundary-note"><ShieldAlert size={14} /> Workspace-scoped source of truth · The portal forwards only operator-selected files · Retention and provider use remain Runtime policy</p>
     </DataPanel>
   </div>;
-}
-
-function fileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("Unable to read the selected file"));
-    reader.onload = () => resolve(String(reader.result ?? "").split(",", 2)[1] ?? "");
-    reader.readAsDataURL(file);
-  });
 }
 
 const messageFrom = (error: unknown) => error instanceof Error ? error.message : String(error);

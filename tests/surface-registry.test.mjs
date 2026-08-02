@@ -269,14 +269,13 @@ test("Mission planning enters canonical interaction admission while step executi
     readFile(workSessionsPath, "utf8"),
     registry(),
   ]);
-  const execute = client.match(/executeMissionStep:[\s\S]*?conclaveWorkspaces:/)?.[0] ?? "";
   assert.doesNotMatch(client, /planMission:|"\/missions\/plan"/);
-  assert.match(execute, /\/execute-step/);
-  assert.doesNotMatch(execute, /Promise\.reject|Hosted Mission execution is unavailable/);
+  assert.doesNotMatch(client, /executeMissionStep|\/execute-step/);
   assert.match(dashboard, /admitExecutiveInteraction\(/);
   assert.match(dashboard, /PORTAL_CANONICAL_ACTIONS\.copilotInteractionStart/);
   assert.doesNotMatch(dashboard, /localNexusClient\.planMission|"\/missions\/plan"/);
-  assert.match(dashboard, /localNexusClient\.executeMissionStep/);
+  assert.match(dashboard, /admitCanonicalActionIntent/);
+  assert.doesNotMatch(dashboard, /localNexusClient\.executeMissionStep/);
   assert.match(dashboard, /hostedMissionScope/);
   assert.match(dashboard, /operations:write/);
   assert.match(dashboard, /=== "mission_executor"/);
@@ -302,7 +301,7 @@ test("Mission planning enters canonical interaction admission while step executi
   assert.equal(missionControl.capabilityIds.includes("conclave"), false);
   assert.doesNotMatch(missionControl.clients.web.reason, /Conclave/);
   assert.match(workSessions, /object\(resultRecord\.receipt\)/);
-  assert.match(workSessions, /admitExecutiveInteraction[\s\S]*Plan a bounded Work Session/);
+  assert.match(workSessions, /admitCanonicalActionIntent[\s\S]*bounded Work Session/);
   assert.doesNotMatch(workSessions, /planWorkSession|"\/work-sessions\/plan"/);
   assert.match(workSessions, /No receipt is recorded for/);
   assert.match(workSessions, /setReceipt\(null\)/);

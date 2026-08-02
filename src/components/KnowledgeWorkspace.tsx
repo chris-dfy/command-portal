@@ -13,7 +13,9 @@ import {
 import {
   localNexusClient,
   operationalSessionClient,
+  type KnowledgeIntakeRequest,
   type OperationalSession,
+  type RuntimeBaselineRequest,
 } from "../lib/local-client";
 import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
 import {
@@ -27,9 +29,10 @@ import type { CapabilityRegistryProjection, RuntimeSnapshot } from "../lib/types
 import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { StatusPill } from "./StatusPill";
+import { admitCanonicalActionIntent, canonicalExecutionResult } from "../lib/canonical-action-intent";
 
 type RuntimeRecord = Record<string, unknown>;
-type PendingKnowledgeIntake = PrivateDraftOperation<Parameters<typeof localNexusClient.knowledgeIntake>[0]>;
+type PendingKnowledgeIntake = PrivateDraftOperation<KnowledgeIntakeRequest>;
 type SourceState = "loading" | "available" | "empty" | "unavailable";
 type KnowledgeSources = {
   readiness: RuntimeRecord | null;
@@ -152,7 +155,7 @@ export function KnowledgeWorkspace({
   const [intakeSource, setIntakeSource] = useState<"model_native" | "platform_knowledge" | "tenant_knowledge" | "retrieved_evidence" | "live_external_source" | "runtime_evidence">("runtime_evidence");
   const [completeIntakeTask, setCompleteIntakeTask] = useState(false);
   const [expectedDeployedCommit, setExpectedDeployedCommit] = useState("");
-  const [pendingBaseline, setPendingBaseline] = useState<PrivateDraftOperation<Parameters<typeof localNexusClient.establishRuntimeBaseline>[0]> | null>(null);
+  const [pendingBaseline, setPendingBaseline] = useState<PrivateDraftOperation<RuntimeBaselineRequest> | null>(null);
   const [pendingIntake, setPendingIntake] = useState<PendingKnowledgeIntake | null>(null);
   const [busy, setBusy] = useState<"" | "intake" | "baseline" | "candidate" | "promotion">("");
   const [errors, setErrors] = useState<string[]>([]);
@@ -390,8 +393,11 @@ export function KnowledgeWorkspace({
     setPendingIntake(operation);
     setBusy("intake"); setErrors([]); setOperationResult(null);
     try {
-      const result = await localNexusClient.knowledgeIntake(operation.payload, operation.idempotencyKey);
-      setOperationResult(result);
+      const admission = await admitCanonicalActionIntent(
+        `Admit this factual Evidence to the governed Mission task: ${JSON.stringify(operation.payload)}.`,
+        operation.idempotencyKey,
+      );
+      setOperationResult(canonicalExecutionResult(admission));
       setPendingIntake(clearPrivateDraftAfterSuccess());
       await refresh();
     } catch (caught) {
@@ -413,9 +419,12 @@ export function KnowledgeWorkspace({
     setPendingBaseline(operation);
     setBusy("baseline"); setErrors([]); setOperationResult(null);
     try {
-      const result = await localNexusClient.establishRuntimeBaseline(operation.payload, operation.idempotencyKey);
+      const admission = await admitCanonicalActionIntent(
+        `Establish a governed Runtime baseline with these constraints: ${JSON.stringify(operation.payload)}.`,
+        operation.idempotencyKey,
+      );
       setPendingBaseline(clearPrivateDraftAfterSuccess());
-      setOperationResult(result);
+      setOperationResult(canonicalExecutionResult(admission));
       await refresh();
     } catch (caught) {
       setPendingBaseline(retainPrivateDraftAfterFailure(operation));
@@ -431,12 +440,10 @@ export function KnowledgeWorkspace({
     const expectedMissionVersion = selectedAcquisitionRecord.version ?? selectedAcquisitionRecord.missionVersion ?? selectedAcquisitionRecord.mission_version;
     setBusy("candidate"); setErrors([]); setOperationResult(null);
     try {
-      const result = await localNexusClient.createKnowledgePromotionCandidate(
-        missionId,
-        typeof expectedMissionVersion === "string" || typeof expectedMissionVersion === "number" ? expectedMissionVersion : undefined,
-        `promotion-candidate-${globalThis.crypto.randomUUID()}`,
+      const admission = await admitCanonicalActionIntent(
+        `Create a governed Knowledge Promotion candidate from Mission ${JSON.stringify(missionId)}${typeof expectedMissionVersion === "string" || typeof expectedMissionVersion === "number" ? ` at expected Mission version ${JSON.stringify(expectedMissionVersion)}` : ""}.`,
       );
-      setOperationResult(result);
+      setOperationResult(canonicalExecutionResult(admission));
       await refresh();
     } catch (caught) {
       setErrors([caught instanceof Error ? caught.message : "Promotion candidate creation failed safely."]);
@@ -450,8 +457,10 @@ export function KnowledgeWorkspace({
     if (!candidateId) return;
     setBusy("promotion"); setErrors([]); setOperationResult(null);
     try {
-      const result = await localNexusClient.promoteKnowledge({ candidateId }, `knowledge-promotion-${globalThis.crypto.randomUUID()}`);
-      setOperationResult(result);
+      const admission = await admitCanonicalActionIntent(
+        `Promote governed Knowledge candidate ${JSON.stringify(candidateId)} into the versioned Knowledge Store.`,
+      );
+      setOperationResult(canonicalExecutionResult(admission));
       await refresh();
     } catch (caught) {
       setErrors([caught instanceof Error ? caught.message : "Knowledge Promotion failed safely."]);

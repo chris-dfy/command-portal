@@ -165,14 +165,27 @@ export const RETIRED_INTERACTION_ROUTE_BASES = Object.freeze([
   "/api/operations/work-sessions/plan",
 ]);
 
-function retiredInteractionRoute(pathname, method = "GET") {
+const CANONICAL_BROWSER_MUTATION_ROUTES = Object.freeze([
+  /^\/api\/(?:local|operations)\/executive-interactions$/,
+  /^\/api\/(?:local|operations)\/approvals\/[A-Za-z0-9_.:-]{1,160}\/(?:approve|deny)$/,
+]);
+
+export function canonicalBrowserMutationRoute(pathname, method = "POST") {
+  return method === "POST"
+    && CANONICAL_BROWSER_MUTATION_ROUTES.some((pattern) => pattern.test(pathname));
+}
+
+export function retiredInteractionRoute(pathname, method = "GET") {
   if (RETIRED_INTERACTION_ROUTE_BASES.some(
     (base) => pathname === base || pathname.startsWith(`${base}/`),
   )) return true;
-  return method === "POST" && (
-    pathname === "/api/canonical-execution/missions"
-    || /^\/api\/canonical-execution\/missions\/[^/]+\/actions$/.test(pathname)
-  );
+  if (method !== "POST") return false;
+  if (
+    (pathname.startsWith("/api/local/") || pathname.startsWith("/api/operations/"))
+    && !canonicalBrowserMutationRoute(pathname, method)
+  ) return true;
+  return pathname === "/api/canonical-execution/missions"
+    || /^\/api\/canonical-execution\/missions\/[^/]+\/actions$/.test(pathname);
 }
 
 export const LOCAL_CAPABILITY_ROUTES = Object.freeze({

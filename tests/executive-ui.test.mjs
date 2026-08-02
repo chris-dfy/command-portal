@@ -174,8 +174,10 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
     assert.equal(registry.surfaces.some((surface) => surface.label === label), true);
   }
   assert.match(app, /<DocumentIntake capabilityRegistry=\{capabilityRegistry\} session=\{operationalSession\}/);
-  for (const contract of ["/executive-interactions", "/intake/upload", "/intake/query", "/projects", "/scope", "/estimate", "/planning-model", "/compile"]) assert.match(client, new RegExp(contract));
-  assert.match(intake, /FileReader/);
+  for (const contract of ["/executive-interactions", "/scope", "/estimate", "/planning-model"]) assert.match(client, new RegExp(contract));
+  for (const retired of ["intakeUpload", "intakeQuery", "projectCreate", "projectCompile"]) assert.doesNotMatch(client, new RegExp(retired));
+  assert.doesNotMatch(intake, /FileReader|readAsDataURL/);
+  assert.match(intake, /admitCanonicalActionIntent/);
   assert.match(intake, /canonicalHostedControlAvailability/);
   assert.match(intake, /pathTemplate: "\/intake\/history"/);
   assert.match(intake, /pathTemplate: "\/intake\/upload"/);
@@ -183,9 +185,7 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(intake, /"operations:read"/);
   assert.doesNotMatch(intake, /pathTemplate: "\/intake\/query"[\s\S]{0,180}"operations:write"/);
   assert.match(intake, /"evidence:write"/);
-  assert.match(intake, /successfulDocumentUploadMessage/);
-  assert.match(documentResult, /Source inventory remains degraded/);
-  assert.match(documentResult, /Source inventory refresh is degraded/);
+  assert.match(intake, /browser has retained the selected file bytes locally/);
   assert.match(intake, /projectId/);
   assert.match(intake, /Ask ingested sources/);
   assert.match(projects, /browser performs no project calculation/i);
@@ -290,15 +290,12 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.equal(registry.surfaces.find((surface) => surface.id === "conclave")?.label, "Conclave");
   assert.match(app, /<ConclaveWorkspace onReplay=\{openReplay\} readiness=\{operationalReadiness\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\}/);
   for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
-  assert.match(client, /localNexusClient\.createConclaveWorkspace/);
-  assert.match(client, /localNexusClient\.runConclaveWorkspace/);
-  assert.match(client, /localNexusClient\.conclaveWorkspace/);
-  assert.match(client, /isVerifiedCanonicalReview/);
+  assert.doesNotMatch(client, /localNexusClient\.(?:createConclaveWorkspace|runConclaveWorkspace)/);
   assert.match(directory, /lifecyclePosture === "canonical_operational"/);
   assert.match(directory, /reviewIntegrityVerified === true/);
   assert.match(directory, /terminalReceiptVerified === true/);
   assert.match(directory, /completionReceipt[\s\S]*runReceipt/);
-  assert.match(client, /runPending: true/);
+  assert.match(client, /createdConclaveRunIdentity/);
   assert.match(client, /expectedWorkspaceVersion/);
   assert.doesNotMatch(client, /\/api\/runtime\/conclave\/reviews|runConclaveReview/);
   assert.match(conclave, /localNexusClient\.conclaveWorkspaces\(\)/);
@@ -313,14 +310,15 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(conclave, /Run governed review/);
   assert.match(conclave, /Creation does not dispatch a run/);
   assert.match(conclave, /createAllowed: creationAllowed, runAllowed/);
-  assert.match(conclave, /createConclaveInvestigation/);
+  assert.match(conclave, /admitCanonicalActionIntent/);
   assert.match(conclave, /workspaceDisplayStatus\(workspace\)/);
   assert.match(conclave, /workspace\.lifecyclePosture === "legacy_read_only"/);
   assert.doesNotMatch(conclave, /displayStatus\s*\?\?\s*(?:workspace\??\.)?status/);
   assert.match(conclave, /const predecessor: ConclavePredecessor/);
   assert.match(conclave, /workspaceVersion:\s*workspace\.workspaceVersion/);
   assert.match(conclave, /Unblock an evidence-waiting task/);
-  assert.match(conclave, /localNexusClient\.admitConclaveEvidence/);
+  assert.doesNotMatch(conclave, /localNexusClient\.admitConclaveEvidence/);
+  assert.match(conclave, /Admit this Evidence to Conclave Review/);
   assert.match(conclave, /evidence:write/);
   assert.match(conclave, /canonicalHostedControlAvailability/);
   assert.match(conclave, /pathTemplate: "\/conclave\/workspaces"/);
@@ -343,8 +341,7 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
       new RegExp(`evidenceSourceClassifications[\\s\\S]{0,240}"${producerOwned}"`),
     );
   }
-  assert.match(localClient, /admitConclaveEvidence/);
-  assert.match(localClient, /\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/evidence/);
+  assert.doesNotMatch(localClient, /admitConclaveEvidence|createConclaveWorkspace|runConclaveWorkspace/);
   assert.match(conclave, /useState\(""\)/);
   assert.match(conclave, /placeholder=\{suggestedProposal\}/);
   assert.doesNotMatch(client, /gateway\.data\.data/);
@@ -660,17 +657,17 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(client, /runtimeNodes: \(\) => request<RuntimeNodeFleet>\("\/runtime-coordination\/nodes"\)/);
   for (const path of [
     "/runtime-coordination/admissions",
-    "/cancel",
-    "/challenge/reissue",
     "/receipt",
     "/replay",
   ]) assert.match(client, new RegExp(path.replaceAll("/", "\\/")));
-  assert.match(client, /createRuntimeAdmission/);
+  assert.doesNotMatch(client, /createRuntimeAdmission|cancelRuntimeAdmission|reissueRuntimeAdmissionChallenge/);
   assert.match(client, /runtimeAdmissionReceipt/);
   assert.match(client, /runtimeAdmissionReplay/);
   assert.match(knowledge, /Mission Store/);
   assert.match(knowledge, /Knowledge Store/);
-  for (const operation of ["knowledgeIntake", "knowledgeAcquisition", "knowledgePromotionCandidate", "knowledgeVersions", "knowledgeReceipt", "knowledgePromotions"]) assert.match(client, new RegExp(operation));
+  for (const operation of ["knowledgeAcquisition", "knowledgePromotionCandidate", "knowledgeVersions", "knowledgeReceipt", "knowledgePromotions"]) assert.match(client, new RegExp(operation));
+  assert.doesNotMatch(client, /knowledgeIntake|createKnowledgePromotionCandidate|promoteKnowledge/);
+  assert.match(knowledge, /admitCanonicalActionIntent/);
   assert.match(knowledge, /policyEligible/);
   for (const gate of ["intakeGate", "baselineGate", "candidateGate", "promotionGate"]) assert.match(knowledge, new RegExp(gate));
   assert.match(knowledge, /Mission completion never writes to Knowledge Store automatically/);

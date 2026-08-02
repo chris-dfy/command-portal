@@ -19,6 +19,7 @@ import { localNexusClient, newExecutiveInteractionId, operationalSessionClient, 
 import { canonicalHostedControlAvailability, hostedSessionActionAvailability } from "../lib/hosted-capability-gate";
 import { canonicalActionAvailability, PORTAL_CANONICAL_ACTIONS } from "../lib/portal-client";
 import { admitExecutiveInteraction, rememberPendingExecutiveApproval } from "../lib/runtime-voice-admission";
+import { admitCanonicalActionIntent } from "../lib/canonical-action-intent";
 import type { CapabilityRegistryProjection } from "../lib/types";
 import { NexusButton, NexusMetric } from "../design-system/NexusPrimitives";
 import { nexusModuleById } from "../platform/surfaceRegistry";
@@ -256,7 +257,10 @@ export function MissionDashboard({
     setBusy(true);
     setError("");
     try {
-      await localNexusClient.executeMissionStep(id, stepId);
+      const admission = await admitCanonicalActionIntent(
+        `Execute step ${JSON.stringify(stepId)} of governed Mission ${JSON.stringify(id)}.`,
+      );
+      setPlanOutcome(admission.spokenSummary);
       await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Mission step was blocked or unavailable.");

@@ -2,11 +2,7 @@ import {
   createSerializedRefresh,
   runBoundedTask,
 } from "./request-coordination.mjs";
-import type {
-  ConclaveEvidenceAdmissionRequest,
-  ConclavePredecessor,
-  ConclaveWorkspaceCreateRequest,
-} from "./conclave-request-identity";
+import type { ConclavePredecessor } from "./conclave-request-identity";
 
 const CLIENT_READ_TIMEOUT_MS = 10_000;
 
@@ -1105,55 +1101,19 @@ export const localNexusClient = Object.freeze({
   capabilityReadiness: () => request<Record<string, unknown>>("/capabilities/readiness"),
   clientCapabilities: () => request<ClientCapabilityContract>("/client-capabilities"),
   intakeHistory: () => request<IntakeHistory>("/intake/history"),
-  intakeUpload: (filename: string, contentBase64: string, projectId?: string) => post<Record<string, unknown>>("/intake/upload", { filename, contentBase64, ...(projectId ? { projectId } : {}) }),
-  intakeQuery: (question: string, projectId?: string, idempotencyKey?: string) => post<{ status: string; answer: string; citations?: Array<Record<string, unknown>> }>("/intake/query", { question, ...(projectId ? { projectId } : {}) }, idempotencyKey),
-  projectCreate: (name: string, idempotencyKey?: string) => post<{ projectId: string; name: string }>("/projects", { name }, idempotencyKey),
   artifactTypes: () => request<{ artifacts: ArtifactDefinition[] }>("/projects/artifact-types"),
   projectScope: (projectId: string) => request<ProjectScope>(`/projects/${encodeURIComponent(projectId)}/scope`),
   projectEstimate: (projectId: string) => request<ProjectEstimate>(`/projects/${encodeURIComponent(projectId)}/estimate`),
   projectPlanningModel: (projectId: string) => request<PlanningModel>(`/projects/${encodeURIComponent(projectId)}/planning-model`),
-  projectCompile: (projectId: string, artifactType: string, options: Record<string, unknown>, idempotencyKey?: string) => post<CompiledArtifact>(`/projects/${encodeURIComponent(projectId)}/compile`, { artifactType, options }, idempotencyKey),
   voiceStatus: () => request<Record<string, unknown>>("/voice-operator/status"),
   voiceHistory: () => request<{ events?: Array<Record<string, unknown>> }>("/voice-operator/history"),
   missions: () => request<Record<string, unknown>>("/missions"),
   mission: (missionId: string) => request<Record<string, unknown>>(
     `/missions/${encodeURIComponent(missionId)}`,
   ),
-  executeMissionStep: (missionId: string, stepId: string) => post<Record<string, unknown>>(
-    `/missions/${encodeURIComponent(missionId)}/execute-step`,
-    { stepId },
-    `mission-step:${globalThis.crypto.randomUUID()}`,
-  ),
   conclaveWorkspaces: () => request<ConclaveWorkspaceList>("/conclave/workspaces"),
-  createConclaveWorkspace: (
-    payload: ConclaveWorkspaceCreateRequest,
-    idempotencyKey: string,
-  ) => post<ConclaveWorkspaceRecord, ConclaveWorkspaceCreateRequest>(
-    "/conclave/workspaces",
-    payload,
-    idempotencyKey,
-  ),
   conclaveWorkspace: (missionId: string) => request<ConclaveWorkspaceRecord>(
     `/conclave/workspaces/${encodeURIComponent(missionId)}`,
-  ),
-  runConclaveWorkspace: (
-    missionId: string,
-    expectedWorkspaceVersion: string,
-    idempotencyKey: string,
-  ) => post<ConclaveWorkspaceRecord>(
-    `/conclave/workspaces/${encodeURIComponent(missionId)}/run`,
-    { expectedWorkspaceVersion },
-    idempotencyKey,
-  ),
-  admitConclaveEvidence: (
-    missionId: string,
-    taskId: string,
-    payload: ConclaveEvidenceAdmissionRequest,
-    idempotencyKey: string,
-  ) => post<ConclaveWorkspaceRecord, ConclaveEvidenceAdmissionRequest>(
-    `/conclave/workspaces/${encodeURIComponent(missionId)}/tasks/${encodeURIComponent(taskId)}/evidence`,
-    payload,
-    idempotencyKey,
   ),
   governanceReadiness: () => request<Record<string, unknown>>(
     "/governance/readiness",
@@ -1182,24 +1142,7 @@ export const localNexusClient = Object.freeze({
     `/operational-replay/receipts/${encodeURIComponent(receiptId)}`,
   ),
   workSessions: () => request<Record<string, unknown>>("/work-sessions"),
-  startWorkSession: (
-    objective: string,
-    idempotencyKey = `work-session-start-${globalThis.crypto.randomUUID()}`,
-  ) => post<Record<string, unknown>>(
-    "/work-sessions/start",
-    { objective },
-    idempotencyKey,
-  ),
   workSession: (sessionId: string) => request<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}`),
-  controlWorkSession: (
-    sessionId: string,
-    action: "step" | "continue" | "pause" | "cancel",
-    idempotencyKey = `work-session-${action}-${globalThis.crypto.randomUUID()}`,
-  ) => post<Record<string, unknown>>(
-    `/work-sessions/${encodeURIComponent(sessionId)}/${action}`,
-    {},
-    idempotencyKey,
-  ),
   workSessionReceipt: (sessionId: string) => request<Record<string, unknown>>(`/work-sessions/${encodeURIComponent(sessionId)}/receipt`),
   approvals: () => request<Record<string, unknown>>("/approvals"),
   approve: (approvalId: string) => post<ExecutiveInteractionApprovalResponse>(
@@ -1214,33 +1157,8 @@ export const localNexusClient = Object.freeze({
   ),
   runtimeNodes: () => request<RuntimeNodeFleet>("/runtime-coordination/nodes"),
   runtimeAdmissions: () => request<RuntimeAdmissionList>("/runtime-coordination/admissions"),
-  createRuntimeAdmission: (intent: RuntimeAdmissionIntentRequest, idempotencyKey: string) => post<RuntimeAdmissionResponse>(
-    "/runtime-coordination/admissions",
-    intent,
-    idempotencyKey,
-  ),
   runtimeAdmission: (admissionRequestId: string) => request<RuntimeAdmissionResponse>(
     `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}`,
-  ),
-  cancelRuntimeAdmission: (
-    admissionRequestId: string,
-    expectedVersion: number,
-    reason: string,
-    idempotencyKey: string,
-  ) => post<RuntimeAdmissionResponse>(
-    `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}/cancel`,
-    { expectedVersion, reason },
-    idempotencyKey,
-  ),
-  reissueRuntimeAdmissionChallenge: (
-    admissionRequestId: string,
-    expectedVersion: number,
-    reason: string,
-    idempotencyKey: string,
-  ) => post<RuntimeAdmissionResponse>(
-    `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}/challenge/reissue`,
-    { expectedVersion, reason },
-    idempotencyKey,
   ),
   runtimeAdmissionReceipt: (admissionRequestId: string) => request<Record<string, unknown>>(
     `/runtime-coordination/admissions/${encodeURIComponent(admissionRequestId)}/receipt`,
@@ -1260,11 +1178,6 @@ export const localNexusClient = Object.freeze({
   missionStoreRecord: (missionId: string) => request<Record<string, unknown>>(
     `/mission-store/${encodeURIComponent(missionId)}`,
   ),
-  knowledgeIntake: (payload: KnowledgeIntakeRequest, idempotencyKey: string) => post<Record<string, unknown>, KnowledgeIntakeRequest>(
-    "/knowledge/intake",
-    payload,
-    idempotencyKey,
-  ),
   knowledgeAcquisitions: () => request<Record<string, unknown>>("/knowledge/acquisitions"),
   knowledgeAcquisition: (missionId: string) => request<Record<string, unknown>>(
     `/knowledge/acquisitions/${encodeURIComponent(missionId)}`,
@@ -1272,15 +1185,6 @@ export const localNexusClient = Object.freeze({
   knowledgePromotionCandidates: () => request<Record<string, unknown>>("/knowledge/promotion-candidates"),
   knowledgePromotionCandidate: (candidateId: string) => request<Record<string, unknown>>(
     `/knowledge/promotion-candidates/${encodeURIComponent(candidateId)}`,
-  ),
-  createKnowledgePromotionCandidate: (
-    missionId: string,
-    expectedMissionVersion: string | number | undefined,
-    idempotencyKey: string,
-  ) => post<Record<string, unknown>>(
-    `/knowledge/acquisitions/${encodeURIComponent(missionId)}/promotion-candidates`,
-    expectedMissionVersion === undefined ? {} : { expectedMissionVersion },
-    idempotencyKey,
   ),
   knowledgeStore: () => request<Record<string, unknown>>("/knowledge/store"),
   knowledgeRecord: (recordId: string) => request<Record<string, unknown>>(
@@ -1294,14 +1198,4 @@ export const localNexusClient = Object.freeze({
     `/knowledge/receipts/${encodeURIComponent(receiptId)}`,
   ),
   knowledgePromotions: () => request<Record<string, unknown>>("/knowledge/promotions"),
-  establishRuntimeBaseline: (payload: RuntimeBaselineRequest, idempotencyKey: string) => post<Record<string, unknown>>(
-    "/runtime/baselines",
-    payload,
-    idempotencyKey,
-  ),
-  promoteKnowledge: (payload: KnowledgePromotionRequest, idempotencyKey: string) => post<Record<string, unknown>>(
-    "/knowledge/promotions",
-    payload,
-    idempotencyKey,
-  ),
 });

@@ -32,13 +32,26 @@ const action = ({
   inputSchemaId: "schema",
   method,
   pathTemplate,
-  invocationPaths: [],
+  invocationSurfaces: actionId === "canonical.route.post.executive.interactions" ? ["assistant"] : ["api"],
+  invocationPaths: actionId === "canonical.route.post.executive.interactions"
+    ? ["assistant:canonical-adapter:canonical.route.post.executive.interactions"]
+    : [],
   classification,
   invocable,
+  operationalAvailability: invocable,
   authorizationRequirement: "per_action",
   authorityGranted: false,
   limitations: invocable ? [] : [`${actionId} remains unavailable.`],
   requiredNextAction: invocable ? "" : `Verify ${actionId}.`,
+});
+
+const canonicalInteraction = () => action({
+  actionId: "canonical.route.post.executive.interactions",
+  capabilityId: "operational.engagement",
+  method: "POST",
+  pathTemplate: "/executive/interactions",
+  invocable: true,
+  classification: "live_verified",
 });
 
 function projection(actions) {
@@ -49,7 +62,7 @@ function projection(actions) {
       limitations: [],
       requiredNextAction: "",
     }],
-    actions,
+    actions: [canonicalInteraction(), ...actions],
   };
 }
 
@@ -185,7 +198,7 @@ test("canonical interaction admission stays available when execute-step is unava
   ).available, false);
 });
 
-test("an exact live action still requires its exact hosted session scope", () => {
+test("all user action controls require canonical interaction admission scope", () => {
   const workSessionProjection = projection([
     action({
       actionId: "work-sessions.start",
@@ -207,12 +220,12 @@ test("an exact live action still requires its exact hosted session scope", () =>
     {
       hosted: true,
       authenticated: true,
-      scopes: ["operations:read"],
+      scopes: ["operations:write"],
     },
     "operations:write",
   );
   assert.equal(denied.available, false);
-  assert.match(denied.reason, /lacks operations:write/);
+  assert.match(denied.reason, /lacks operations:read/);
 
   const admitted = gate.canonicalHostedControlAvailability(
     workSessionProjection,
@@ -220,14 +233,14 @@ test("an exact live action still requires its exact hosted session scope", () =>
     {
       hosted: true,
       authenticated: true,
-      scopes: ["operations:read", "operations:write"],
+      scopes: ["operations:read"],
     },
     "operations:write",
   );
   assert.equal(admitted.available, true);
 });
 
-test("Conclave create, run, and Evidence controls retain independent action and scope truth", () => {
+test("Conclave action controls share one canonical admission gate", () => {
   const conclaveProjection = {
     capabilities: [
       {
@@ -244,6 +257,7 @@ test("Conclave create, run, and Evidence controls retain independent action and 
       },
     ],
     actions: [
+      canonicalInteraction(),
       action({
         actionId: "conclave.create",
         capabilityId: "conclave",
@@ -306,8 +320,7 @@ test("Conclave create, run, and Evidence controls retain independent action and 
     "evidence:write",
   );
   assert.equal(create.available, true);
-  assert.equal(run.available, false);
-  assert.match(run.reason, /run/);
+  assert.equal(run.available, true);
   assert.equal(evidence.available, true);
   assert.equal(gate.canonicalHostedControlAvailability(
     conclaveProjection,
@@ -316,12 +329,12 @@ test("Conclave create, run, and Evidence controls retain independent action and 
       method: "POST",
       pathTemplate: "/conclave/workspaces/{mission_id}/tasks/{task_id}/evidence",
     },
-    { ...access, scopes: ["operations:read", "operations:write"] },
+    { ...access, scopes: ["operations:write", "evidence:write"] },
     "evidence:write",
   ).available, false);
 });
 
-test("Document history, upload, and query controls cannot borrow sibling action or scope availability", () => {
+test("Document reads remain exact while upload and query intent share canonical admission", () => {
   const documentProjection = {
     capabilities: [{
       capabilityId: "knowledge.document_intake",
@@ -330,6 +343,7 @@ test("Document history, upload, and query controls cannot borrow sibling action 
       requiredNextAction: "Verify document upload.",
     }],
     actions: [
+      canonicalInteraction(),
       action({
         actionId: "intake.history",
         capabilityId: "knowledge.document_intake",
@@ -388,7 +402,7 @@ test("Document history, upload, and query controls cannot borrow sibling action 
     },
     readOnlyAccess,
     "evidence:write",
-  ).available, false);
+  ).available, true);
   const queryAllowed = gate.canonicalHostedControlAvailability(
     documentProjection,
     {
@@ -426,10 +440,11 @@ test("Document history, upload, and query controls cannot borrow sibling action 
   ).state, "unavailable");
 });
 
-test("Project, Knowledge, and Edge mutations retain exact sibling action truth", () => {
+test("Project, Knowledge, and Edge action intent shares the canonical coordinator", () => {
   const exactProjection = {
     capabilities: [],
     actions: [
+      canonicalInteraction(),
       action({
         actionId: "projects.create",
         capabilityId: "projects.nexicron_planning",
@@ -499,7 +514,7 @@ test("Project, Knowledge, and Edge mutations retain exact sibling action truth",
   const operationsWrite = {
     hosted: true,
     authenticated: true,
-    scopes: ["operations:write", "edge:node_admission:request"],
+    scopes: ["operations:read", "operations:write", "edge:node_admission:request"],
   };
   const available = (capabilityId, pathTemplate, scope = "operations:write") => (
     gate.canonicalHostedControlAvailability(
@@ -514,7 +529,7 @@ test("Project, Knowledge, and Edge mutations retain exact sibling action truth",
   assert.equal(available(
     "projects.nexicron_planning",
     "/projects/{project_id}/compile",
-  ).available, false);
+  ).available, true);
   assert.equal(available("knowledge_acquisition", "/runtime/baselines").available, true);
   assert.equal(available(
     "knowledge_promotion",
@@ -524,7 +539,7 @@ test("Project, Knowledge, and Edge mutations retain exact sibling action truth",
     "knowledge_promotion",
     "/knowledge/promotions",
     "knowledge:promote",
-  ).available, false);
+  ).available, true);
   assert.equal(available(
     "edge_node_admission",
     "/runtime-coordination/admissions",
@@ -539,7 +554,7 @@ test("Project, Knowledge, and Edge mutations retain exact sibling action truth",
     "edge_node_admission",
     "/runtime-coordination/admissions/{admission_id}/challenge/reissue",
     "edge:node_admission:review",
-  ).available, false);
+  ).available, true);
 });
 
 test("global canonical interaction and voice actions require the hosted operations write scope independently", () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pause, Play, ReceiptText, Route, StepForward, XCircle } from "lucide-react";
 import {
   localNexusClient,
@@ -8,7 +8,7 @@ import {
 } from "../lib/local-client";
 import { canonicalHostedControlAvailability, hostedSessionActionAvailability } from "../lib/hosted-capability-gate";
 import { canonicalActionAvailability, PORTAL_CANONICAL_ACTIONS } from "../lib/portal-client";
-import { admitExecutiveInteraction, rememberPendingExecutiveApproval } from "../lib/runtime-voice-admission";
+import { admitCanonicalActionIntent } from "../lib/canonical-action-intent";
 import type { CapabilityRegistryProjection } from "../lib/types";
 import { nexusModuleById } from "../platform/surfaceRegistry";
 import {
@@ -84,7 +84,6 @@ export function WorkSessionsWorkspace({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [planOutcome, setPlanOutcome] = useState("");
-  const conversationId = useRef(newExecutiveInteractionId());
 
   const refresh = useCallback(async () => {
     const response = await localNexusClient.workSessions();
@@ -155,22 +154,27 @@ export function WorkSessionsWorkspace({
     const operation = beginPrivateDraftAttempt(staged);
     setPendingObjective(operation);
     const succeeded = await run(async () => {
-      if (action === "start") {
-        return localNexusClient.startWorkSession(operation.payload.objective, operation.idempotencyKey);
-      }
-      const admission = await admitExecutiveInteraction(
-        `Plan a bounded Work Session with this objective: ${operation.payload.objective}`,
-        "text",
-        conversationId.current,
+      const admission = await admitCanonicalActionIntent(
+        `${action === "start" ? "Start" : "Plan"} a bounded Work Session with this objective: ${operation.payload.objective}`,
         operation.idempotencyKey,
       );
-      rememberPendingExecutiveApproval(admission);
       setPlanOutcome(admission.spokenSummary);
       return admission.interactionResult;
     });
     setPendingObjective(succeeded
       ? clearPrivateDraftAfterSuccess()
       : retainPrivateDraftAfterFailure(operation));
+  }
+
+  async function controlSession(action: "step" | "continue" | "pause" | "cancel") {
+    if (!selected) return;
+    await run(async () => {
+      const admission = await admitCanonicalActionIntent(
+        `${action} governed Work Session ${JSON.stringify(selected.sessionId)}.`,
+      );
+      setPlanOutcome(admission.spokenSummary);
+      return admission.interactionResult;
+    });
   }
 
   async function showReceipt() {
@@ -299,16 +303,16 @@ export function WorkSessionsWorkspace({
         {selected.honestNarration && <p>{selected.honestNarration}</p>}
         <OperationalResultLineage proofId={resultProofId} receiptId={resultReceiptId} onOpenReplay={onReplay} empty="This Work Session has not returned proof, receipt, or Replay lineage." />
         <div className="work-sessions-workspace__actions">
-          <button type="button" disabled={!canStep} title={stepAvailable ? undefined : stepAction.available ? stepModule?.clients.web.reason : stepAction.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "step"))}>
+          <button type="button" disabled={!canStep} title={stepAvailable ? undefined : stepAction.available ? stepModule?.clients.web.reason : stepAction.reason} onClick={() => void controlSession("step")}>
             <StepForward size={15} aria-hidden="true" /> step
           </button>
-          <button type="button" disabled={!canContinue} title={continueAvailable ? undefined : continueAction.available ? continueModule?.clients.web.reason : continueAction.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "continue"))}>
+          <button type="button" disabled={!canContinue} title={continueAvailable ? undefined : continueAction.available ? continueModule?.clients.web.reason : continueAction.reason} onClick={() => void controlSession("continue")}>
             <StepForward size={15} aria-hidden="true" /> continue
           </button>
-          <button type="button" disabled={!canPause} title={pauseAvailable ? undefined : pauseAction.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "pause"))}>
+          <button type="button" disabled={!canPause} title={pauseAvailable ? undefined : pauseAction.reason} onClick={() => void controlSession("pause")}>
             <Pause size={15} aria-hidden="true" /> pause
           </button>
-          <button type="button" disabled={!canCancel} title={cancelAvailable ? undefined : cancelAction.reason} onClick={() => void run(() => localNexusClient.controlWorkSession(selected.sessionId, "cancel"))}>
+          <button type="button" disabled={!canCancel} title={cancelAvailable ? undefined : cancelAction.reason} onClick={() => void controlSession("cancel")}>
             <XCircle size={15} aria-hidden="true" /> cancel
           </button>
           <button type="button" disabled={busy || !receiptAvailable} title={receiptAvailable ? undefined : receiptAction.reason} onClick={() => void showReceipt()}>
