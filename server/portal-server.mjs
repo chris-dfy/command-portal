@@ -529,7 +529,9 @@ export function createTenantContextAssertion(config, claims, clientId, clock = (
     exp: issuedAt + 60,
     jti: randomUUID(),
     trustBindingId: TRUST_BINDING_ID,
-    authorityGranted: true,
+    // This assertion authenticates and scopes a named human; only the
+    // canonical Runtime Authority evaluation may grant execution Authority.
+    authorityGranted: false,
     humanOperatorVerified: true,
   } : {
     v: 2,

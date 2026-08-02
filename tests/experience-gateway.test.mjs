@@ -1779,7 +1779,7 @@ test("Experience Gateway signs authoritative Runtime tenant context without expo
   assert.equal(assertion.humanOperatorVerified, true);
   assert.equal(assertion.clientId, "nexus-web");
   assert.equal(assertion.trustBindingId, "runtime-experience-trust-bootstrap");
-  assert.equal(assertion.authorityGranted, true);
+  assert.equal(assertion.authorityGranted, false);
   assert.equal(assertion.exp - assertion.iat, 60);
   assert.equal(signature, createHmac("sha256", secret).update(encodedPayload).digest("base64url"));
   const forwarded = JSON.parse(observed.options.body);
