@@ -38,7 +38,35 @@ const STATUSES = new Set<ExecutiveInteractionStatus>([
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STABLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,199}$/;
+const TERMINAL_INTERACTION_LOOKUP_STATES = new Set(["approval_required", "completed", "blocked", "failed"]);
 const PENDING_INTERACTION_STORAGE_KEY = "nexus-command:pending-executive-interaction:v1";
+const PENDING_RECONCILIATION_STORAGE_KEY = "nexus-command:pending-executive-interaction-reconciliation:v1";
+
+export class CanonicalInteractionIndeterminateError extends Error {
+  readonly interactionId: string;
+  readonly retryProhibited = true;
+
+  constructor(interactionId: string, detail: string) {
+    super(
+      `Interaction ${interactionId} has an indeterminate Runtime outcome. ${detail} `
+      + "Do not retry it with a new interaction identifier; reconcile this exact interaction first.",
+    );
+    this.name = "CanonicalInteractionIndeterminateError";
+    this.interactionId = interactionId;
+  }
+}
+
+export function isCanonicalInteractionIndeterminateError(
+  value: unknown,
+): value is CanonicalInteractionIndeterminateError {
+  return value instanceof CanonicalInteractionIndeterminateError
+    || Boolean(
+      value
+      && typeof value === "object"
+      && (value as { retryProhibited?: unknown }).retryProhibited === true
+      && UUID_PATTERN.test(String((value as { interactionId?: unknown }).interactionId ?? "")),
+    );
+}
 
 const boundedSummary = (value: unknown): string => {
   const summary = typeof value === "string" ? value.trim() : "";
@@ -54,6 +82,16 @@ const boundedIds = (values: unknown[]): string[] => [...new Set(values.filter(
 
 const approvalIdFrom = (result: ExecutiveInteractionResult): string | null => {
   const value = result.authority_decision?.approval_id;
+  return typeof value === "string" && STABLE_ID_PATTERN.test(value) ? value : null;
+};
+
+const durableReceiptIdFrom = (result: ExecutiveInteractionResult): string | null => {
+  const value = result.receipt_id;
+  return typeof value === "string" && STABLE_ID_PATTERN.test(value) ? value : null;
+};
+
+const underlyingExecutionReceiptIdFrom = (result: ExecutiveInteractionResult): string | null => {
+  const value = result.execution?.underlying_execution_receipt_id;
   return typeof value === "string" && STABLE_ID_PATTERN.test(value) ? value : null;
 };
 
@@ -91,6 +129,26 @@ function pendingInteractionPointer(): string | null {
   if (UUID_PATTERN.test(value)) return value;
   if (value) globalThis.sessionStorage.removeItem(PENDING_INTERACTION_STORAGE_KEY);
   return null;
+}
+
+export function pendingExecutiveInteractionReconciliationId(): string | null {
+  if (typeof globalThis.sessionStorage === "undefined") return null;
+  const value = globalThis.sessionStorage.getItem(PENDING_RECONCILIATION_STORAGE_KEY)?.trim() ?? "";
+  if (UUID_PATTERN.test(value)) return value;
+  if (value) globalThis.sessionStorage.removeItem(PENDING_RECONCILIATION_STORAGE_KEY);
+  return null;
+}
+
+function rememberPendingInteractionReconciliation(interactionId: string): void {
+  if (typeof globalThis.sessionStorage === "undefined") return;
+  globalThis.sessionStorage.setItem(PENDING_RECONCILIATION_STORAGE_KEY, interactionId);
+}
+
+function clearPendingInteractionReconciliation(interactionId: string): void {
+  if (typeof globalThis.sessionStorage === "undefined") return;
+  if (pendingExecutiveInteractionReconciliationId() === interactionId) {
+    globalThis.sessionStorage.removeItem(PENDING_RECONCILIATION_STORAGE_KEY);
+  }
 }
 
 export function rememberPendingExecutiveApproval(admission: RuntimeInteractionAdmission): void {
@@ -155,6 +213,201 @@ function requestFromRuntimeEnvelope(value: unknown, expectedInteractionId: strin
       conversation_id: conversationId,
     },
   };
+}
+
+function sameInteractionRequest(
+  expected: ExecutiveInteractionRequest,
+  retained: ExecutiveInteractionRequest,
+): boolean {
+  return expected.interaction_id === retained.interaction_id
+    && expected.session_id === retained.session_id
+    && expected.input.modality === retained.input.modality
+    && expected.input.text === retained.input.text
+    && expected.input.source_client === retained.input.source_client
+    && JSON.stringify(expected.context) === JSON.stringify(retained.context);
+}
+
+function ambiguousInteractionFailure(error: unknown): boolean {
+  const status = Number((error as { status?: unknown } | null)?.status);
+  return !Number.isFinite(status)
+    || (status >= 200 && status < 300)
+    || status === 408
+    || status === 409
+    || status === 429
+    || status >= 500;
+}
+
+async function lookupUncertainInteraction(
+  request: ExecutiveInteractionRequest,
+): Promise<RuntimeInteractionAdmission | null> {
+  let lookup;
+  try {
+    lookup = await localNexusClient.executiveInteractionLookup(request.interaction_id);
+  } catch {
+    rememberPendingInteractionReconciliation(request.interaction_id);
+    throw new CanonicalInteractionIndeterminateError(
+      request.interaction_id,
+      "The canonical interaction lookup was unavailable after submission.",
+    );
+  }
+  if (lookup.interaction_id !== request.interaction_id) {
+    rememberPendingInteractionReconciliation(request.interaction_id);
+    throw new CanonicalInteractionIndeterminateError(
+      request.interaction_id,
+      "Runtime lookup returned a different interaction binding.",
+    );
+  }
+  if (!lookup.found) return null;
+
+  if (!lookup.original_envelope) {
+    rememberPendingInteractionReconciliation(request.interaction_id);
+    throw new CanonicalInteractionIndeterminateError(
+      request.interaction_id,
+      "Runtime retained no original interaction envelope for identity reconciliation.",
+    );
+  }
+  let retainedRequest;
+  try {
+    retainedRequest = requestFromRuntimeEnvelope(lookup.original_envelope, request.interaction_id);
+  } catch {
+    rememberPendingInteractionReconciliation(request.interaction_id);
+    throw new CanonicalInteractionIndeterminateError(
+      request.interaction_id,
+      "Runtime retained a malformed original interaction envelope.",
+    );
+  }
+  if (!sameInteractionRequest(request, retainedRequest)) {
+    rememberPendingInteractionReconciliation(request.interaction_id);
+    throw new CanonicalInteractionIndeterminateError(
+      request.interaction_id,
+      "Runtime retained an interaction envelope that does not match the submitted request.",
+    );
+  }
+  if (!TERMINAL_INTERACTION_LOOKUP_STATES.has(String(lookup.state ?? "")) || !lookup.latest_response) {
+    rememberPendingInteractionReconciliation(request.interaction_id);
+    throw new CanonicalInteractionIndeterminateError(
+      request.interaction_id,
+      `Runtime retained the interaction in state ${lookup.state ?? "unknown"} without a terminal response.`,
+    );
+  }
+  try {
+    const admission = projectExecutiveInteraction(
+      lookup.latest_response,
+      retainedRequest,
+      request.interaction_id,
+    );
+    clearPendingInteractionReconciliation(request.interaction_id);
+    return admission;
+  } catch {
+    rememberPendingInteractionReconciliation(request.interaction_id);
+    throw new CanonicalInteractionIndeterminateError(
+      request.interaction_id,
+      "Runtime retained a response that did not satisfy the canonical semantic admission contract.",
+    );
+  }
+}
+
+async function reconcilePendingInteractionBeforeSubmission(
+  text: string,
+  modality: "text" | "voice",
+  sessionId: string,
+): Promise<RuntimeInteractionAdmission | null> {
+  const interactionId = pendingExecutiveInteractionReconciliationId();
+  if (!interactionId) return null;
+  let lookup;
+  try {
+    lookup = await localNexusClient.executiveInteractionLookup(interactionId);
+  } catch {
+    throw new CanonicalInteractionIndeterminateError(
+      interactionId,
+      "A previous canonical interaction is still awaiting Runtime reconciliation.",
+    );
+  }
+  if (!lookup.found || lookup.interaction_id !== interactionId || !lookup.original_envelope) {
+    throw new CanonicalInteractionIndeterminateError(
+      interactionId,
+      "A previous canonical interaction cannot yet be reconciled, so a new request is blocked.",
+    );
+  }
+  let retainedRequest;
+  try {
+    retainedRequest = requestFromRuntimeEnvelope(lookup.original_envelope, interactionId);
+  } catch {
+    throw new CanonicalInteractionIndeterminateError(
+      interactionId,
+      "A previous canonical interaction retained no valid original envelope.",
+    );
+  }
+  if (
+    retainedRequest.session_id !== sessionId
+    || retainedRequest.input.modality !== modality
+    || retainedRequest.input.text !== text
+  ) {
+    throw new CanonicalInteractionIndeterminateError(
+      interactionId,
+      "A previous canonical interaction blocks submission of a different request.",
+    );
+  }
+  if (!TERMINAL_INTERACTION_LOOKUP_STATES.has(String(lookup.state ?? "")) || !lookup.latest_response) {
+    throw new CanonicalInteractionIndeterminateError(
+      interactionId,
+      `Runtime still reports state ${lookup.state ?? "unknown"} without a terminal response.`,
+    );
+  }
+  try {
+    const admission = projectExecutiveInteraction(
+      lookup.latest_response,
+      retainedRequest,
+      interactionId,
+    );
+    clearPendingInteractionReconciliation(interactionId);
+    return admission;
+  } catch {
+    throw new CanonicalInteractionIndeterminateError(
+      interactionId,
+      "The retained Runtime response still fails canonical semantic admission.",
+    );
+  }
+}
+
+async function submitExecutiveInteractionWithReconciliation(
+  request: ExecutiveInteractionRequest,
+  approvalId?: string,
+): Promise<RuntimeInteractionAdmission> {
+  const submit = () => localNexusClient.executiveInteraction(request, approvalId);
+  let result: ExecutiveInteractionResult;
+  try {
+    result = await submit();
+  } catch (error) {
+    if (!ambiguousInteractionFailure(error)) throw error;
+    const recovered = await lookupUncertainInteraction(request);
+    if (recovered) return recovered;
+    try {
+      result = await submit();
+    } catch (retryError) {
+      if (!ambiguousInteractionFailure(retryError)) throw retryError;
+      const retryRecovered = await lookupUncertainInteraction(request);
+      if (retryRecovered) return retryRecovered;
+      rememberPendingInteractionReconciliation(request.interaction_id);
+      throw new CanonicalInteractionIndeterminateError(
+        request.interaction_id,
+        "Two same-key submissions had no response and Runtime has not retained a terminal result.",
+      );
+    }
+  }
+  try {
+    const admission = projectExecutiveInteraction(result, request, request.interaction_id);
+    clearPendingInteractionReconciliation(request.interaction_id);
+    return admission;
+  } catch {
+    const recovered = await lookupUncertainInteraction(request);
+    if (recovered) return recovered;
+    rememberPendingInteractionReconciliation(request.interaction_id);
+    throw new CanonicalInteractionIndeterminateError(
+      request.interaction_id,
+      "The submitted Runtime response failed canonical semantic admission and no retained result was available.",
+    );
+  }
 }
 
 /**
@@ -238,18 +491,72 @@ export function projectExecutiveInteraction(
   if (new Set(["approval_required", "executed"]).has(result.status) && result.classification !== "action") {
     throw new Error("NEXUS Runtime returned an operational status for a non-action interaction.");
   }
-  if (result.status === "approval_required" && !approvalIdFrom(result)) {
-    throw new Error("NEXUS Runtime returned an approval gate without a durable approval identifier.");
+  if (result.classification === "blocked" && !new Set(["blocked", "failed"]).has(result.status)) {
+    throw new Error("NEXUS Runtime returned a blocked classification with a non-blocking status.");
+  }
+  if (result.status === "answered") {
+    const conversationalAnswer = new Set(["question", "clarification"]).has(result.classification)
+      && result.execution_scope == null;
+    const clientPresentationAnswer = admittedPresentation;
+    if (
+      !(conversationalAnswer || clientPresentationAnswer)
+      || result.authority_decision.decision !== "not_applicable"
+      || result.execution.attempted !== false
+      || result.execution.executed !== false
+      || result.execution.execution_scope != null
+      || result.verification.verified !== false
+    ) {
+      throw new Error("NEXUS Runtime returned an answer without matching non-execution and Authority semantics.");
+    }
+  }
+  if (result.status === "approval_required") {
+    if (
+      result.authority_decision.decision !== "approval_required"
+      || !approvalIdFrom(result)
+      || !durableReceiptIdFrom(result)
+      || result.execution.attempted !== false
+      || result.execution.executed !== false
+      || result.execution_scope != null
+      || result.execution.execution_scope != null
+      || result.verification.verified !== false
+    ) {
+      throw new Error("NEXUS Runtime returned an approval gate without matching Authority, non-execution state, and a durable receipt.");
+    }
   }
   if (result.status === "executed") {
     if (
       result.authority_decision.decision !== "allow"
-      || !result.receipt_id
-      || !STABLE_ID_PATTERN.test(result.receipt_id)
+      || result.execution_scope !== "runtime"
+      || result.execution.execution_scope !== "runtime"
+      || result.execution.attempted !== true
+      || result.execution.executed !== true
       || result.verification.verified !== true
-      || Object.keys(result.execution).length === 0
+      || !durableReceiptIdFrom(result)
+      || !underlyingExecutionReceiptIdFrom(result)
     ) {
-      throw new Error("NEXUS Runtime did not return allowed, verified execution with a durable receipt.");
+      throw new Error("NEXUS Runtime did not return allowed, attempted, executed, verified Runtime execution with durable receipts.");
+    }
+  }
+  const operationalBlockOrFailure = new Set(["action", "blocked"]).has(result.classification)
+    && new Set(["blocked", "failed"]).has(result.status);
+  if (operationalBlockOrFailure) {
+    const authorityDecision = result.authority_decision.decision;
+    const attempted = result.execution.attempted;
+    const runtimeAttempt = attempted === true
+      && result.execution_scope === "runtime"
+      && result.execution.execution_scope === "runtime";
+    const noAttempt = attempted === false
+      && result.execution_scope == null
+      && result.execution.execution_scope == null;
+    if (
+      !durableReceiptIdFrom(result)
+      || result.execution.executed !== false
+      || result.verification.verified !== false
+      || !(runtimeAttempt || noAttempt)
+      || (result.status === "blocked" && !new Set(["deny", "capability_unavailable"]).has(String(authorityDecision)))
+      || (result.status === "failed" && !new Set(["deny", "withhold"]).has(String(authorityDecision)))
+    ) {
+      throw new Error("NEXUS Runtime returned an operational block or failure without matching Authority, execution state, and a durable receipt.");
     }
   }
 
@@ -262,7 +569,7 @@ export function projectExecutiveInteraction(
     interactionResult: result,
     interactionRequest,
     proofIds: boundedIds(Array.isArray(result.proof_ids) ? result.proof_ids : []),
-    receiptIds: boundedIds([result.receipt_id]),
+    receiptIds: boundedIds([durableReceiptIdFrom(result)]),
     limitations: Array.isArray(result.limitations)
       ? result.limitations.filter((value): value is string => typeof value === "string").slice(0, 64)
       : [],
@@ -294,11 +601,9 @@ export async function admitApprovedExecutiveInteraction(
   if ((!decisionRecorded && !executionAlreadyConsumed) || response.interaction_id !== pendingAdmission.interactionResult.interaction_id) {
     throw new Error("NEXUS Runtime did not bind approval to the pending canonical interaction.");
   }
-  const result = await localNexusClient.executiveInteraction(pendingAdmission.interactionRequest, approvalId);
-  const admission = projectExecutiveInteraction(
-    result,
+  const admission = await submitExecutiveInteractionWithReconciliation(
     pendingAdmission.interactionRequest,
-    pendingAdmission.interactionResult.interaction_id,
+    approvalId,
   );
   if (admission.status === "approval_required") {
     throw new Error("NEXUS Runtime returned another unresolved approval gate instead of a completed continuation.");
@@ -323,8 +628,9 @@ export function validateExecutiveInteractionDenial(
 
 /**
  * The sole browser admission path for both text and finalized voice input.
- * Endpoint absence and Runtime failures are final; there is no HIF, Voice
- * Operator, model, or client-classification fallback.
+ * There is no HIF, Voice Operator, model, or client-classification fallback.
+ * Ambiguous submission outcomes reconcile only through the Runtime-retained
+ * interaction with the same UUID; an unresolved outcome blocks every new ID.
  */
 export async function admitExecutiveInteraction(
   text: string,
@@ -332,9 +638,10 @@ export async function admitExecutiveInteraction(
   sessionId: string,
   interactionId?: string,
 ): Promise<RuntimeInteractionAdmission> {
+  const reconciled = await reconcilePendingInteractionBeforeSubmission(text, modality, sessionId);
+  if (reconciled) return reconciled;
   const request = newExecutiveInteractionRequest(text, modality, sessionId, interactionId);
-  const result = await localNexusClient.executiveInteraction(request);
-  return projectExecutiveInteraction(result, request, request.interaction_id);
+  return submitExecutiveInteractionWithReconciliation(request);
 }
 
 export const admitRuntimeVoiceTranscript = (

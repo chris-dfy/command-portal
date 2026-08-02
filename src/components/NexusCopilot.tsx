@@ -257,8 +257,9 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       onRuntimeResponse: (responseText) => {
         if (!nexusMutedRef.current) speakBrowserResponse(responseText);
       },
-      onError: (message) => {
+      onError: (message, context) => {
         setError(message);
+        if (context?.retryProhibited) return;
         const captured = latestUserTranscript.current.trim();
         if (captured) {
           const staged = snapshotPrivateDraftOperation(

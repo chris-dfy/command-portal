@@ -15,6 +15,9 @@ export class RealtimeTurnAdmissionLedger<T> {
   private readonly completed = new Set<string>();
 
   beginTurn(): string {
+    if (this.activeKey !== null) {
+      throw new Error("Realtime voice cannot begin a new speech turn while the current turn is unresolved.");
+    }
     if (typeof globalThis.crypto?.randomUUID !== "function") {
       throw new Error("Realtime voice requires secure UUID generation for canonical interaction admission.");
     }

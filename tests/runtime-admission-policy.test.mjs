@@ -13,6 +13,10 @@ const policy = await import(`data:text/javascript;base64,${Buffer.from(javascrip
 test("duplicate Realtime completions share one turn key and one upstream admission", async () => {
   const ledger = new policy.RealtimeTurnAdmissionLedger();
   const turnKey = ledger.beginTurn();
+  assert.throws(
+    () => ledger.beginTurn(),
+    /cannot begin a new speech turn while the current turn is unresolved/,
+  );
   assert.match(turnKey, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   const observedKeys = [];
   let upstreamCalls = 0;
@@ -68,5 +72,6 @@ test("ambiguous Realtime failure retries with the same key and conflicting text 
     /conflicting transcripts/,
   );
   assert.equal(attempts, 2);
+  ledger.endTurn();
   assert.notEqual(ledger.beginTurn(), turnKey);
 });

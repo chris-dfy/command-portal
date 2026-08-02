@@ -16,6 +16,9 @@ import {
   loadConfig,
   LOCAL_CAPABILITY_ROUTES,
   publicTrustBootstrap,
+  REALTIME_INPUT_MODE,
+  REALTIME_INPUT_MODE_HEADER,
+  REALTIME_PROMPT_ECHO_HEADER,
   REPLAY_ROUTES,
   resolveCanonicalCapabilityActionAlias,
   resolveGatewayRuntimeActionAlias,
@@ -1981,6 +1984,61 @@ test("unavailable Realtime WebRTC never crosses the same-origin gateway", async 
   assert.equal(response.status, 503);
   assert.equal(body.error.code, "canonical_action_unavailable");
   assert.equal(calls, 0);
+});
+
+test("Realtime gateway requires and forwards the exact same-call manual-commit attestation", async () => {
+  const offer = "v=0\r\na=offer\r\n".repeat(12);
+  const promptSignature = "nexus governed runtime prompt signature boundary";
+  const projection = actionAdmissionProjection({
+    classifications: {
+      "context.runtime.route.post.runtime.voice.realtime.call": "live_verified",
+    },
+  });
+  for (const inputMode of [null, "client-audio-commit-v0", "CLIENT-AUDIO-COMMIT-V1"]) {
+    const runtimeFetch = withActionRegistry(async () => new Response("v=0\r\na=answer\r\n", {
+      status: 201,
+      headers: {
+        "Content-Type": "application/sdp",
+        [REALTIME_PROMPT_ECHO_HEADER]: promptSignature,
+        ...(inputMode ? { [REALTIME_INPUT_MODE_HEADER]: inputMode } : {}),
+      },
+    }), projection);
+    const base = await start(runtimeFetch);
+    await primeActionAdmission(base);
+    const response = await fetch(`${base}/api/runtime/realtime/call`, {
+      method: "POST",
+      headers: { "Content-Type": "application/sdp", Accept: "application/sdp" },
+      body: offer,
+    });
+    assert.equal(response.status, 502, String(inputMode));
+    assert.equal((await response.json()).error.code, "realtime_response_invalid");
+  }
+
+  let upstreamCall;
+  const runtimeFetch = withActionRegistry(async (url, options) => {
+    upstreamCall = { url, options };
+    return new Response("v=0\r\na=answer\r\n", {
+      status: 201,
+      headers: {
+        "Content-Type": "application/sdp",
+        [REALTIME_PROMPT_ECHO_HEADER]: promptSignature,
+        [REALTIME_INPUT_MODE_HEADER]: REALTIME_INPUT_MODE,
+      },
+    });
+  }, projection);
+  const base = await start(runtimeFetch);
+  await primeActionAdmission(base);
+  const response = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST",
+    headers: { "Content-Type": "application/sdp", Accept: "application/sdp" },
+    body: offer,
+  });
+  assert.equal(response.status, 201);
+  assert.equal(response.headers.get(REALTIME_PROMPT_ECHO_HEADER), promptSignature);
+  assert.equal(response.headers.get(REALTIME_INPUT_MODE_HEADER), REALTIME_INPUT_MODE);
+  assert.equal(await response.text(), "v=0\r\na=answer\r\n");
+  assert.equal(upstreamCall.url, "https://runtime.invalid/runtime/voice/realtime/call");
+  assert.equal(Buffer.from(upstreamCall.options.body).toString("utf8"), offer);
 });
 
 test("Realtime gateway rejects unavailable actions and unsafe methods before contacting Runtime", async () => {

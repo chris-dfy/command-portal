@@ -6,6 +6,9 @@ import {
   ClientSpeechTurnSegmenter,
   isVerifiedManualCommitStatus,
   RealtimeVoiceClient,
+  RUNTIME_REALTIME_INPUT_MODE,
+  RUNTIME_REALTIME_INPUT_MODE_HEADER,
+  runtimeRealtimeInputModeFromHeaders,
 } from "../src/lib/realtime-voice-client.ts";
 
 const clients = [];
@@ -16,17 +19,24 @@ function makeClient({ admit = async (text) => ({ admitted: true, spokenSummary: 
   const states = [];
   const errors = [];
   const transcripts = [];
+  const admissions = [];
   const narrated = [];
   const amplitudes = [];
+  const errorContexts = [];
   const client = new RealtimeVoiceClient({
     onState: (state) => states.push(state),
     onAmplitude: (amplitude) => amplitudes.push(amplitude),
     onUserTranscript: async (text, idempotencyKey) => {
       transcripts.push({ text, idempotencyKey });
-      return admit(text, idempotencyKey);
+      const admission = await admit(text, idempotencyKey);
+      admissions.push(admission);
+      return admission;
     },
     onRuntimeResponse: (text) => narrated.push(text),
-    onError: (message) => errors.push(message),
+    onError: (message, context) => {
+      errors.push(message);
+      errorContexts.push(context);
+    },
   });
   const sent = [];
   client.channel = {
@@ -36,6 +46,11 @@ function makeClient({ admit = async (text) => ({ admitted: true, spokenSummary: 
   };
   client.promptEchoSignature = "nexus governed runtime prompt signature boundary";
   client.transportReady = true;
+  const microphoneTrack = { enabled: true, stopped: false, stop() { this.stopped = true; } };
+  client.stream = {
+    getAudioTracks: () => [microphoneTrack],
+    getTracks: () => [microphoneTrack],
+  };
   const dispatch = (event) => client.handleEvent(JSON.stringify(event));
   const fixture = {
     client,
@@ -43,9 +58,12 @@ function makeClient({ admit = async (text) => ({ admitted: true, spokenSummary: 
     sent,
     states,
     errors,
+    errorContexts,
     transcripts,
+    admissions,
     narrated,
     amplitudes,
+    microphoneTrack,
     now: 0,
   };
   clients.push(client);
@@ -111,6 +129,137 @@ test("only the exact Runtime manual-commit status enables live voice", () => {
     { ...verified, inputAudioCommitEvent: "input_audio_buffer.speech_stopped" },
     { ...verified, inputAudioCommitEvent: undefined },
   ]) assert.equal(isVerifiedManualCommitStatus(status), false);
+});
+
+test("only the exact per-call Runtime input-mode attestation is accepted", () => {
+  assert.equal(
+    runtimeRealtimeInputModeFromHeaders(new Headers({
+      [RUNTIME_REALTIME_INPUT_MODE_HEADER]: RUNTIME_REALTIME_INPUT_MODE,
+    })),
+    RUNTIME_REALTIME_INPUT_MODE,
+  );
+  for (const value of [undefined, "", "client-audio-commit-v0", "CLIENT-AUDIO-COMMIT-V1", "client-audio-commit-v1 "]) {
+    const headers = { get: () => value ?? null };
+    assert.equal(runtimeRealtimeInputModeFromHeaders(headers), null);
+  }
+});
+
+test("the browser rejects missing or wrong per-call attestation before accepting remote SDP", async () => {
+  const keys = [
+    "window",
+    "navigator",
+    "RTCPeerConnection",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "fetch",
+  ];
+  const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const restore = () => {
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  };
+  const remoteDescriptions = [];
+  let callInputMode = null;
+  const track = { enabled: true, stop() {} };
+  const stream = { getAudioTracks: () => [track], getTracks: () => [track] };
+  class FakeAudioContext {
+    state = "running";
+    createAnalyser() {
+      return {
+        fftSize: 256,
+        smoothingTimeConstant: 0,
+        frequencyBinCount: 1,
+        getByteFrequencyData(values) { values[0] = 0; },
+      };
+    }
+    createMediaStreamSource() { return { connect() {} }; }
+    async resume() {}
+    async close() {}
+  }
+  class FakePeer {
+    connectionState = "connected";
+    addTransceiver() {}
+    createDataChannel() {
+      return { readyState: "connecting", addEventListener() {}, close() {} };
+    }
+    async createOffer() { return { type: "offer", sdp: "v=0\r\na=offer\r\n" }; }
+    async setLocalDescription() {}
+    async setRemoteDescription(description) { remoteDescriptions.push(description); }
+    close() {}
+  }
+  try {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        RTCPeerConnection: FakePeer,
+        AudioContext: FakeAudioContext,
+        dispatchEvent() {},
+      },
+    });
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { mediaDevices: { getUserMedia: async () => stream } },
+    });
+    Object.defineProperty(globalThis, "RTCPeerConnection", { configurable: true, value: FakePeer });
+    Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: () => 1 });
+    Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: async (url) => {
+        if (String(url).endsWith("/realtime-voice")) {
+          return new Response(JSON.stringify({
+            ok: true,
+            data: {
+              state: "available",
+              serverVAD: false,
+              clientAudioCommitRequired: true,
+              inputAudioCommitEvent: "input_audio_buffer.commit",
+            },
+          }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        return new Response("v=0\r\na=answer\r\n", {
+          status: 201,
+          headers: {
+            "Content-Type": "application/sdp",
+            "X-NEXUS-Prompt-Echo-Signature": "nexus governed runtime prompt signature boundary",
+            ...(callInputMode === null
+              ? {}
+              : { [RUNTIME_REALTIME_INPUT_MODE_HEADER]: callInputMode }),
+          },
+        });
+      },
+    });
+
+    for (const inputMode of [null, "client-audio-commit-v0"]) {
+      callInputMode = inputMode;
+      const client = new RealtimeVoiceClient({
+        onState() {}, onAmplitude() {}, onUserTranscript: async () => ({ admitted: false }),
+        onRuntimeResponse() {}, onError() {},
+      });
+      clients.push(client);
+      const before = remoteDescriptions.length;
+      await assert.rejects(
+        client.connect(),
+        /did not attest the exact manual Realtime audio-commit mode/,
+      );
+      assert.equal(remoteDescriptions.length, before, String(inputMode));
+    }
+
+    callInputMode = RUNTIME_REALTIME_INPUT_MODE;
+    const accepted = new RealtimeVoiceClient({
+      onState() {}, onAmplitude() {}, onUserTranscript: async () => ({ admitted: false }),
+      onRuntimeResponse() {}, onError() {},
+    });
+    clients.push(accepted);
+    await accepted.connect();
+    assert.equal(remoteDescriptions.length, 1);
+    assert.equal(remoteDescriptions[0].sdp, "v=0\r\na=answer\r\n");
+  } finally {
+    for (const client of clients.splice(0)) client.stop();
+    restore();
+  }
 });
 
 test("deterministic segmentation ignores silence and transient noise", () => {
@@ -188,94 +337,145 @@ test("each committed provider item is bound to one turn and each final transcrip
   assert.equal(fixture.sent.some((event) => event.type === "response.create"), false);
 });
 
-test("overlapping committed turns bind FIFO while only the current turn may narrate", async () => {
+test("a committed turn disables the microphone and rejects a second commit before provider binding", () => {
   const fixture = makeClient();
   beginDetectedSpeech(fixture);
   endDetectedSpeech(fixture);
+  assert.equal(fixture.microphoneTrack.enabled, false);
   beginDetectedSpeech(fixture);
   endDetectedSpeech(fixture);
-  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 2);
-
-  fixture.dispatch({ type: "input_audio_buffer.committed", item_id: "item_old" });
-  fixture.dispatch({ type: "input_audio_buffer.committed", item_id: "item_new" });
-  fixture.dispatch({
-    type: "conversation.item.input_audio_transcription.completed",
-    transcript: "superseded request",
-    item_id: "item_old",
-  });
-  fixture.dispatch({
-    type: "conversation.item.input_audio_transcription.completed",
-    transcript: "current request",
-    item_id: "item_new",
-  });
-  await fixture.client.admissionQueue;
-
-  assert.deepEqual(fixture.transcripts.map(({ text }) => text), ["current request"]);
-  assert.deepEqual(fixture.narrated, ["Runtime: current request"]);
-  assert.ok(fixture.sent.some((event) => event.type === "conversation.item.delete" && event.item_id === "item_old"));
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+  fixture.dispatch({ type: "input_audio_buffer.committed", item_id: "item_1" });
+  beginDetectedSpeech(fixture);
+  endDetectedSpeech(fixture);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
 });
 
-test("a superseded in-flight admission can never narrate after a newer speech turn wins", async () => {
+test("a Runtime POST cannot be superseded and its first verified result narrates exactly once", async () => {
   let releaseFirst;
   const firstAdmission = new Promise((resolve) => { releaseFirst = resolve; });
-  let calls = 0;
   const fixture = makeClient({
-    admit: async (text) => {
-      calls += 1;
-      if (calls === 1) return firstAdmission;
-      return { admitted: true, spokenSummary: `Runtime current: ${text}` };
-    },
+    admit: async () => firstAdmission,
   });
 
-  detectAndBindTurn(fixture, "item_old");
+  detectAndBindTurn(fixture, "item_1");
   fixture.dispatch({
     type: "conversation.item.input_audio_transcription.completed",
-    transcript: "old request",
-    item_id: "item_old",
+    transcript: "execute the governed request",
+    item_id: "item_1",
   });
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fixture.transcripts.length, 1);
 
-  detectAndBindTurn(fixture, "item_new");
-  releaseFirst({ admitted: true, spokenSummary: "stale Runtime result" });
+  beginDetectedSpeech(fixture);
+  endDetectedSpeech(fixture);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+  assert.equal(fixture.microphoneTrack.enabled, false);
+
+  releaseFirst({ admitted: true, spokenSummary: "Verified Runtime result" });
   await fixture.client.admissionQueue;
-
-  assert.deepEqual(fixture.narrated, []);
-  assert.ok(fixture.sent.some((event) => event.type === "conversation.item.delete" && event.item_id === "item_old"));
+  assert.deepEqual(fixture.narrated, ["Verified Runtime result"]);
+  assert.equal(fixture.admissions.length, 1);
+  assert.equal(fixture.microphoneTrack.enabled, true);
 
   fixture.dispatch({
     type: "conversation.item.input_audio_transcription.completed",
-    transcript: "new request",
-    item_id: "item_new",
+    transcript: "execute the governed request",
+    item_id: "item_1",
   });
   await fixture.client.admissionQueue;
-  assert.deepEqual(fixture.narrated, ["Runtime current: new request"]);
-  assert.deepEqual(fixture.transcripts.map(({ text }) => text), ["old request", "new request"]);
+  assert.deepEqual(fixture.narrated, ["Verified Runtime result"]);
+  assert.equal(fixture.transcripts.length, 1);
+});
+
+test("a later turn can begin only after the first Runtime disposition releases it", async () => {
+  const fixture = makeClient();
+  await admitTurn(fixture, "first request", "item_first");
+  assert.equal(fixture.microphoneTrack.enabled, true);
+
+  detectAndBindTurn(fixture, "item_next");
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "next request",
+    item_id: "item_next",
+  });
+  await fixture.client.admissionQueue;
+  assert.deepEqual(fixture.transcripts.map(({ text }) => text), ["first request", "next request"]);
+  assert.deepEqual(fixture.narrated, ["Runtime: first request", "Runtime: next request"]);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 2);
   assert.equal(fixture.sent.some((event) => event.type === "response.create"), false);
 });
 
-test("a delayed completion remains bound to its original provider item and cannot consume the new turn", async () => {
-  const fixture = makeClient();
-  detectAndBindTurn(fixture, "item_old");
-  detectAndBindTurn(fixture, "item_new");
+test("stopping transport cannot invalidate an already submitted canonical Runtime interaction", async () => {
+  let releaseAdmission;
+  const pendingAdmission = new Promise((resolve) => { releaseAdmission = resolve; });
+  const fixture = makeClient({ admit: async () => pendingAdmission });
+  detectAndBindTurn(fixture, "item_submitted");
   fixture.dispatch({
     type: "conversation.item.input_audio_transcription.completed",
-    transcript: "delayed old request",
-    item_id: "item_old",
+    transcript: "submitted request",
+    item_id: "item_submitted",
   });
-  await fixture.client.admissionQueue;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fixture.transcripts.length, 1);
+  fixture.client.stop();
 
-  assert.deepEqual(fixture.transcripts, []);
+  releaseAdmission({ admitted: true, spokenSummary: "Runtime result delivered to the UI callback" });
+  await fixture.client.admissionQueue;
+  assert.equal(fixture.admissions.length, 1);
+  assert.equal(fixture.admissions[0].spokenSummary, "Runtime result delivered to the UI callback");
   assert.deepEqual(fixture.narrated, []);
-  assert.ok(fixture.sent.some((event) => event.type === "conversation.item.delete" && event.item_id === "item_old"));
+  assert.equal(fixture.states.at(-1), "idle");
+});
 
+test("a provider failure during canonical admission prohibits a competing retry identity", async () => {
+  let releaseAdmission;
+  const pendingAdmission = new Promise((resolve) => { releaseAdmission = resolve; });
+  const fixture = makeClient({ admit: async () => pendingAdmission });
+  detectAndBindTurn(fixture, "item_provider_failure");
   fixture.dispatch({
     type: "conversation.item.input_audio_transcription.completed",
-    transcript: "current request",
-    item_id: "item_new",
+    transcript: "execute exactly once",
+    item_id: "item_provider_failure",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const interactionId = fixture.transcripts[0].idempotencyKey;
+
+  fixture.dispatch({ type: "error", error: { message: "provider transport lost" } });
+  assert.deepEqual(fixture.errorContexts.at(-1), {
+    interactionId,
+    retryProhibited: true,
+  });
+  assert.match(fixture.errors.at(-1), /remains in flight; do not retry it under a new identifier/);
+
+  releaseAdmission({ admitted: true, spokenSummary: "Original Runtime result" });
+  await fixture.client.admissionQueue;
+  assert.equal(fixture.admissions.length, 1);
+  assert.deepEqual(fixture.narrated, []);
+});
+
+test("an indeterminate canonical POST is surfaced as do-not-retry and cannot stage a competing turn", async () => {
+  const interactionId = "11111111-1111-4111-8111-111111111111";
+  const error = Object.assign(new Error(`Interaction ${interactionId} is indeterminate.`), {
+    interactionId,
+    retryProhibited: true,
+  });
+  const fixture = makeClient({ admit: async () => { throw error; } });
+  detectAndBindTurn(fixture, "item_indeterminate");
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "execute once",
+    item_id: "item_indeterminate",
   });
   await fixture.client.admissionQueue;
-  assert.deepEqual(fixture.transcripts.map(({ text }) => text), ["current request"]);
-  assert.deepEqual(fixture.narrated, ["Runtime: current request"]);
+  assert.equal(fixture.states.at(-1), "error");
+  assert.deepEqual(fixture.errorContexts.at(-1), {
+    interactionId,
+    retryProhibited: true,
+  });
+  beginDetectedSpeech(fixture);
+  endDetectedSpeech(fixture);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
 });
 
 test("mute discards a partial turn and unmute starts a clean turn", async () => {

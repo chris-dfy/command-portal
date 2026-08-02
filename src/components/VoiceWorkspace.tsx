@@ -217,8 +217,9 @@ export function VoiceWorkspace({
       onRuntimeResponse: (responseText) => {
         if (!nexusMutedRef.current) speakBrowserResponse(responseText);
       },
-      onError: (errorMessage) => {
+      onError: (errorMessage, context) => {
         setMessage(errorMessage);
+        if (context?.retryProhibited) return;
         const captured = latestUserTranscript.current.trim();
         if (captured) {
           const staged = snapshotPrivateDraftOperation(

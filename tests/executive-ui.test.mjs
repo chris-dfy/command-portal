@@ -200,7 +200,7 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /status\.clientAudioCommitRequired === true/);
   assert.match(realtime, /direction: "sendonly"/);
   assert.match(realtime, /setMicrophoneMuted/);
-  assert.match(realtime, /track\.enabled = !this\.microphoneMuted/);
+  assert.match(realtime, /track\.enabled = !this\.microphoneMuted && !this\.turnProcessing/);
   assert.match(realtime, /setOutputMuted/);
   assert.doesNotMatch(realtime, /HTMLAudioElement|document\.createElement\(["']audio/);
   assert.match(realtime, /attempted to attach output media to a transcription-only session/);
@@ -219,7 +219,8 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /forbidden output event/);
   assert.match(voice, /admitRuntimeVoiceTranscript\(/);
   assert.match(admission, /The sole browser admission path for both text and finalized voice input/);
-  assert.match(admission, /localNexusClient\.executiveInteraction\(request\)/);
+  assert.match(admission, /localNexusClient\.executiveInteraction\(request, approvalId\)/);
+  assert.match(admission, /lookupUncertainInteraction\(request\)/);
   assert.doesNotMatch(admission, /hifClient|routeTranscript|executiveIntentEndpointIsAbsent|voiceOperatorEndpointIsAbsent/);
   assert.match(voice, /setTranscript\(""\)/);
   assert.match(voice, /governed Runtime Voice Operator/);

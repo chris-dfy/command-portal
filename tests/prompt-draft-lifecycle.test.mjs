@@ -144,8 +144,8 @@ test("Voice keeps transcripts in history and never rehydrates the typed draft", 
   assert.match(source, /pendingRequest && <button[\s\S]*Send captured transcript through governed Voice/);
   assert.match(source, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(source, /shouldPresentPrivateDraft\([\s\S]*staged\.payload\.historyAlreadyRecorded/);
-  assert.match(source, /onError: \(errorMessage\) => \{[\s\S]*captured[\s\S]*snapshotPrivateDraftOperation/);
-  assert.doesNotMatch(source, /onError: \(errorMessage\) => \{[\s\S]{0,900}void routeGovernedTranscript/);
+  assert.match(source, /onError: \(errorMessage, context\) => \{[\s\S]*context\?\.retryProhibited[\s\S]*captured[\s\S]*snapshotPrivateDraftOperation/);
+  assert.doesNotMatch(source, /onError: \(errorMessage, context\) => \{[\s\S]{0,900}void routeGovernedTranscript/);
   assert.doesNotMatch(source, /value=\{pendingRequest[^}]*\}/);
   assert.match(source, /value=\{transcript\}[\s\S]*autoComplete="off"/);
 });
@@ -218,8 +218,8 @@ test("Copilot clears its visible draft only after canonical Runtime acceptance",
   assert.equal((source.match(/localStorage/g) ?? []).length, 2);
   assert.match(source, /introductionKey/);
   assert.match(source, /aria-label="Ask NEXUS" autoComplete="off"/);
-  assert.match(source, /onError: \(message\) => \{[\s\S]*captured[\s\S]*snapshotPrivateDraftOperation/);
-  assert.doesNotMatch(source, /onError: \(message\) => \{[\s\S]{0,800}void routeGovernedVoice/);
+  assert.match(source, /onError: \(message, context\) => \{[\s\S]*context\?\.retryProhibited[\s\S]*captured[\s\S]*snapshotPrivateDraftOperation/);
+  assert.doesNotMatch(source, /onError: \(message, context\) => \{[\s\S]{0,800}void routeGovernedVoice/);
   assert.match(source, /pendingVoiceRequest && <button[\s\S]*Send captured transcript through governed Voice/);
   assert.match(source, /explicitOperation\.idempotencyKey/);
   assert.match(source, /retainPrivateDraftAfterFailure\(operation\)/);

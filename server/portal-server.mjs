@@ -70,6 +70,8 @@ export const TRUST_BOOTSTRAP_CONTRACT = "nexus.runtime-experience-trust-bootstra
 export const CONTEXT_ASSERTION_CONTRACT = "nexus.context-assertion@2.0.0";
 export const CONTEXT_ASSERTION_ALGORITHM = "hmac-sha256";
 export const REALTIME_PROMPT_ECHO_HEADER = "X-NEXUS-Prompt-Echo-Signature";
+export const REALTIME_INPUT_MODE_HEADER = "X-NEXUS-Realtime-Input-Mode";
+export const REALTIME_INPUT_MODE = "client-audio-commit-v1";
 const CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime";
 const CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway";
 const CONTEXT_ASSERTION_KEY_ID = "context-assertion-command-portal-v1";
@@ -4479,6 +4481,15 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
         502,
       );
     }
+    const realtimeInputMode = upstream.headers.get(REALTIME_INPUT_MODE_HEADER) ?? "";
+    if (realtimeInputMode !== REALTIME_INPUT_MODE) {
+      throw new GatewayFailure(
+        "realtime_response_invalid",
+        "Runtime did not attest the exact manual Realtime audio-commit mode for this call.",
+        "Unknown",
+        502,
+      );
+    }
     structuredLog("experience_gateway_realtime_session", { route: url.pathname, status: upstream.status });
     response.writeHead(upstream.status, {
       "Content-Type": "application/sdp",
@@ -4486,6 +4497,7 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
       [REALTIME_PROMPT_ECHO_HEADER]: promptEchoSignature,
+      [REALTIME_INPUT_MODE_HEADER]: realtimeInputMode,
     });
     return response.end(answer);
   } catch (error) {

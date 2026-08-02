@@ -4,10 +4,17 @@ import { RealtimeTurnAdmissionLedger } from "./runtime-admission-policy.ts";
 export type RealtimeVoiceState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "interrupted" | "error";
 
 export const RUNTIME_PROMPT_ECHO_HEADER = "X-NEXUS-Prompt-Echo-Signature";
+export const RUNTIME_REALTIME_INPUT_MODE_HEADER = "X-NEXUS-Realtime-Input-Mode";
+export const RUNTIME_REALTIME_INPUT_MODE = "client-audio-commit-v1";
 
 export type RealtimeTranscriptAdmission =
   | { admitted: true; spokenSummary: string }
   | { admitted: false; reason?: string };
+
+export type RealtimeVoiceErrorContext = {
+  interactionId?: string;
+  retryProhibited?: boolean;
+};
 
 export type RealtimeManualCommitStatus = {
   state?: string;
@@ -30,7 +37,7 @@ export type RealtimeVoiceCallbacks = {
   onUserTranscript: (text: string, idempotencyKey: string) => Promise<RealtimeTranscriptAdmission>;
   /** Narrate only the Runtime-returned response after current-turn admission. */
   onRuntimeResponse: (responseText: string) => void;
-  onError: (message: string) => void;
+  onError: (message: string, context?: RealtimeVoiceErrorContext) => void;
 };
 
 type RealtimeEvent = {
@@ -180,13 +187,17 @@ const normalizeTranscript = (value: string) => value
 
 const REALTIME_ITEM_ID_PATTERN = /^[A-Za-z0-9._:-]{1,200}$/;
 const MAXIMUM_SESSION_TURNS = 128;
-const MAXIMUM_PENDING_COMMIT_BINDINGS = 4;
 const MAXIMUM_IDLE_BUFFER_MS = 4_000;
 
 export function runtimePromptEchoSignatureFromHeaders(headers: Pick<Headers, "get">): string | null {
   const value = headers.get(RUNTIME_PROMPT_ECHO_HEADER)?.trim() ?? "";
   if (!value || value.length > 512 || !/^[\x20-\x7e]+$/.test(value)) return null;
   return value;
+}
+
+export function runtimeRealtimeInputModeFromHeaders(headers: Pick<Headers, "get">): string | null {
+  const value = headers.get(RUNTIME_REALTIME_INPUT_MODE_HEADER) ?? "";
+  return value === RUNTIME_REALTIME_INPUT_MODE ? value : null;
 }
 
 /**
@@ -232,10 +243,14 @@ export class RealtimeVoiceClient {
   private microphoneMuted = false;
   private transportReady = false;
   private promptEchoSignature: string | null = null;
+  private realtimeInputModeAttested = false;
+  private turnProcessing = false;
+  private canonicalAdmissionInFlight = false;
+  private stoppedDuringCanonicalAdmission = false;
   private admissionQueue: Promise<void> = Promise.resolve();
   private admittedItemIds = new Set<string>();
   private readonly turnKeyByItemId = new Map<string, string>();
-  private readonly pendingCommitTurnKeys: string[] = [];
+  private pendingCommitTurnKey: string | null = null;
   private uncommittedTurnKey: string | null = null;
   private sessionTurnCount = 0;
   private idleBufferClearedAtMs: number | null = null;
@@ -306,9 +321,9 @@ export class RealtimeVoiceClient {
       this.channel = channel;
       channel.addEventListener("message", (event) => this.handleEvent(event.data));
       channel.addEventListener("open", () => {
-        if (!this.promptEchoSignature) {
+        if (!this.promptEchoSignature || !this.realtimeInputModeAttested) {
           this.stop();
-          this.fail("Realtime transport opened without the governed transcript-admission boundary.");
+          this.fail("Realtime transport opened without the governed manual-commit admission boundary.");
           return;
         }
         this.transportReady = true;
@@ -344,8 +359,12 @@ export class RealtimeVoiceClient {
       }
       const answer = await response.text();
       if (!answer.trimStart().startsWith("v=0")) throw new Error("Live voice session returned an invalid connection response.");
-      this.promptEchoSignature = runtimePromptEchoSignatureFromHeaders(response.headers);
-      if (!this.promptEchoSignature) throw new Error("NEXUS Runtime omitted the governed Realtime transcript-admission boundary.");
+      const promptEchoSignature = runtimePromptEchoSignatureFromHeaders(response.headers);
+      if (!promptEchoSignature) throw new Error("NEXUS Runtime omitted the governed Realtime transcript-admission boundary.");
+      const realtimeInputMode = runtimeRealtimeInputModeFromHeaders(response.headers);
+      if (!realtimeInputMode) throw new Error("NEXUS Runtime did not attest the exact manual Realtime audio-commit mode for this call.");
+      this.promptEchoSignature = promptEchoSignature;
+      this.realtimeInputModeAttested = true;
       await peer.setRemoteDescription({ type: "answer", sdp: answer });
     } catch (error) {
       this.stop();
@@ -354,6 +373,8 @@ export class RealtimeVoiceClient {
   }
 
   stop() {
+    const preserveCanonicalAdmission = this.canonicalAdmissionInFlight
+      && this.turnAdmissions.activeTurnKey() !== null;
     this.transportReady = false;
     if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
     this.animationFrame = null;
@@ -366,14 +387,20 @@ export class RealtimeVoiceClient {
     void this.audioContext?.close();
     this.audioContext = null;
     this.promptEchoSignature = null;
-    this.admittedItemIds.clear();
-    this.turnKeyByItemId.clear();
-    this.pendingCommitTurnKeys.splice(0);
-    this.uncommittedTurnKey = null;
-    this.sessionTurnCount = 0;
+    this.realtimeInputModeAttested = false;
+    if (preserveCanonicalAdmission) {
+      this.stoppedDuringCanonicalAdmission = true;
+    } else {
+      this.turnProcessing = false;
+      this.admittedItemIds.clear();
+      this.turnKeyByItemId.clear();
+      this.pendingCommitTurnKey = null;
+      this.uncommittedTurnKey = null;
+      this.sessionTurnCount = 0;
+      this.turnAdmissions.endTurn();
+    }
     this.idleBufferClearedAtMs = null;
     this.speechTurnSegmenter.reset();
-    this.turnAdmissions.endTurn();
     this.callbacks.onAmplitude(0);
     this.callbacks.onState("idle");
   }
@@ -383,6 +410,10 @@ export class RealtimeVoiceClient {
     this.microphoneMuted = muted;
     this.applyMicrophoneMute();
     if (muted) {
+      if (this.turnProcessing) {
+        this.callbacks.onAmplitude(0);
+        return;
+      }
       const abandonedBufferedSpeech = this.speechTurnSegmenter.reset();
       this.idleBufferClearedAtMs = null;
       const abandonedTurnKey = this.uncommittedTurnKey;
@@ -409,7 +440,9 @@ export class RealtimeVoiceClient {
   }
 
   private applyMicrophoneMute() {
-    this.stream?.getAudioTracks().forEach((track) => { track.enabled = !this.microphoneMuted; });
+    this.stream?.getAudioTracks().forEach((track) => {
+      track.enabled = !this.microphoneMuted && !this.turnProcessing;
+    });
   }
 
   private handleEvent(raw: unknown) {
@@ -459,12 +492,13 @@ export class RealtimeVoiceClient {
 
   private bindCommittedProviderItem(event: RealtimeEvent) {
     const itemId = this.providerItemId(event);
-    const turnIdempotencyKey = this.pendingCommitTurnKeys.shift() ?? null;
+    const turnIdempotencyKey = this.pendingCommitTurnKey;
     if (!itemId || !turnIdempotencyKey || this.turnKeyByItemId.has(itemId)) {
       this.stop();
       this.fail("Realtime buffer commit did not match exactly one detected speech turn.");
       return;
     }
+    this.pendingCommitTurnKey = null;
     this.turnKeyByItemId.set(itemId, turnIdempotencyKey);
   }
 
@@ -474,8 +508,23 @@ export class RealtimeVoiceClient {
     this.admissionQueue = this.admissionQueue
       .then(() => this.admitFinalizedTranscript(event, turnIdempotencyKey))
       .catch((error) => {
+        this.canonicalAdmissionInFlight = false;
+        this.stoppedDuringCanonicalAdmission = false;
+        this.turnProcessing = false;
+        this.turnAdmissions.endTurn();
         this.stop();
-        this.fail(error instanceof Error ? error.message : "Realtime transcript admission failed.");
+        const context = error && typeof error === "object"
+          ? {
+              interactionId: typeof (error as { interactionId?: unknown }).interactionId === "string"
+                ? (error as { interactionId: string }).interactionId
+                : undefined,
+              retryProhibited: (error as { retryProhibited?: unknown }).retryProhibited === true,
+            }
+          : undefined;
+        this.fail(
+          error instanceof Error ? error.message : "Realtime transcript admission failed.",
+          context,
+        );
       });
   }
 
@@ -489,7 +538,9 @@ export class RealtimeVoiceClient {
     }
     if (this.admittedItemIds.has(itemId)) return;
     if (!this.turnAdmissions.isActiveTurn(turnIdempotencyKey)) {
-      this.discardSupersededTranscript(itemId);
+      if (!this.transportReady) return;
+      this.stop();
+      this.fail("Finalized transcript did not match the one active serialized speech turn.");
       return;
     }
     if (!text || !this.promptEchoSignature || looksLikeRuntimePromptEcho(text, this.promptEchoSignature)) {
@@ -502,6 +553,7 @@ export class RealtimeVoiceClient {
     }
 
     this.callbacks.onState("thinking");
+    this.canonicalAdmissionInFlight = true;
     let admission: RealtimeTranscriptAdmission;
     try {
       const turnAdmission = await this.turnAdmissions.admit(
@@ -512,20 +564,7 @@ export class RealtimeVoiceClient {
       if (turnAdmission.duplicate) return;
       admission = turnAdmission.value;
     } catch (error) {
-      if (!this.turnAdmissions.isActiveTurn(turnIdempotencyKey)) {
-        this.discardSupersededTranscript(itemId);
-        return;
-      }
-      this.rejectFinalizedTranscript(
-        itemId,
-        error instanceof Error ? error.message : "Runtime transcript admission failed.",
-        turnIdempotencyKey,
-      );
-      return;
-    }
-    if (!this.turnAdmissions.isActiveTurn(turnIdempotencyKey)) {
-      this.discardSupersededTranscript(itemId);
-      return;
+      throw error instanceof Error ? error : new Error("Runtime transcript admission failed.");
     }
     const responseText = admission.admitted ? admission.spokenSummary.trim() : "";
     if (!admission.admitted || !responseText || responseText.length > 4_000) {
@@ -537,9 +576,11 @@ export class RealtimeVoiceClient {
       return;
     }
     this.admittedItemIds.add(itemId);
-    this.callbacks.onRuntimeResponse(responseText);
-    if (this.turnAdmissions.isActiveTurn(turnIdempotencyKey)) this.turnAdmissions.endTurn();
-    this.callbacks.onState("listening");
+    if (!this.stoppedDuringCanonicalAdmission) {
+      this.callbacks.onRuntimeResponse(responseText);
+    }
+    this.releaseTurn(turnIdempotencyKey);
+    if (this.transportReady) this.callbacks.onState("listening");
   }
 
   private rejectFinalizedTranscript(
@@ -547,6 +588,10 @@ export class RealtimeVoiceClient {
     reason = "Finalized transcript was not admitted.",
     turnIdempotencyKey: string | null = null,
   ) {
+    if (this.stoppedDuringCanonicalAdmission && !this.transportReady) {
+      if (turnIdempotencyKey) this.releaseTurn(turnIdempotencyKey);
+      return;
+    }
     if (!itemId || !this.send({ type: "conversation.item.delete", item_id: itemId })) {
       this.stop();
       this.fail(`${reason} Unable to remove it from the Realtime session.`);
@@ -558,18 +603,22 @@ export class RealtimeVoiceClient {
       return;
     }
     if (turnIdempotencyKey && this.turnAdmissions.isActiveTurn(turnIdempotencyKey)) {
-      this.turnAdmissions.endTurn();
+      this.releaseTurn(turnIdempotencyKey);
     }
-    this.callbacks.onState("listening");
+    if (this.transportReady) this.callbacks.onState("listening");
   }
 
-  private discardSupersededTranscript(itemId: string): boolean {
-    if (!itemId || !this.send({ type: "conversation.item.delete", item_id: itemId })) {
-      this.stop();
-      this.fail("A superseded Runtime-admitted transcript could not be removed from the Realtime session.");
-      return false;
+  private releaseTurn(turnIdempotencyKey: string) {
+    if (this.turnAdmissions.isActiveTurn(turnIdempotencyKey)) {
+      this.turnAdmissions.endTurn();
     }
-    return true;
+    this.canonicalAdmissionInFlight = false;
+    this.stoppedDuringCanonicalAdmission = false;
+    this.turnProcessing = false;
+    this.pendingCommitTurnKey = null;
+    this.speechTurnSegmenter.reset();
+    this.idleBufferClearedAtMs = null;
+    this.applyMicrophoneMute();
   }
 
   private providerItemId(event: RealtimeEvent): string {
@@ -587,14 +636,23 @@ export class RealtimeVoiceClient {
     }
   }
 
-  private fail(message: string) {
+  private fail(message: string, context?: RealtimeVoiceErrorContext) {
+    const activeInteractionId = this.canonicalAdmissionInFlight
+      ? this.turnAdmissions.activeTurnKey()
+      : null;
+    const protectedContext = activeInteractionId
+      ? { interactionId: activeInteractionId, retryProhibited: true }
+      : context;
+    const protectedMessage = activeInteractionId && context?.retryProhibited !== true
+      ? `${message} Canonical interaction ${activeInteractionId} remains in flight; do not retry it under a new identifier.`
+      : message;
     this.callbacks.onState("error");
-    this.callbacks.onError(message);
+    this.callbacks.onError(protectedMessage, protectedContext);
   }
 
   private processAmplitudeSample(amplitude: number, observedAtMs: number) {
-    this.callbacks.onAmplitude(this.microphoneMuted ? 0 : amplitude);
-    if (!this.transportReady || this.microphoneMuted) {
+    this.callbacks.onAmplitude(this.microphoneMuted || this.turnProcessing ? 0 : amplitude);
+    if (!this.transportReady || this.microphoneMuted || this.turnProcessing) {
       this.speechTurnSegmenter.reset();
       this.idleBufferClearedAtMs = null;
       return;
@@ -643,7 +701,7 @@ export class RealtimeVoiceClient {
 
     const turnIdempotencyKey = this.uncommittedTurnKey;
     this.uncommittedTurnKey = null;
-    if (!turnIdempotencyKey || this.pendingCommitTurnKeys.length >= MAXIMUM_PENDING_COMMIT_BINDINGS) {
+    if (!turnIdempotencyKey || this.pendingCommitTurnKey || this.turnProcessing) {
       this.stop();
       this.fail("Realtime voice could not preserve a bounded speech-turn commit binding.");
       return;
@@ -653,7 +711,9 @@ export class RealtimeVoiceClient {
       this.fail("Realtime voice could not commit the detected speech turn.");
       return;
     }
-    this.pendingCommitTurnKeys.push(turnIdempotencyKey);
+    this.pendingCommitTurnKey = turnIdempotencyKey;
+    this.turnProcessing = true;
+    this.applyMicrophoneMute();
     this.idleBufferClearedAtMs = observedAtMs;
     this.callbacks.onState("thinking");
   }

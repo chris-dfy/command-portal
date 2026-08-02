@@ -38,11 +38,55 @@ const result = (overrides = {}) => ({
   response_text: "Canonical Runtime response.",
   intent: { intent_type: "informational" },
   mission_id: null,
-  authority_decision: { decision: "allow" },
-  execution: {},
+  authority_decision: { decision: "not_applicable" },
+  execution: { attempted: false, executed: false, execution_scope: null },
   verification: { verified: false },
   receipt_id: null,
+  execution_scope: null,
   ...overrides,
+});
+
+const localEnvelope = (data) => ({
+  ok: true,
+  data,
+  local: {
+    mode: "local_first",
+    route: "/executive/interactions",
+    runtimeUrl: "http://127.0.0.1:8765",
+    enabled: true,
+    authoritative: "NEXUS Runtime",
+    contextAssemblyOwner: "NEXUS Runtime",
+    secretValuesExposed: false,
+  },
+  truth: {
+    productionReady: false,
+    enterpriseReady: false,
+    cloudPrimary: false,
+    localSourceOfTruth: true,
+    secretValuesExposed: false,
+  },
+});
+
+const retainedEnvelope = (inputRequest = request) => ({
+  ...inputRequest,
+  actor: { actor_id: "operator-1", tenant_id: "tenant-alpha", roles: ["admin"] },
+  context: { ...inputRequest.context, workspace_id: "workspace-alpha" },
+});
+
+const executedResult = () => result({
+  classification: "action",
+  status: "executed",
+  response_text: "Executed and independently verified.",
+  authority_decision: { decision: "allow" },
+  execution_scope: "runtime",
+  execution: {
+    attempted: true,
+    executed: true,
+    execution_scope: "runtime",
+    underlying_execution_receipt_id: "EXECUTION-RECEIPT-001",
+  },
+  verification: { verified: true },
+  receipt_id: "INTERACTION-RECEIPT-001",
 });
 
 test("canonical projection admits informational answers and validates the interaction binding", () => {
@@ -54,6 +98,18 @@ test("canonical projection admits informational answers and validates the intera
     () => admission.projectExecutiveInteraction(result({ interaction_id: "33333333-3333-4333-8333-333333333333" }), request, INTERACTION_ID),
     /different interaction/,
   );
+  for (const invalid of [
+    { authority_decision: { decision: "allow" } },
+    { execution: { attempted: true, executed: false, execution_scope: "runtime" } },
+    { execution: { attempted: false, executed: true, execution_scope: "runtime" } },
+    { execution_scope: "runtime" },
+    { verification: { verified: true } },
+  ]) {
+    assert.throws(
+      () => admission.projectExecutiveInteraction(result(invalid), request, INTERACTION_ID),
+      /answer without matching non-execution and Authority semantics/,
+    );
+  }
 });
 
 test("client presentation is admitted only from explicit Runtime execution_scope", () => {
@@ -97,28 +153,105 @@ test("client presentation is admitted only from explicit Runtime execution_scope
   }), request, INTERACTION_ID), /malformed or unscoped client presentation effect/);
 });
 
-test("executed narration fails closed without Authority, verification, and receipt", () => {
+test("executed narration requires exact Runtime scope, execution, verification, and receipt proof", () => {
   const executed = {
     classification: "action",
     status: "executed",
     authority_decision: { decision: "allow" },
-    execution: { attempted: true, result: { ok: true } },
+    execution_scope: "runtime",
+    execution: {
+      attempted: true,
+      executed: true,
+      execution_scope: "runtime",
+      underlying_execution_receipt_id: "EXECUTION-RECEIPT-001",
+      result: { ok: true },
+    },
     verification: { verified: true },
-    receipt_id: "RECEIPT-001",
+    receipt_id: "INTERACTION-RECEIPT-001",
   };
   assert.equal(admission.projectExecutiveInteraction(result(executed), request, INTERACTION_ID).status, "executed");
-  assert.throws(
-    () => admission.projectExecutiveInteraction(result({ ...executed, verification: { verified: false } }), request, INTERACTION_ID),
-    /allowed, verified execution with a durable receipt/,
+  for (const invalid of [
+    { ...executed, authority_decision: { decision: "deny" } },
+    { ...executed, execution_scope: null },
+    { ...executed, execution: { ...executed.execution, execution_scope: null } },
+    { ...executed, execution: { ...executed.execution, attempted: false } },
+    { ...executed, execution: { ...executed.execution, executed: false } },
+    { ...executed, verification: { verified: false } },
+    { ...executed, receipt_id: null },
+    { ...executed, execution: { ...executed.execution, underlying_execution_receipt_id: null } },
+  ]) {
+    assert.throws(
+      () => admission.projectExecutiveInteraction(result(invalid), request, INTERACTION_ID),
+      /attempted, executed, verified Runtime execution with durable receipts/,
+    );
+  }
+});
+
+test("approval, blocked, and failed operational narration requires matching semantics and durable receipts", () => {
+  const approvalRequired = {
+    classification: "action",
+    status: "approval_required",
+    authority_decision: { decision: "approval_required", approval_id: "APPROVAL-001" },
+    execution: { attempted: false, executed: false, execution_scope: null },
+    execution_scope: null,
+    verification: { verified: false },
+    receipt_id: "INTERACTION-RECEIPT-APPROVAL",
+  };
+  assert.equal(
+    admission.projectExecutiveInteraction(result(approvalRequired), request, INTERACTION_ID).status,
+    "approval_required",
   );
-  assert.throws(
-    () => admission.projectExecutiveInteraction(result({ ...executed, receipt_id: null }), request, INTERACTION_ID),
-    /allowed, verified execution with a durable receipt/,
-  );
-  assert.throws(
-    () => admission.projectExecutiveInteraction(result({ ...executed, authority_decision: { decision: "deny" } }), request, INTERACTION_ID),
-    /allowed, verified execution with a durable receipt/,
-  );
+  for (const invalid of [
+    { ...approvalRequired, authority_decision: { decision: "allow", approval_id: "APPROVAL-001" } },
+    { ...approvalRequired, authority_decision: { decision: "approval_required", approval_id: null } },
+    { ...approvalRequired, receipt_id: null },
+    { ...approvalRequired, execution: { ...approvalRequired.execution, attempted: true } },
+    { ...approvalRequired, execution: { ...approvalRequired.execution, executed: true } },
+    { ...approvalRequired, execution_scope: "runtime" },
+    { ...approvalRequired, verification: { verified: true } },
+  ]) {
+    assert.throws(
+      () => admission.projectExecutiveInteraction(result(invalid), request, INTERACTION_ID),
+      /approval gate without matching Authority, non-execution state, and a durable receipt/,
+    );
+  }
+
+  const blocked = {
+    classification: "blocked",
+    status: "blocked",
+    authority_decision: { decision: "capability_unavailable" },
+    execution: { attempted: false, executed: false, execution_scope: null },
+    execution_scope: null,
+    verification: { verified: false },
+    receipt_id: "INTERACTION-RECEIPT-BLOCKED",
+  };
+  const failed = {
+    classification: "action",
+    status: "failed",
+    authority_decision: { decision: "deny" },
+    execution: { attempted: true, executed: false, execution_scope: "runtime" },
+    execution_scope: "runtime",
+    verification: { verified: false },
+    receipt_id: "INTERACTION-RECEIPT-FAILED",
+  };
+  assert.equal(admission.projectExecutiveInteraction(result(blocked), request, INTERACTION_ID).status, "blocked");
+  assert.equal(admission.projectExecutiveInteraction(result(failed), request, INTERACTION_ID).status, "failed");
+  for (const invalid of [
+    { ...blocked, status: "answered" },
+    { ...blocked, receipt_id: null },
+    { ...blocked, authority_decision: { decision: "allow" } },
+    { ...blocked, execution: { ...blocked.execution, executed: true } },
+    { ...failed, receipt_id: null },
+    { ...failed, authority_decision: { decision: "allow" } },
+    { ...failed, execution: { ...failed.execution, attempted: false } },
+    { ...failed, execution: { ...failed.execution, executed: true } },
+    { ...failed, verification: { verified: true } },
+  ]) {
+    assert.throws(
+      () => admission.projectExecutiveInteraction(result(invalid), request, INTERACTION_ID),
+      /non-conversational interaction as answered|blocked classification with a non-blocking status|operational block or failure without matching Authority, execution state, and a durable receipt/,
+    );
+  }
 });
 
 test("approval denial is accepted only for the exact pending interaction", () => {
@@ -151,6 +284,64 @@ test("approval denial is accepted only for the exact pending interaction", () =>
   );
 });
 
+test("approval continuation never treats a stale pending response as a terminal Runtime result", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousStorage = globalThis.sessionStorage;
+  const storage = new Map();
+  const pendingResult = result({
+    classification: "action",
+    status: "approval_required",
+    response_text: "Approval is required.",
+    authority_decision: { decision: "approval_required", approval_id: "APPROVAL-001" },
+    receipt_id: "INTERACTION-RECEIPT-APPROVAL",
+  });
+  const pendingAdmission = admission.projectExecutiveInteraction(
+    pendingResult,
+    request,
+    INTERACTION_ID,
+  );
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
+    },
+  });
+  try {
+    globalThis.fetch = async (_url, options = {}) => {
+      if (options.method === "POST") throw new TypeError("approval continuation response lost");
+      return new Response(JSON.stringify(localEnvelope({
+        record_type: "nexus_interaction_lookup",
+        interaction_id: INTERACTION_ID,
+        found: true,
+        state: "executing",
+        transitions: [],
+        latest_response: pendingResult,
+        original_envelope: retainedEnvelope(),
+      })), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    await assert.rejects(
+      admission.admitApprovedExecutiveInteraction({
+        approval_id: "APPROVAL-001",
+        interaction_id: INTERACTION_ID,
+        status: "approved",
+        resume_required: true,
+      }, pendingAdmission),
+      (error) => {
+        assert.equal(error.name, "CanonicalInteractionIndeterminateError");
+        assert.equal(error.interactionId, INTERACTION_ID);
+        assert.match(error.message, /state executing without a terminal response/);
+        return true;
+      },
+    );
+    assert.equal(admission.pendingExecutiveInteractionReconciliationId(), INTERACTION_ID);
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: previousStorage });
+  }
+});
+
 test("pending approval recovery uses only a browser UUID pointer and the Runtime-retained envelope", async () => {
   const storage = new Map();
   const previousStorage = globalThis.sessionStorage;
@@ -170,6 +361,7 @@ test("pending approval recovery uses only a browser UUID pointer and the Runtime
       status: "approval_required",
       response_text: "Approval is required.",
       authority_decision: { decision: "approval_required", approval_id: "APPROVAL-001" },
+      receipt_id: "INTERACTION-RECEIPT-APPROVAL",
     });
     admission.rememberPendingExecutiveApproval(
       admission.projectExecutiveInteraction(pendingResult, request, INTERACTION_ID),
@@ -219,5 +411,200 @@ test("pending approval recovery uses only a browser UUID pointer and the Runtime
   } finally {
     globalThis.fetch = previousFetch;
     Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: previousStorage });
+  }
+});
+
+test("a lost POST response is reconciled by same-ID lookup and never submitted under a new identity", async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      if (options.method === "POST") throw new TypeError("response lost after submission");
+      return new Response(JSON.stringify(localEnvelope({
+        record_type: "nexus_interaction_lookup",
+        interaction_id: INTERACTION_ID,
+        found: true,
+        state: "completed",
+        transitions: [],
+        latest_response: executedResult(),
+        original_envelope: retainedEnvelope(),
+      })), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const recovered = await admission.admitExecutiveInteraction(
+      request.input.text,
+      "text",
+      SESSION_ID,
+      INTERACTION_ID,
+    );
+    assert.equal(recovered.status, "executed");
+    assert.equal(recovered.interactionResult.interaction_id, INTERACTION_ID);
+    assert.deepEqual(calls.map((call) => call.options.method ?? "GET"), ["POST", "GET"]);
+    assert.equal(calls[0].options.headers["Idempotency-Key"], INTERACTION_ID);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("a malformed successful POST is reconciled as ambiguous and requires the retained original envelope", async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      if (options.method === "POST") {
+        return new Response(JSON.stringify({ ok: false, data: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(localEnvelope({
+        record_type: "nexus_interaction_lookup",
+        interaction_id: INTERACTION_ID,
+        found: true,
+        state: "completed",
+        transitions: [],
+        latest_response: executedResult(),
+        original_envelope: retainedEnvelope(),
+      })), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const recovered = await admission.admitExecutiveInteraction(
+      request.input.text,
+      "text",
+      SESSION_ID,
+      INTERACTION_ID,
+    );
+    assert.equal(recovered.status, "executed");
+    assert.deepEqual(calls.map((call) => call.options.method ?? "GET"), ["POST", "GET"]);
+
+    calls.length = 0;
+    globalThis.fetch = async (_url, options = {}) => {
+      if (options.method === "POST") throw new TypeError("response lost after submission");
+      return new Response(JSON.stringify(localEnvelope({
+        record_type: "nexus_interaction_lookup",
+        interaction_id: INTERACTION_ID,
+        found: true,
+        state: "completed",
+        transitions: [],
+        latest_response: executedResult(),
+        original_envelope: null,
+      })), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    await assert.rejects(
+      admission.admitExecutiveInteraction(request.input.text, "text", SESSION_ID, INTERACTION_ID),
+      /retained no original interaction envelope for identity reconciliation/,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("a retained nonterminal interaction blocks every new UUID until the exact original result reconciles", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousStorage = globalThis.sessionStorage;
+  const storage = new Map();
+  let latestResponse = null;
+  let state = "executing";
+  let postCalls = 0;
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
+    },
+  });
+  try {
+    globalThis.fetch = async (_url, options = {}) => {
+      if (options.method === "POST") {
+        postCalls += 1;
+        throw new TypeError("ambiguous POST failure");
+      }
+      return new Response(JSON.stringify(localEnvelope({
+        record_type: "nexus_interaction_lookup",
+        interaction_id: INTERACTION_ID,
+        found: true,
+        state,
+        transitions: [],
+        latest_response: latestResponse,
+        original_envelope: retainedEnvelope(),
+      })), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    await assert.rejects(
+      admission.admitExecutiveInteraction(request.input.text, "text", SESSION_ID, INTERACTION_ID),
+      (error) => {
+        assert.equal(error.name, "CanonicalInteractionIndeterminateError");
+        assert.equal(error.interactionId, INTERACTION_ID);
+        assert.equal(error.retryProhibited, true);
+        assert.match(error.message, /Do not retry it with a new interaction identifier/);
+        return true;
+      },
+    );
+    assert.equal(admission.pendingExecutiveInteractionReconciliationId(), INTERACTION_ID);
+    assert.equal(postCalls, 1);
+
+    await assert.rejects(
+      admission.admitExecutiveInteraction(
+        "a different request",
+        "text",
+        SESSION_ID,
+        "33333333-3333-4333-8333-333333333333",
+      ),
+      /blocks submission of a different request/,
+    );
+    assert.equal(postCalls, 1);
+
+    latestResponse = executedResult();
+    state = "completed";
+    const recovered = await admission.admitExecutiveInteraction(
+      request.input.text,
+      "text",
+      SESSION_ID,
+      "33333333-3333-4333-8333-333333333333",
+    );
+    assert.equal(recovered.interactionResult.interaction_id, INTERACTION_ID);
+    assert.equal(admission.pendingExecutiveInteractionReconciliationId(), null);
+    assert.equal(postCalls, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: previousStorage });
+  }
+});
+
+test("a verified not-found lookup permits only one same-key resubmission", async () => {
+  const previousFetch = globalThis.fetch;
+  const observedKeys = [];
+  let postCalls = 0;
+  try {
+    globalThis.fetch = async (_url, options = {}) => {
+      if (options.method === "POST") {
+        postCalls += 1;
+        observedKeys.push(options.headers["Idempotency-Key"]);
+        if (postCalls === 1) throw new TypeError("first response unavailable");
+        return new Response(JSON.stringify(localEnvelope(result())), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(localEnvelope({
+        record_type: "nexus_interaction_lookup",
+        interaction_id: INTERACTION_ID,
+        found: false,
+        state: null,
+        transitions: [],
+        latest_response: null,
+        original_envelope: null,
+      })), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const admitted = await admission.admitExecutiveInteraction(
+      request.input.text,
+      "text",
+      SESSION_ID,
+      INTERACTION_ID,
+    );
+    assert.equal(admitted.status, "answered");
+    assert.deepEqual(observedKeys, [INTERACTION_ID, INTERACTION_ID]);
+  } finally {
+    globalThis.fetch = previousFetch;
   }
 });
