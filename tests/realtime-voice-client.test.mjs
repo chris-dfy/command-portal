@@ -10,6 +10,10 @@ import {
   RUNTIME_REALTIME_INPUT_MODE_HEADER,
   runtimeRealtimeInputModeFromHeaders,
 } from "../src/lib/realtime-voice-client.ts";
+import {
+  RealtimePcmAppendCoordinator,
+  encodePcm16Base64,
+} from "../src/lib/realtime-pcm-input.ts";
 
 const clients = [];
 const SPEECH_AMPLITUDE = CLIENT_SPEECH_TURN_POLICY.speechStartThreshold + 0.08;
@@ -114,8 +118,11 @@ test("only the exact Runtime manual-commit status enables live voice", () => {
   const verified = {
     state: "available",
     serverVAD: false,
+    clientAudioAppendRequired: true,
+    inputAudioAppendEvent: "input_audio_buffer.append",
     clientAudioCommitRequired: true,
     inputAudioCommitEvent: "input_audio_buffer.commit",
+    rtpAudioNegotiated: false,
   };
   assert.equal(isVerifiedManualCommitStatus(verified), true);
   for (const status of [
@@ -124,10 +131,13 @@ test("only the exact Runtime manual-commit status enables live voice", () => {
     { ...verified, state: "unavailable" },
     { ...verified, serverVAD: true },
     { ...verified, serverVAD: undefined },
+    { ...verified, clientAudioAppendRequired: false },
+    { ...verified, inputAudioAppendEvent: "response.create" },
     { ...verified, clientAudioCommitRequired: false },
     { ...verified, clientAudioCommitRequired: undefined },
     { ...verified, inputAudioCommitEvent: "input_audio_buffer.speech_stopped" },
     { ...verified, inputAudioCommitEvent: undefined },
+    { ...verified, rtpAudioNegotiated: true },
   ]) assert.equal(isVerifiedManualCommitStatus(status), false);
 });
 
@@ -138,10 +148,38 @@ test("only the exact per-call Runtime input-mode attestation is accepted", () =>
     })),
     RUNTIME_REALTIME_INPUT_MODE,
   );
-  for (const value of [undefined, "", "client-audio-commit-v0", "CLIENT-AUDIO-COMMIT-V1", "client-audio-commit-v1 "]) {
+  for (const value of [undefined, "", "client-pcm-append-commit-v0", "CLIENT-PCM-APPEND-COMMIT-V1", "client-pcm-append-commit-v1 "]) {
     const headers = { get: () => value ?? null };
     assert.equal(runtimeRealtimeInputModeFromHeaders(headers), null);
   }
+});
+
+test("PCM pre-roll, live audio, and commit use one ordered data-channel path", () => {
+  const encoded = Buffer.from(encodePcm16Base64(new Float32Array([-1, 0, 1])), "base64");
+  assert.deepEqual([...encoded], [0x00, 0x80, 0x00, 0x00, 0xff, 0x7f]);
+  const events = [];
+  const pcm = new RealtimePcmAppendCoordinator((event) => {
+    events.push(event);
+    return true;
+  }, 2);
+  assert.equal(pcm.acceptSamples(new Float32Array([0.1, -0.1])), true);
+  assert.equal(pcm.acceptSamples(new Float32Array([0.2, -0.2])), true);
+  assert.equal(pcm.beginTurn(), true);
+  assert.equal(pcm.acceptSamples(new Float32Array([0.3, -0.3])), true);
+  assert.equal(pcm.commitTurn(), true);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    [
+      "input_audio_buffer.clear",
+      "input_audio_buffer.append",
+      "input_audio_buffer.append",
+      "input_audio_buffer.append",
+      "input_audio_buffer.commit",
+    ],
+  );
+  assert.ok(events.filter((event) => event.type === "input_audio_buffer.append")
+    .every((event) => typeof event.audio === "string" && event.audio.length > 0));
+  assert.equal(pcm.commitTurn(), false);
 });
 
 test("the browser rejects missing or wrong per-call attestation before accepting remote SDP", async () => {
@@ -166,6 +204,8 @@ test("the browser rejects missing or wrong per-call attestation before accepting
   const stream = { getAudioTracks: () => [track], getTracks: () => [track] };
   class FakeAudioContext {
     state = "running";
+    sampleRate = 24_000;
+    destination = {};
     createAnalyser() {
       return {
         fftSize: 256,
@@ -174,13 +214,14 @@ test("the browser rejects missing or wrong per-call attestation before accepting
         getByteFrequencyData(values) { values[0] = 0; },
       };
     }
-    createMediaStreamSource() { return { connect() {} }; }
+    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+    createScriptProcessor() { return { onaudioprocess: null, connect() {}, disconnect() {} }; }
+    createGain() { return { gain: { value: 1 }, connect() {}, disconnect() {} }; }
     async resume() {}
     async close() {}
   }
   class FakePeer {
     connectionState = "connected";
-    addTransceiver() {}
     createDataChannel() {
       return { readyState: "connecting", addEventListener() {}, close() {} };
     }
@@ -214,8 +255,11 @@ test("the browser rejects missing or wrong per-call attestation before accepting
             data: {
               state: "available",
               serverVAD: false,
+              clientAudioAppendRequired: true,
+              inputAudioAppendEvent: "input_audio_buffer.append",
               clientAudioCommitRequired: true,
               inputAudioCommitEvent: "input_audio_buffer.commit",
+              rtpAudioNegotiated: false,
             },
           }), { status: 200, headers: { "Content-Type": "application/json" } });
         }
@@ -232,7 +276,7 @@ test("the browser rejects missing or wrong per-call attestation before accepting
       },
     });
 
-    for (const inputMode of [null, "client-audio-commit-v0"]) {
+    for (const inputMode of [null, "client-pcm-append-commit-v0"]) {
       callInputMode = inputMode;
       const client = new RealtimeVoiceClient({
         onState() {}, onAmplitude() {}, onUserTranscript: async () => ({ admitted: false }),
@@ -242,7 +286,7 @@ test("the browser rejects missing or wrong per-call attestation before accepting
       const before = remoteDescriptions.length;
       await assert.rejects(
         client.connect(),
-        /did not attest the exact manual Realtime audio-commit mode/,
+        /did not attest the exact ordered PCM append\/commit mode/,
       );
       assert.equal(remoteDescriptions.length, before, String(inputMode));
     }
@@ -484,7 +528,7 @@ test("mute discards a partial turn and unmute starts a clean turn", async () => 
   fixture.client.setMicrophoneMuted(true);
   sample(fixture, SPEECH_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.maximumTurnMs);
   assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 0);
-  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.clear").length, 1);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.clear").length, 2);
   assert.equal(fixture.amplitudes.at(-1), 0);
 
   fixture.client.setMicrophoneMuted(false);
@@ -593,12 +637,14 @@ test("invalid or non-monotonic acoustic samples fail closed", () => {
   assert.match(nonMonotonic.errors.at(-1), /invalid acoustic sample/);
 });
 
-test("the browser offer is send-only and source contains no provider answer path", async () => {
+test("the browser offer is data-only and source contains no provider answer path", async () => {
   const source = await readFile(new URL("../src/lib/realtime-voice-client.ts", import.meta.url), "utf8");
-  assert.match(source, /addTransceiver\(track, \{ direction: "sendonly"/);
+  const pcmSource = await readFile(new URL("../src/lib/realtime-pcm-input.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /addTransceiver|\.addTrack\(/);
   assert.match(source, /Boolean\(window\.AudioContext\)/);
   assert.match(source, /context\.state !== "running"/);
-  assert.match(source, /type: "input_audio_buffer\.commit"/);
+  assert.equal((pcmSource.match(/type: "input_audio_buffer\.append"/g) ?? []).length, 1);
+  assert.equal((pcmSource.match(/type: "input_audio_buffer\.commit"/g) ?? []).length, 1);
   assert.doesNotMatch(source, /\.play\(/);
   assert.doesNotMatch(source, /type:\s*["']response\.create["']/);
   assert.doesNotMatch(source, /session\.update|\binstructions\b|\btools\s*:/);

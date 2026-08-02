@@ -1994,7 +1994,7 @@ test("Realtime gateway requires and forwards the exact same-call manual-commit a
       "context.runtime.route.post.runtime.voice.realtime.call": "live_verified",
     },
   });
-  for (const inputMode of [null, "client-audio-commit-v0", "CLIENT-AUDIO-COMMIT-V1"]) {
+  for (const inputMode of [null, "client-pcm-append-commit-v0", "CLIENT-PCM-APPEND-COMMIT-V1"]) {
     const runtimeFetch = withActionRegistry(async () => new Response("v=0\r\na=answer\r\n", {
       status: 201,
       headers: {

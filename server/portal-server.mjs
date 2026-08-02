@@ -71,7 +71,7 @@ export const CONTEXT_ASSERTION_CONTRACT = "nexus.context-assertion@2.0.0";
 export const CONTEXT_ASSERTION_ALGORITHM = "hmac-sha256";
 export const REALTIME_PROMPT_ECHO_HEADER = "X-NEXUS-Prompt-Echo-Signature";
 export const REALTIME_INPUT_MODE_HEADER = "X-NEXUS-Realtime-Input-Mode";
-export const REALTIME_INPUT_MODE = "client-audio-commit-v1";
+export const REALTIME_INPUT_MODE = "client-pcm-append-commit-v1";
 const CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime";
 const CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway";
 const CONTEXT_ASSERTION_KEY_ID = "context-assertion-command-portal-v1";
@@ -4485,7 +4485,7 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
     if (realtimeInputMode !== REALTIME_INPUT_MODE) {
       throw new GatewayFailure(
         "realtime_response_invalid",
-        "Runtime did not attest the exact manual Realtime audio-commit mode for this call.",
+        "Runtime did not attest the exact ordered PCM append/commit mode for this call.",
         "Unknown",
         502,
       );

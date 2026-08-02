@@ -158,13 +158,14 @@ test("provider sign-out stays within the CSP-closed same-origin request boundary
 });
 
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
-  const [app, registry, intake, projects, voice, realtime, browserSpeech, client, admission, documentResult] = await Promise.all([
+  const [app, registry, intake, projects, voice, realtime, pcm, browserSpeech, client, admission, documentResult] = await Promise.all([
     read("../src/App.tsx"),
     surfaceRegistry(),
     read("../src/components/DocumentIntake.tsx"),
     read("../src/components/ProjectStudio.tsx"),
     read("../src/components/VoiceWorkspace.tsx"),
     read("../src/lib/realtime-voice-client.ts"),
+    read("../src/lib/realtime-pcm-input.ts"),
     read("../src/lib/browser-speech.ts"),
     read("../src/lib/local-client.ts"),
     read("../src/lib/runtime-voice-admission.ts"),
@@ -194,11 +195,13 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /RTCPeerConnection/);
   assert.match(realtime, /echoCancellation: true/);
   assert.match(realtime, /conversation\.item\.input_audio_transcription\.completed/);
-  assert.match(realtime, /type: "input_audio_buffer\.commit"/);
+  assert.match(pcm, /type: "input_audio_buffer\.append"/);
+  assert.match(pcm, /type: "input_audio_buffer\.commit"/);
   assert.match(realtime, /input_audio_buffer\.committed/);
   assert.match(realtime, /status\.serverVAD === false/);
   assert.match(realtime, /status\.clientAudioCommitRequired === true/);
-  assert.match(realtime, /direction: "sendonly"/);
+  assert.match(realtime, /status\.clientAudioAppendRequired === true/);
+  assert.doesNotMatch(realtime, /addTransceiver|\.addTrack\(/);
   assert.match(realtime, /setMicrophoneMuted/);
   assert.match(realtime, /track\.enabled = !this\.microphoneMuted && !this\.turnProcessing/);
   assert.match(realtime, /setOutputMuted/);
@@ -208,7 +211,7 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.doesNotMatch(realtime, /type:\s*"response\.create"/);
   assert.doesNotMatch(realtime, /\.play\(/);
   for (const control of ["Mute microphone", "Mute NEXUS", "Unmute microphone", "Unmute NEXUS"]) assert.match(voice, new RegExp(control));
-  assert.match(voice, /WebRTC carries microphone input only/i);
+  assert.match(voice, /WebRTC carries ordered microphone PCM on its data channel only/i);
   assert.match(voice, /model-native knowledge/i);
   assert.match(browserSpeech, /SpeechRecognition/);
   assert.match(browserSpeech, /speechSynthesis\.speak\(utterance\)/);
@@ -823,7 +826,8 @@ test("copilot and voice controls fail closed on canonical interaction availabili
   assert.match(voice, /The captured transcript has not been sent/);
   assert.doesNotMatch(voice, /response_timeout/);
   assert.match(voice, /Send captured transcript through governed Voice/);
-  assert.match(realtime, /direction: "sendonly"/);
+  assert.match(realtime, /RealtimePcmAppendCoordinator/);
+  assert.doesNotMatch(realtime, /addTransceiver|\.addTrack\(/);
   assert.match(realtime, /isProviderOutputEvent\(type\)/);
   assert.match(realtime, /forbidden output event/);
   assert.doesNotMatch(realtime, /RealtimeNarrationResponseGate|requestResponse/);

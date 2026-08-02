@@ -1,11 +1,16 @@
 import { OPERATIONAL_SESSION_INVALID_EVENT, operationalSessionClient } from "./local-client.ts";
 import { RealtimeTurnAdmissionLedger } from "./runtime-admission-policy.ts";
+import {
+  RealtimePcmAppendCoordinator,
+  createRealtimePcmCapture,
+  type RealtimePcmCapture,
+} from "./realtime-pcm-input.ts";
 
 export type RealtimeVoiceState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "interrupted" | "error";
 
 export const RUNTIME_PROMPT_ECHO_HEADER = "X-NEXUS-Prompt-Echo-Signature";
 export const RUNTIME_REALTIME_INPUT_MODE_HEADER = "X-NEXUS-Realtime-Input-Mode";
-export const RUNTIME_REALTIME_INPUT_MODE = "client-audio-commit-v1";
+export const RUNTIME_REALTIME_INPUT_MODE = "client-pcm-append-commit-v1";
 
 export type RealtimeTranscriptAdmission =
   | { admitted: true; spokenSummary: string }
@@ -19,15 +24,21 @@ export type RealtimeVoiceErrorContext = {
 export type RealtimeManualCommitStatus = {
   state?: string;
   serverVAD?: boolean;
+  clientAudioAppendRequired?: boolean;
+  inputAudioAppendEvent?: string;
   clientAudioCommitRequired?: boolean;
   inputAudioCommitEvent?: string;
+  rtpAudioNegotiated?: boolean;
 };
 
 export function isVerifiedManualCommitStatus(status: RealtimeManualCommitStatus | null | undefined): boolean {
   return status?.state === "available"
     && status.serverVAD === false
+    && status.clientAudioAppendRequired === true
+    && status.inputAudioAppendEvent === "input_audio_buffer.append"
     && status.clientAudioCommitRequired === true
-    && status.inputAudioCommitEvent === "input_audio_buffer.commit";
+    && status.inputAudioCommitEvent === "input_audio_buffer.commit"
+    && status.rtpAudioNegotiated === false;
 }
 
 export type RealtimeVoiceCallbacks = {
@@ -239,6 +250,7 @@ export class RealtimeVoiceClient {
   private channel: RTCDataChannel | null = null;
   private stream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
+  private pcmCapture: RealtimePcmCapture | null = null;
   private animationFrame: number | null = null;
   private microphoneMuted = false;
   private transportReady = false;
@@ -256,6 +268,7 @@ export class RealtimeVoiceClient {
   private idleBufferClearedAtMs: number | null = null;
   private readonly speechTurnSegmenter = new ClientSpeechTurnSegmenter();
   private readonly turnAdmissions = new RealtimeTurnAdmissionLedger<RealtimeTranscriptAdmission>();
+  private readonly pcmTurns = new RealtimePcmAppendCoordinator((event) => this.send(event));
 
   constructor(callbacks: RealtimeVoiceCallbacks) {
     this.callbacks = callbacks;
@@ -290,7 +303,7 @@ export class RealtimeVoiceClient {
       if (!statusResponse.ok || !statusBody.ok || !isVerifiedManualCommitStatus(statusBody.data)) {
         throw new Error(
           statusBody.error?.message
-          ?? "NEXUS Runtime has not verified the required manual Realtime audio-commit contract.",
+          ?? "NEXUS Runtime has not verified the required ordered PCM append/commit contract.",
         );
       }
       this.stream = await navigator.mediaDevices.getUserMedia({
@@ -298,6 +311,12 @@ export class RealtimeVoiceClient {
       });
       this.applyMicrophoneMute();
       await this.startAmplitudeMeter(this.stream);
+      this.pcmCapture = await createRealtimePcmCapture(this.stream, (samples) => {
+        if (this.microphoneMuted || this.turnProcessing) return;
+        if (this.pcmTurns.acceptSamples(samples)) return;
+        this.stop();
+        this.fail("Realtime PCM audio could not be appended to the governed provider turn.");
+      });
 
       const peer = new RTCPeerConnection();
       this.peer = peer;
@@ -313,10 +332,6 @@ export class RealtimeVoiceClient {
           this.fail("The live voice connection was interrupted.");
         }
       };
-      for (const track of this.stream.getAudioTracks()) {
-        peer.addTransceiver(track, { direction: "sendonly", streams: [this.stream] });
-      }
-
       const channel = peer.createDataChannel("oai-events");
       this.channel = channel;
       channel.addEventListener("message", (event) => this.handleEvent(event.data));
@@ -329,6 +344,11 @@ export class RealtimeVoiceClient {
         this.transportReady = true;
         this.idleBufferClearedAtMs = null;
         this.speechTurnSegmenter.reset();
+        if (!this.pcmTurns.clearProviderBuffer()) {
+          this.stop();
+          this.fail("Realtime ordered PCM transport could not initialize.");
+          return;
+        }
         this.callbacks.onState("listening");
       });
       channel.addEventListener("close", () => {
@@ -362,7 +382,7 @@ export class RealtimeVoiceClient {
       const promptEchoSignature = runtimePromptEchoSignatureFromHeaders(response.headers);
       if (!promptEchoSignature) throw new Error("NEXUS Runtime omitted the governed Realtime transcript-admission boundary.");
       const realtimeInputMode = runtimeRealtimeInputModeFromHeaders(response.headers);
-      if (!realtimeInputMode) throw new Error("NEXUS Runtime did not attest the exact manual Realtime audio-commit mode for this call.");
+      if (!realtimeInputMode) throw new Error("NEXUS Runtime did not attest the exact ordered PCM append/commit mode for this call.");
       this.promptEchoSignature = promptEchoSignature;
       this.realtimeInputModeAttested = true;
       await peer.setRemoteDescription({ type: "answer", sdp: answer });
@@ -380,6 +400,9 @@ export class RealtimeVoiceClient {
     this.animationFrame = null;
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
+    this.pcmCapture?.stop();
+    this.pcmCapture = null;
+    this.pcmTurns.reset();
     this.channel?.close();
     this.channel = null;
     this.peer?.close();
@@ -421,7 +444,7 @@ export class RealtimeVoiceClient {
       if (abandonedTurnKey && this.turnAdmissions.isActiveTurn(abandonedTurnKey)) {
         this.turnAdmissions.endTurn();
       }
-      if (abandonedBufferedSpeech && this.transportReady && !this.send({ type: "input_audio_buffer.clear" })) {
+      if (abandonedBufferedSpeech && this.transportReady && !this.pcmTurns.clearProviderBuffer()) {
         this.stop();
         this.fail("Realtime voice could not discard the muted partial speech turn.");
         return;
@@ -597,7 +620,7 @@ export class RealtimeVoiceClient {
       this.fail(`${reason} Unable to remove it from the Realtime session.`);
       return;
     }
-    if (!this.send({ type: "input_audio_buffer.clear" })) {
+    if (!this.pcmTurns.clearProviderBuffer()) {
       this.stop();
       this.fail(`${reason} Unable to clear the Realtime input buffer.`);
       return;
@@ -680,6 +703,16 @@ export class RealtimeVoiceClient {
         this.fail(error instanceof Error ? error.message : "Realtime voice could not bind the detected speech turn.");
         return;
       }
+      if (!this.pcmTurns.beginTurn()) {
+        const abandonedTurnKey = this.uncommittedTurnKey;
+        this.uncommittedTurnKey = null;
+        if (abandonedTurnKey && this.turnAdmissions.isActiveTurn(abandonedTurnKey)) {
+          this.turnAdmissions.endTurn();
+        }
+        this.stop();
+        this.fail("Realtime PCM audio turn could not start.");
+        return;
+      }
       this.callbacks.onState("listening");
       return;
     }
@@ -690,7 +723,7 @@ export class RealtimeVoiceClient {
         return;
       }
       if (observedAtMs - this.idleBufferClearedAtMs < MAXIMUM_IDLE_BUFFER_MS) return;
-      if (!this.send({ type: "input_audio_buffer.clear" })) {
+      if (!this.pcmTurns.clearProviderBuffer()) {
         this.stop();
         this.fail("Realtime voice could not bound its idle provider audio buffer.");
         return;
@@ -706,7 +739,7 @@ export class RealtimeVoiceClient {
       this.fail("Realtime voice could not preserve a bounded speech-turn commit binding.");
       return;
     }
-    if (!this.send({ type: "input_audio_buffer.commit" })) {
+    if (!this.pcmTurns.commitTurn()) {
       this.stop();
       this.fail("Realtime voice could not commit the detected speech turn.");
       return;

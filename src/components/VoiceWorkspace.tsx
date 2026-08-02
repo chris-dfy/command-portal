@@ -43,8 +43,11 @@ type VoiceStatus = RealtimeManualCommitStatus & {
   voice?: string;
   transport?: string;
   serverVAD?: boolean;
+  clientAudioAppendRequired?: boolean;
+  inputAudioAppendEvent?: string;
   clientAudioCommitRequired?: boolean;
   inputAudioCommitEvent?: string;
+  rtpAudioNegotiated?: boolean;
   interruptResponse?: boolean;
   contextAssemblyOwner?: string;
   limitations?: string[];
@@ -100,7 +103,7 @@ export function VoiceWorkspace({
     : !supported
       ? "This browser does not support secure WebRTC microphone capture."
       : !manualCommitVerified
-        ? status?.limitations?.[0] ?? "The Runtime has not verified the required manual Realtime audio-commit contract."
+        ? status?.limitations?.[0] ?? "The Runtime has not verified the required ordered PCM append/commit contract."
         : "The exact Realtime voice action, provider contract, and browser capture path are available.";
   const resultProofId = latestAdmission?.proofIds[0];
   const resultReceiptId = latestAdmission?.receiptIds[0];
@@ -379,7 +382,7 @@ export function VoiceWorkspace({
 
   return <div className="experience-grid local-workspace">
     <DataPanel eyebrow="Runtime-managed Realtime voice" title="Speak with NEXUS" icon={<Mic size={18} />} className="span-2">
-      <p className="workspace-intro">A governed voice session with bounded browser speech-turn detection and provider transcription. WebRTC carries microphone input only; one manual audio commit closes each detected turn, each final transcript enters the canonical Runtime once, and browser narration speaks only Runtime response text.</p>
+      <p className="workspace-intro">A governed voice session with bounded browser speech-turn detection and provider transcription. WebRTC carries ordered microphone PCM on its data channel only; one manual commit follows the appended audio for each detected turn, each final transcript enters the canonical Runtime once, and browser narration speaks only Runtime response text.</p>
       <div className="realtime-voice-stage">
         <NexusAvatar state={deriveAssistantAvatarState({ voiceState, textBusy: busy, hasError: false })} amplitude={amplitude} size="lg" micMuted={microphoneMuted && connected} unavailable={!connected && !liveProviderAvailable} />
         <div className="voice-stage-copy">
