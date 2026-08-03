@@ -45,6 +45,7 @@ jobs:
           jq -e '
             .bomFormat == "CycloneDX" and
             .specVersion == "1.6" and
+            .serialNumber == "urn:uuid:eefb437b-666b-4c27-9edd-a4c7b4d10f71" and
             .metadata.component.name == "command-portal" and
             .metadata.component.version == "0.6.0" and
             any(.components[]; .name == "postcss" and .version == "8.5.25")
