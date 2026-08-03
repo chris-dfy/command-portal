@@ -694,8 +694,10 @@ export function loadConfig(overrides = {}) {
       32,
     )
     : "";
-  const operationalScopes = String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "operations:read,operations:write,repository:metadata:read,approvals:decide,evidence:write,knowledge:promote,edge:node_admission:request")
-    .split(",").map((item) => item.trim()).filter(Boolean);
+  const operationalScopes = [...new Set(
+    String(overrides.operationalScopes ?? process.env.COMMAND_PORTAL_OPERATIONAL_SCOPES ?? "approvals:decide,edge:node_admission:request,evidence:write,knowledge:promote,operations:read,operations:write,repository:metadata:read")
+      .split(",").map((item) => item.trim()).filter(Boolean),
+  )].sort();
   const replitDeployment = enabled(overrides.replitDeployment ?? process.env.REPLIT_DEPLOYMENT);
   const replitId = String(overrides.replitId ?? process.env.REPL_ID ?? "").trim();
   const operationalSessionMode = String(

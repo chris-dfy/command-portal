@@ -39,7 +39,7 @@ To enable the fixed-workspace Hosted Operational Gateway, publish the app as a *
 - `NEXUS_HOSTED_WORKSPACE_ID` matches `COMMAND_PORTAL_WORKSPACE_ID`;
 - `NEXUS_HOSTED_SERVICE_ID` matches `COMMAND_PORTAL_OPERATOR_USER_ID`;
 - `NEXUS_HOSTED_SERVICE_ROLE` matches `COMMAND_PORTAL_OPERATOR_ROLE`; and
-- `NEXUS_HOSTED_SERVICE_SCOPES` matches `COMMAND_PORTAL_OPERATIONAL_SCOPES` using the same comma-separated values.
+- `NEXUS_HOSTED_SERVICE_SCOPES` matches the Gateway's canonical, deduplicated `COMMAND_PORTAL_OPERATIONAL_SCOPES` value in lexicographic order. Scope order is part of the fail-closed Runtime identity corroboration contract.
 
 Published Replit deployments select the automatic workspace-session contract from Replit's predefined `REPLIT_DEPLOYMENT=1` marker and require the exact `REPLIT_DOMAINS` binding, HTTPS, and a same-origin browser request. The browser receives only a signed HttpOnly session cookie and CSRF token; it never receives or submits an operator access key. Non-Replit development retains the explicit `access_key` compatibility mode.
 

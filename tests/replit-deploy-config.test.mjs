@@ -22,8 +22,10 @@ test("published deploy config uses the bounded automatic workspace service", () 
   assert.equal(setting("COMMAND_PORTAL_SESSION_MODE"), "automatic_private_workspace");
   assert.equal(setting("COMMAND_PORTAL_OPERATOR_USER_ID"), "nexus-workspace-service");
   assert.equal(setting("COMMAND_PORTAL_OPERATOR_ROLE"), "operator");
+  const scopes = setting("COMMAND_PORTAL_OPERATIONAL_SCOPES").split(",");
   assert.equal(
-    setting("COMMAND_PORTAL_OPERATIONAL_SCOPES"),
-    "operations:read,operations:write,repository:metadata:read,evidence:write,edge:node_admission:request",
+    scopes.join(","),
+    "edge:node_admission:request,evidence:write,operations:read,operations:write,repository:metadata:read",
   );
+  assert.deepEqual(scopes, [...new Set(scopes)].sort());
 });

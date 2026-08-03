@@ -101,7 +101,7 @@ test("Replit publishes the fixed hosted binding without committing server secret
     'COMMAND_PORTAL_TENANT_ID = "nexicron"',
     'COMMAND_PORTAL_WORKSPACE_ID = "primary"',
     'COMMAND_PORTAL_OPERATOR_ROLE = "operator"',
-    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,repository:metadata:read,evidence:write,edge:node_admission:request"',
+    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "edge:node_admission:request,evidence:write,operations:read,operations:write,repository:metadata:read"',
     'COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED = "true"',
     'COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF = "secret-manager:experience-gateway/mission-3/provider-session-current"',
     'COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID = "provider-session-current"',

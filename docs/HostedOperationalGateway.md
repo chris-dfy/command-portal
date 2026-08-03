@@ -43,13 +43,15 @@ The execution Runtime enables hosted ingress enforcement only when `NEXUS_HOSTED
 NEXUS_HOSTED_TENANT_ID=nexicron
 NEXUS_HOSTED_WORKSPACE_ID=primary
 NEXUS_HOSTED_SERVICE_ID=nexus-workspace-service
+NEXUS_HOSTED_SERVICE_ROLE=operator
+NEXUS_HOSTED_SERVICE_SCOPES=edge:node_admission:request,evidence:write,operations:read,operations:write,repository:metadata:read
 NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET=<same Command Portal-only HMAC secret as the portal>
 NEXUS_CONTEXT_ASSERTION_ISSUERS=command-portal-experience-gateway
 NEXUS_CONTEXT_ASSERTION_CLIENT_IDS=nexus-web
 NEXUS_HOSTED_GATEWAY_AUDIT_PATH=data/team/hosted_gateway_audit.jsonl
 ```
 
-Runtime verifies the bearer transport credential and exact fixed workspace binding for ordinary bounded workspace operations. Human-only routes additionally require the v3 human assertion. The assertion issuer/client must be explicitly allowlisted and all corroborating identity headers/body fields must match. Replayed, expired, future-dated, mismatched, or invalid assertions fail closed. Runtime records secret-free admission outcomes. `/health` remains liveness only.
+Runtime verifies the bearer transport credential and exact fixed workspace binding for ordinary bounded workspace operations. The scope string is canonicalized by the Gateway as a deduplicated lexicographically ordered list and the Runtime deployment must use that exact order; a mismatch fails closed. Human-only routes additionally require the v3 human assertion. The assertion issuer/client must be explicitly allowlisted and all corroborating identity headers/body fields must match. Replayed, expired, future-dated, mismatched, or invalid assertions fail closed. Runtime records secret-free admission outcomes. `/health` remains liveness only.
 
 ## Portal configuration
 

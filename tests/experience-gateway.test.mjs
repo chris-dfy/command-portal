@@ -3361,12 +3361,22 @@ test("published Replit mode requires its private domain boundary and no operator
     replitDeployment: true,
     replitDomains: "command-portal.replit.app",
   };
-  const config = loadConfig(hosted);
+  const config = loadConfig({
+    ...hosted,
+    operationalScopes: "repository:metadata:read,operations:write,operations:read,operations:read,evidence:write,edge:node_admission:request",
+  });
   assert.equal(config.operationalSessionMode, "automatic_private_workspace");
   assert.equal(config.operationalPrincipalType, "workspace_service");
   assert.equal(config.operationalAccessBasis, "replit_private_deployment");
   assert.equal(config.operationalAccessKey, "automatic-session-no-access-key");
   assert.deepEqual(config.replitDomains, ["command-portal.replit.app"]);
+  assert.deepEqual(config.operationalScopes, [
+    "edge:node_admission:request",
+    "evidence:write",
+    "operations:read",
+    "operations:write",
+    "repository:metadata:read",
+  ]);
 
   assert.throws(
     () => loadConfig({ ...hosted, replitDomains: "" }),
@@ -3413,7 +3423,7 @@ test("private Replit ingress automatically establishes one server-derived worksp
   assert.equal(body.session.tenantId, "tenant-alpha");
   assert.equal(body.session.workspaceId, "workspace-alpha");
   assert.equal(body.session.role, "operator");
-  assert.deepEqual(body.session.scopes, ["operations:read", "operations:write", "evidence:write"]);
+  assert.deepEqual(body.session.scopes, ["evidence:write", "operations:read", "operations:write"]);
   assert.equal(body.session.connectionMode, "automatic_private_workspace");
   assert.equal(body.session.principalType, "workspace_service");
   assert.equal(body.session.accessBasis, "replit_private_deployment");
