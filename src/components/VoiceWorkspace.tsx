@@ -47,6 +47,8 @@ type VoiceStatus = RealtimeManualCommitStatus & {
   inputAudioAppendEvent?: string;
   clientAudioCommitRequired?: boolean;
   inputAudioCommitEvent?: string;
+  providerOfferAudioDirection?: string;
+  providerOfferAudioTrackAttached?: boolean;
   rtpAudioNegotiated?: boolean;
   interruptResponse?: boolean;
   contextAssemblyOwner?: string;

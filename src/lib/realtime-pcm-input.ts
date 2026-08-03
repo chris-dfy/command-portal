@@ -24,7 +24,8 @@ export function encodePcm16Base64(samples: Float32Array): string {
 
 /**
  * Preserves bounded pre-roll, then serializes clear, PCM appends, and commit on
- * one reliable ordered data channel. No RTP media path exists or can race it.
+ * one reliable ordered data channel. The provider-required audio m-line stays
+ * inactive and trackless, so no RTP audio can race the ordered PCM path.
  */
 export class RealtimePcmAppendCoordinator {
   private readonly preRoll: string[] = [];

@@ -28,6 +28,8 @@ export type RealtimeManualCommitStatus = {
   inputAudioAppendEvent?: string;
   clientAudioCommitRequired?: boolean;
   inputAudioCommitEvent?: string;
+  providerOfferAudioDirection?: string;
+  providerOfferAudioTrackAttached?: boolean;
   rtpAudioNegotiated?: boolean;
 };
 
@@ -38,6 +40,8 @@ export function isVerifiedManualCommitStatus(status: RealtimeManualCommitStatus 
     && status.inputAudioAppendEvent === "input_audio_buffer.append"
     && status.clientAudioCommitRequired === true
     && status.inputAudioCommitEvent === "input_audio_buffer.commit"
+    && status.providerOfferAudioDirection === "inactive"
+    && status.providerOfferAudioTrackAttached === false
     && status.rtpAudioNegotiated === false;
 }
 
@@ -332,6 +336,10 @@ export class RealtimeVoiceClient {
           this.fail("The live voice connection was interrupted.");
         }
       };
+      const inactiveAudioTransceiver = peer.addTransceiver("audio", { direction: "inactive" });
+      if (inactiveAudioTransceiver.direction !== "inactive" || inactiveAudioTransceiver.sender.track !== null) {
+        throw new Error("Realtime provider compatibility media must remain inactive and trackless.");
+      }
       const channel = peer.createDataChannel("oai-events");
       this.channel = channel;
       channel.addEventListener("message", (event) => this.handleEvent(event.data));

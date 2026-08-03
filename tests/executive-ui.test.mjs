@@ -201,7 +201,10 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /status\.serverVAD === false/);
   assert.match(realtime, /status\.clientAudioCommitRequired === true/);
   assert.match(realtime, /status\.clientAudioAppendRequired === true/);
-  assert.doesNotMatch(realtime, /addTransceiver|\.addTrack\(/);
+  assert.match(realtime, /status\.providerOfferAudioDirection === "inactive"/);
+  assert.match(realtime, /status\.providerOfferAudioTrackAttached === false/);
+  assert.match(realtime, /addTransceiver\("audio", \{ direction: "inactive" \}\)/);
+  assert.doesNotMatch(realtime, /\.addTrack\(/);
   assert.match(realtime, /setMicrophoneMuted/);
   assert.match(realtime, /track\.enabled = !this\.microphoneMuted && !this\.turnProcessing/);
   assert.match(realtime, /setOutputMuted/);
@@ -827,7 +830,8 @@ test("copilot and voice controls fail closed on canonical interaction availabili
   assert.doesNotMatch(voice, /response_timeout/);
   assert.match(voice, /Send captured transcript through governed Voice/);
   assert.match(realtime, /RealtimePcmAppendCoordinator/);
-  assert.doesNotMatch(realtime, /addTransceiver|\.addTrack\(/);
+  assert.match(realtime, /addTransceiver\("audio", \{ direction: "inactive" \}\)/);
+  assert.doesNotMatch(realtime, /\.addTrack\(/);
   assert.match(realtime, /isProviderOutputEvent\(type\)/);
   assert.match(realtime, /forbidden output event/);
   assert.doesNotMatch(realtime, /RealtimeNarrationResponseGate|requestResponse/);

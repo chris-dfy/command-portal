@@ -122,6 +122,8 @@ test("only the exact Runtime manual-commit status enables live voice", () => {
     inputAudioAppendEvent: "input_audio_buffer.append",
     clientAudioCommitRequired: true,
     inputAudioCommitEvent: "input_audio_buffer.commit",
+    providerOfferAudioDirection: "inactive",
+    providerOfferAudioTrackAttached: false,
     rtpAudioNegotiated: false,
   };
   assert.equal(isVerifiedManualCommitStatus(verified), true);
@@ -137,6 +139,10 @@ test("only the exact Runtime manual-commit status enables live voice", () => {
     { ...verified, clientAudioCommitRequired: undefined },
     { ...verified, inputAudioCommitEvent: "input_audio_buffer.speech_stopped" },
     { ...verified, inputAudioCommitEvent: undefined },
+    { ...verified, providerOfferAudioDirection: "sendonly" },
+    { ...verified, providerOfferAudioDirection: undefined },
+    { ...verified, providerOfferAudioTrackAttached: true },
+    { ...verified, providerOfferAudioTrackAttached: undefined },
     { ...verified, rtpAudioNegotiated: true },
   ]) assert.equal(isVerifiedManualCommitStatus(status), false);
 });
@@ -199,6 +205,7 @@ test("the browser rejects missing or wrong per-call attestation before accepting
     }
   };
   const remoteDescriptions = [];
+  const transceiverOffers = [];
   let callInputMode = null;
   const track = { enabled: true, stop() {} };
   const stream = { getAudioTracks: () => [track], getTracks: () => [track] };
@@ -222,6 +229,10 @@ test("the browser rejects missing or wrong per-call attestation before accepting
   }
   class FakePeer {
     connectionState = "connected";
+    addTransceiver(kind, options) {
+      transceiverOffers.push({ kind, options });
+      return { direction: options?.direction, sender: { track: null } };
+    }
     createDataChannel() {
       return { readyState: "connecting", addEventListener() {}, close() {} };
     }
@@ -259,6 +270,8 @@ test("the browser rejects missing or wrong per-call attestation before accepting
               inputAudioAppendEvent: "input_audio_buffer.append",
               clientAudioCommitRequired: true,
               inputAudioCommitEvent: "input_audio_buffer.commit",
+              providerOfferAudioDirection: "inactive",
+              providerOfferAudioTrackAttached: false,
               rtpAudioNegotiated: false,
             },
           }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -300,6 +313,11 @@ test("the browser rejects missing or wrong per-call attestation before accepting
     await accepted.connect();
     assert.equal(remoteDescriptions.length, 1);
     assert.equal(remoteDescriptions[0].sdp, "v=0\r\na=answer\r\n");
+    assert.equal(transceiverOffers.length, 3);
+    assert.deepEqual(
+      transceiverOffers,
+      Array.from({ length: 3 }, () => ({ kind: "audio", options: { direction: "inactive" } })),
+    );
   } finally {
     for (const client of clients.splice(0)) client.stop();
     restore();
@@ -637,10 +655,11 @@ test("invalid or non-monotonic acoustic samples fail closed", () => {
   assert.match(nonMonotonic.errors.at(-1), /invalid acoustic sample/);
 });
 
-test("the browser offer is data-only and source contains no provider answer path", async () => {
+test("the browser offer has one inactive trackless audio section and no provider answer path", async () => {
   const source = await readFile(new URL("../src/lib/realtime-voice-client.ts", import.meta.url), "utf8");
   const pcmSource = await readFile(new URL("../src/lib/realtime-pcm-input.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /addTransceiver|\.addTrack\(/);
+  assert.match(source, /addTransceiver\("audio", \{ direction: "inactive" \}\)/);
+  assert.doesNotMatch(source, /\.addTrack\(/);
   assert.match(source, /Boolean\(window\.AudioContext\)/);
   assert.match(source, /context\.state !== "running"/);
   assert.equal((pcmSource.match(/type: "input_audio_buffer\.append"/g) ?? []).length, 1);
