@@ -1,0 +1,1423 @@
+{
+  "record_type": "nexus_principle_impact_assessment_companion",
+  "schema_version": "1.0.0",
+  "impact_id": "NCR-IMPACT-command-portal-runtime-readiness-production-publish-20260803",
+  "impact_record_digest": "sha256:f7deee3b5b2318d4f25c8fa8462088d9323cb552410ea8e1e4cf4d6325f0564d",
+  "validation_digest": "sha256:f6bfc3f9753c6aef30049c951a1d244929a11d062c32e1034ee65d038c244846",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0001@1",
+      "NCR-CON-0002@1",
+      "NCR-CON-0006@1",
+      "NCR-CON-0009@1",
+      "NCR-CON-0019@1",
+      "NCR-CON-0020@1",
+      "NCR-CON-0021@1",
+      "NCR-CON-0026@1",
+      "NCR-CON-0027@1",
+      "NCR-CON-0028@1",
+      "NCR-CON-0029@1",
+      "NCR-CON-0030@1",
+      "NCR-CON-0032@1",
+      "NCR-CON-0033@1",
+      "NCR-CON-0034@1",
+      "NCR-ARC-0008@1",
+      "NCR-ARC-0012@1",
+      "NCR-ARC-0017@1",
+      "NCR-ARC-0019@1",
+      "NCR-ARC-0020@1",
+      "NCR-ENG-0002@1",
+      "NCR-ENG-0006@1",
+      "NCR-ENG-0008@1",
+      "NCR-ENG-0009@1",
+      "NCR-ENG-0010@1",
+      "NCR-ENG-0011@1",
+      "NCR-ENG-0012@1",
+      "NCR-ENG-0015@1",
+      "NCR-ENG-0018@1",
+      "NCR-ENG-0019@1",
+      "NCR-ENG-0021@1",
+      "NCR-ENG-0022@1",
+      "NCR-OPS-0011@1",
+      "NCR-OPS-0012@1",
+      "NCR-OPS-0017@1",
+      "NCR-OPS-0019@1",
+      "NCR-OPS-0020@1",
+      "NCR-OPS-0022@1",
+      "NCR-OPS-0028@1",
+      "NCR-OPS-0029@1",
+      "NCR-OPS-0030@1",
+      "NCR-EXE-0005@1",
+      "NCR-EXE-0007@1",
+      "NCR-EXE-0008@1",
+      "NCR-EXE-0012@1",
+      "NCR-EXE-0014@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:e4d7beb5788a8cd1aac589161c68f33303a1e6c31bb4e1d54cdf1a72c8cffda2"
+  },
+  "resolved_principle_entry_ids": [
+    "NCR-CON-0001@1",
+    "NCR-CON-0002@1",
+    "NCR-CON-0003@1",
+    "NCR-CON-0004@1",
+    "NCR-CON-0005@1",
+    "NCR-CON-0006@1",
+    "NCR-CON-0007@1",
+    "NCR-CON-0009@1",
+    "NCR-CON-0010@1",
+    "NCR-CON-0011@1",
+    "NCR-CON-0012@1",
+    "NCR-CON-0018@1",
+    "NCR-CON-0019@1",
+    "NCR-CON-0020@1",
+    "NCR-CON-0021@1",
+    "NCR-CON-0022@1",
+    "NCR-CON-0023@1",
+    "NCR-CON-0024@1",
+    "NCR-CON-0025@1",
+    "NCR-CON-0026@1",
+    "NCR-CON-0027@1",
+    "NCR-CON-0028@1",
+    "NCR-CON-0029@1",
+    "NCR-CON-0030@1",
+    "NCR-CON-0031@1",
+    "NCR-CON-0032@1",
+    "NCR-CON-0033@1",
+    "NCR-CON-0034@1",
+    "NCR-ARC-0006@1",
+    "NCR-ARC-0008@1",
+    "NCR-ARC-0010@1",
+    "NCR-ARC-0012@1",
+    "NCR-ARC-0013@1",
+    "NCR-ARC-0014@1",
+    "NCR-ARC-0015@1",
+    "NCR-ARC-0016@1",
+    "NCR-ARC-0017@1",
+    "NCR-ARC-0019@1",
+    "NCR-ARC-0020@1",
+    "NCR-ENG-0002@1",
+    "NCR-ENG-0006@1",
+    "NCR-ENG-0008@1",
+    "NCR-ENG-0009@1",
+    "NCR-ENG-0010@1",
+    "NCR-ENG-0011@1",
+    "NCR-ENG-0012@1",
+    "NCR-ENG-0015@1",
+    "NCR-ENG-0018@1",
+    "NCR-ENG-0019@1",
+    "NCR-ENG-0021@1",
+    "NCR-ENG-0022@1",
+    "NCR-OPS-0010@1",
+    "NCR-OPS-0011@1",
+    "NCR-OPS-0012@1",
+    "NCR-OPS-0013@1",
+    "NCR-OPS-0017@1",
+    "NCR-OPS-0018@1",
+    "NCR-OPS-0019@1",
+    "NCR-OPS-0020@1",
+    "NCR-OPS-0022@1",
+    "NCR-OPS-0028@1",
+    "NCR-OPS-0029@1",
+    "NCR-OPS-0030@1",
+    "NCR-EXE-0005@1",
+    "NCR-EXE-0007@1",
+    "NCR-EXE-0008@1",
+    "NCR-EXE-0011@1",
+    "NCR-EXE-0012@1",
+    "NCR-EXE-0014@1"
+  ],
+  "schema_limitation": {
+    "sealed_contract": "contracts/constitution/constitutional-registry.schema.json#/$defs/principleImpactRecord",
+    "limitation": "The sealed #/$defs/principleImpactRecord contract records one basis-wide disposition, evidence-reference set, and conflict set. It has no fields for distinct per-principle dispositions, per-principle executable evidence, or per-principle migration consequences. The derived_principle_assessments in this validation result are a non-authoritative companion projection and do not amend the sealed contract.",
+    "companion_posture": "non_authoritative_projection",
+    "authority_effect": "This companion records engineering traceability only. It does not amend the Registry or enlarge the sealed Principle Impact Record."
+  },
+  "executable_evidence": [
+    {
+      "evidence_id": "REGISTRY-INTEGRITY",
+      "command": "./nexusctl constitution-registry validate",
+      "result": "valid=true; NCR-1.0.0; 122 active principles; Registry, bundle, publication, and schema digests match CURRENT.json",
+      "verification_scope": "Active constitutional source and immutable release integrity."
+    },
+    {
+      "evidence_id": "BASIS-VALIDATION",
+      "command": "./nexusctl constitution-registry validate-basis [46 pinned direct principles]",
+      "result": "valid=true; basis_digest=sha256:13b2c81a565d77fcd4092fffee631394e4a3b73a04908217dba477abd978a8d2; 69 resolved principles; resolution_digest=sha256:e4d7beb5788a8cd1aac589161c68f33303a1e6c31bb4e1d54cdf1a72c8cffda2",
+      "verification_scope": "Pinned direct deployment basis and transitive Constitutional Registry closure."
+    },
+    {
+      "evidence_id": "PORTAL-IMPLEMENTATION-GATES",
+      "command": "Node 22.22.0 npm run check; npm audit --audit-level=moderate; tracked CycloneDX validation",
+      "result": "347 tests passed; 0 failed; 1,645 modules built; zero vulnerabilities; SBOM digest sha256:eac47de3d648815aecc0923b862506c0020c1ebf979a0afba073272c9b7e78d6",
+      "verification_scope": "Runtime bootstrap, route-specific failure, readiness adapter, browser coordination, production build, dependency, and secret-value boundaries."
+    },
+    {
+      "evidence_id": "SIGNED-RELEASE",
+      "command": "GitHub Actions run 30847352748; gh attestation verify for SLSA and https://cyclonedx.org/bom",
+      "result": "release subject command-portal-64d1e2211f377c4a4c4fd7748583d636fd5c3d1f.tar.gz@sha256:e7287068cb2b564b9d1891c2c65dcc934a9279b62d568ae7362984ebf10b4311 independently verified; SLSA attestation 38644801; SBOM attestation 38644803; Rekor timestamps verified",
+      "verification_scope": "Exact source/ref/toolchain/build/SBOM provenance and artifact signature."
+    },
+    {
+      "evidence_id": "REPLIT-FINAL-ACTIVATION",
+      "command": "Replit exact-source verification, provider build, security scan, and production promotion",
+      "result": "deployment 350e836b-a349-4504-bab6-efbf6db43022; final build dc11c97f-3a6a-40f8-b6a5-ea9b6fed604c; success 2026-08-03T20:01:05Z; exact commit/tree; 1,645 modules; zero vulnerabilities; no secret exposure",
+      "verification_scope": "Existing private production target, final serving build, toolchain, assets, audit, and secret boundary."
+    },
+    {
+      "evidence_id": "ROLLBACK-RECOVERY",
+      "command": "Controlled exact-commit Replit rollback to 7d57e57, live verification, exact signed-release restoration, and final live verification",
+      "result": "rollback build 57fee669-aea2-4de6-ae31-7d95f342a33d succeeded at 2026-08-03T19:57:45Z; rollback postconditions passed; recovery build dc11c97f-3a6a-40f8-b6a5-ea9b6fed604c succeeded; recovery postconditions passed",
+      "verification_scope": "Target-environment clean deployment, rollback, recovery, routing/configuration/secret compatibility, and final serving revision."
+    },
+    {
+      "evidence_id": "LIVE-ACCEPTANCE",
+      "command": "Authenticated live browser dashboard load, manual Runtime refresh, health/readiness inspection, and Ask NEXUS entry-point inspection",
+      "result": "Healthy gateway/runtime/registry/environment/connection/diagnostics; Compatible version; startup requirements pass; zero Unknown signals; no status-details alert; no coordinator failure fan-out; Ask NEXUS Online; typed and voice entry available; no prompt sent; no Runtime credential stored",
+      "verification_scope": "Live target postconditions, fail-visible truth, independent readiness/health presentation, interaction availability, and non-execution."
+    },
+    {
+      "evidence_id": "SIGNED-DEPLOYMENT-RECEIPT",
+      "command": "GitHub Actions run 30848916393; gh attestation verify --predicate-type https://nexus.local/attestations/experience-deployment/v1",
+      "result": "receipt sha256:a5f64a6345f91e36ddaf0e63d516e6dda40e7069221302f14b85e0e8b05967e4 semantically validated; custom attestation 38648665 binds operator acceptance, final Replit build, rollback build, and postconditions to the signed release subject; independent verification and Rekor timestamp passed",
+      "verification_scope": "Durable signed deployment/operator-acceptance receipt and exact artifact-to-target activation binding."
+    },
+    {
+      "evidence_id": "ROOT-CONSTITUTIONAL-REGRESSION",
+      "command": "nexus/bin/python -m pytest test_constitutional_registry.py test_executive_os.py -q; ./nexusctl executive-test",
+      "result": "485 constitutional and Executive OS tests passed in the mandated project virtual environment; executive-test passed",
+      "verification_scope": "Constitutional Registry, Principle Impact Record, Executive OS, receipt, and governance regression surface."
+    },
+    {
+      "evidence_id": "PIR-VALIDATION",
+      "command": "./nexusctl constitution-registry validate-impact docs/mission5/NCR-IMPACT-command-portal-runtime-readiness-production-publish-20260803.json",
+      "result": "valid=true; blocks_artifact=false; record_digest=sha256:f7deee3b5b2318d4f25c8fa8462088d9323cb552410ea8e1e4cf4d6325f0564d; validation_digest=sha256:f6bfc3f9753c6aef30049c951a1d244929a11d062c32e1034ee65d038c244846; conflicts=[]",
+      "verification_scope": "Pinned basis, transitive closure, evidence references, no-change disposition, conflict set, and blocking posture."
+    }
+  ],
+  "principle_assessments": [
+    {
+      "principle_entry_id": "NCR-CON-0001@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0002@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0003@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0004@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0005@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0006@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0007@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0009@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0010@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0011@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0012@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0018@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0019@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0020@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0021@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0022@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0023@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0024@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0025@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0026@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0027@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0028@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0029@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0030@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0031@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0032@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0033@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-CON-0034@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0006@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0008@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0010@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0012@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0013@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0014@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0015@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0016@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0017@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0019@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0020@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0002@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0006@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0008@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0009@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0010@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0011@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0012@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0015@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0018@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0019@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0021@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0022@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0010@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0011@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0012@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0013@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0017@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0018@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0019@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0020@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0022@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0028@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0029@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0030@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-EXE-0005@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-EXE-0007@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-EXE-0008@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-EXE-0011@1",
+      "disposition": "conforms",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "No independent semantic migration applies. This transitive dependency remains preserved by the pinned direct basis, signed release, signed deployment receipt, tested rollback, and unchanged Runtime truth boundaries."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-EXE-0012@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    },
+    {
+      "principle_entry_id": "NCR-EXE-0014@1",
+      "disposition": "verifies",
+      "executable_evidence_ids": [
+        "REGISTRY-INTEGRITY",
+        "BASIS-VALIDATION",
+        "PORTAL-IMPLEMENTATION-GATES",
+        "SIGNED-RELEASE",
+        "REPLIT-FINAL-ACTIVATION",
+        "ROLLBACK-RECOVERY",
+        "LIVE-ACCEPTANCE",
+        "SIGNED-DEPLOYMENT-RECEIPT",
+        "ROOT-CONSTITUTIONAL-REGRESSION",
+        "PIR-VALIDATION"
+      ],
+      "migration_consequences": [
+        "The exact signed portal revision replaced its predecessor in the existing private Replit target; the predecessor was retained and exercised through rollback. No constitutional, contract, database, record, key, Runtime, capability-state, production-readiness, enterprise-readiness, or Authority migration occurred."
+      ]
+    }
+  ]
+}
+
