@@ -96,7 +96,7 @@ jobs:
           subject-path: release/command-portal-${{ github.sha }}.tar.gz
           sbom-path: docs/mission5/NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json
 
-      - name: Read deployment receipt metadata
+      - name: Validate and read deployment receipt metadata
         id: deployment-receipt
         shell: bash
         run: |
@@ -105,6 +105,41 @@ jobs:
             echo "present=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
+          jq -e '
+            .recordType == "nexus_engineering_receipt" and
+            .schemaVersion == "1.0.0" and
+            .completionStatus == "completed" and
+            .completionClaimed == true and
+            .sanitized == true and
+            .constitutionalBasis.releaseId == "NCR-1.0.0" and
+            .constitutionalBasis.releaseDigest == "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa" and
+            .constitutionalBasis.applicablePrincipleResolutionDigest == "sha256:e4d7beb5788a8cd1aac589161c68f33303a1e6c31bb4e1d54cdf1a72c8cffda2" and
+            .authorization.operatorInstruction == "PUBLISH IT." and
+            .operatorAcceptance.accepted == true and
+            .sourceLineage.releaseCommit == "64d1e2211f377c4a4c4fd7748583d636fd5c3d1f" and
+            .sourceLineage.releaseTree == "813632d6dfe72099e2e8a00112df288efe68a922" and
+            .attestation.subjectName == "command-portal-64d1e2211f377c4a4c4fd7748583d636fd5c3d1f.tar.gz" and
+            .attestation.subjectDigest == "sha256:e7287068cb2b564b9d1891c2c65dcc934a9279b62d568ae7362984ebf10b4311" and
+            .replitActivation.deploymentId == "350e836b-a349-4504-bab6-efbf6db43022" and
+            .replitActivation.finalBuildId == "dc11c97f-3a6a-40f8-b6a5-ea9b6fed604c" and
+            .replitActivation.published == true and
+            .deploymentLineage.rollbackActivation.livePostconditionsPassed == true and
+            .deploymentLineage.recoveryActivation.livePostconditionsPassed == true and
+            .deploymentLineage.finalServingRevision == "recoveryActivation" and
+            .livePostconditions.gatewayStatus == "Healthy" and
+            .livePostconditions.runtimeBootstrapRouteCount == 15 and
+            .livePostconditions.unknownSignalsObserved == 0 and
+            .livePostconditions.fabricatedGatewaySnapshotFailureFanoutObserved == false and
+            .livePostconditions.statusDetailsUnavailableAlertObserved == false and
+            .livePostconditions.askNexusStatus == "Online" and
+            .rollbackAndRecovery.drillExecuted == true and
+            .rollbackAndRecovery.rollbackPostconditionsPassed == true and
+            .rollbackAndRecovery.recoveryPostconditionsPassed == true and
+            .security.vulnerabilityGatePassed == true and
+            .security.slsaAndSbomAttestationsVerified == true and
+            .nonChanges.productionReadinessChanged == false and
+            .nonChanges.capabilityStateChanged == false
+          ' "${receipt}" >/dev/null
           echo "present=true" >> "${GITHUB_OUTPUT}"
           echo "subject_name=$(jq -r '.attestation.subjectName' "${receipt}")" >> "${GITHUB_OUTPUT}"
           echo "subject_digest=$(jq -r '.attestation.subjectDigest' "${receipt}")" >> "${GITHUB_OUTPUT}"
