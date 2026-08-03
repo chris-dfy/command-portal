@@ -45,7 +45,7 @@ import type { EoxAssessment } from "./lib/eox-client";
 import {
   capabilityStateView,
   hostedSessionActionAvailability,
-  MODULE_MOUNT_ACTION_REQUIREMENTS,
+  moduleCapabilityStateView,
 } from "./lib/hosted-capability-gate";
 import {
   OPERATIONAL_SESSION_INVALID_EVENT,
@@ -240,20 +240,37 @@ function surfaceCapabilityStateView(
   }
   const states = modules.map((module) => ({
     module,
-    capability: capabilityStateView(projection, module.capabilityIds, registryFailure),
+    capability: moduleCapabilityStateView(
+      projection,
+      module.moduleId,
+      module.capabilityIds,
+      registryFailure,
+    ),
   }));
   const admitted = states.filter(({ capability }) => ["live", "degraded"].includes(capability.state));
-  if (!admitted.length) return states[0].capability;
-  const unavailable = states.filter(({ capability }) => !["live", "degraded"].includes(capability.state));
-  if (unavailable.length) {
+  if (!admitted.length) {
+    const diagnostics = [...new Set(states.flatMap(({ capability }) => capability.diagnostics))];
     return {
-      state: "degraded",
-      reason: `${admitted.length} module capability contract${admitted.length === 1 ? " remains" : "s remain"} usable; ${unavailable.map(({ module }) => module.label).join(", ")} remains unavailable.`,
+      state: states.some(({ capability }) => capability.state === "checking")
+        ? "checking"
+        : states[0].capability.state,
+      reason: diagnostics.join(" "),
+      diagnostics,
     };
   }
+  const unavailable = states.filter(({ capability }) => !["live", "degraded"].includes(capability.state));
+  if (unavailable.length) {
+    const diagnostics = [...new Set([
+      `${admitted.length} module capability contract${admitted.length === 1 ? " remains" : "s remain"} usable; ${unavailable.map(({ module }) => module.label).join(", ")} remains unavailable.`,
+      ...states.flatMap(({ capability }) => capability.diagnostics),
+    ])];
+    return { state: "degraded", reason: diagnostics.join(" "), diagnostics };
+  }
+  const diagnostics = [...new Set(states.flatMap(({ capability }) => capability.diagnostics))];
   return {
     state: states.some(({ capability }) => capability.state === "degraded") ? "degraded" : "live",
-    reason: states.map(({ capability }) => capability.reason).join(" "),
+    reason: diagnostics.join(" "),
+    diagnostics,
   };
 }
 
@@ -304,6 +321,80 @@ function nexusTone(state: ConnectionState): "neutral" | "info" | "success" | "at
   return "critical";
 }
 
+function hostedWorkspacePresentation(
+  state: string,
+  workspace: string,
+): {
+  status: string;
+  tone: "good" | "warn" | "bad" | "neutral";
+  title: string;
+  summary: string;
+} {
+  if (state === "live") {
+    return {
+      status: "available",
+      tone: "good",
+      title: `${workspace} Runtime support is available`,
+      summary: "Individual controls verify session access and authorization.",
+    };
+  }
+  if (state === "degraded") {
+    return {
+      status: "limited",
+      tone: "warn",
+      title: `${workspace} Runtime support has limits`,
+      summary: "Individual controls verify session access and authorization; unavailable controls stay disabled.",
+    };
+  }
+  if (state === "checking") {
+    return {
+      status: "checking",
+      tone: "neutral",
+      title: `Checking ${workspace}`,
+      summary: "NEXUS is verifying the tools required by this workspace.",
+    };
+  }
+  return {
+    status: "unavailable",
+    tone: "bad",
+    title: `${workspace} is unavailable`,
+    summary: "Required tools could not be verified and remain disabled.",
+  };
+}
+
+function runtimeFailurePresentation(state: ConnectionState, failureCount: number): { title: string; summary: string } {
+  if (state === "Unknown") {
+    return {
+      title: failureCount === 1 ? "Status detail unavailable" : "Status details unavailable",
+      summary: failureCount === 1
+        ? "A Runtime response could not be verified. Workspace availability is reported separately."
+        : `${failureCount} Runtime responses could not be verified. Workspace availability is reported separately.`,
+    };
+  }
+  if (state === "Schema Mismatch" || state === "Version Mismatch") {
+    return {
+      title: "Runtime response mismatch",
+      summary: "Affected tools remain unavailable until the Runtime response is compatible.",
+    };
+  }
+  if (state === "Unauthorized") {
+    return {
+      title: "Runtime access unavailable",
+      summary: "Affected tools remain disabled because Gateway access to the Runtime could not be verified.",
+    };
+  }
+  if (state === "Connecting" || state === "Retrying") {
+    return {
+      title: "Reconnecting to Runtime",
+      summary: "Some tools may be temporarily unavailable.",
+    };
+  }
+  return {
+    title: "Runtime needs attention",
+    summary: "Some tools may be unavailable. Check the current workspace availability before continuing.",
+  };
+}
+
 function ProviderRegistry({ snapshot }: { snapshot: RuntimeSnapshot }) {
   const providers = list(snapshot.providers?.data) as unknown as ProviderRecord[];
   return <DataPanel eyebrow="Provider registry" title="Verified runtime inventory" icon={<ShieldCheck size={18} />} className="span-2">
@@ -336,9 +427,16 @@ function HostedCapabilityBoundary({
   if (configured && ["live", "degraded"].includes(capability.state)) return children;
   const boundaryState = configured ? capability.state : "unavailable";
   const reason = configured ? capability.reason : "Hosted operational mode is not configured for this deployment.";
+  const summary = boundaryState === "checking"
+    ? "NEXUS is verifying the tools required by this workspace."
+    : "Required tools could not be verified, so this workspace remains disabled.";
   return <DataPanel eyebrow="Hosted capability boundary" title={`${title} is ${boundaryState === "checking" ? "being verified" : "unavailable"}`} icon={<ShieldCheck size={18} />}>
-    <p className="boundary-note">{reason} NEXUS will not substitute local state or infer readiness from the portal connection.</p>
+    <p className="boundary-note">{summary} NEXUS will not substitute local state or infer readiness from the portal connection.</p>
     <StatusPill value={boundaryState} />
+    <details className="hosted-capability-boundary__details">
+      <summary>Technical details</summary>
+      <p>{reason}</p>
+    </details>
   </DataPanel>;
 }
 
@@ -608,6 +706,10 @@ export function App() {
     current,
     capabilityRegistryFailure,
   );
+  const hostedPresentation = hostedWorkspacePresentation(hostedCapability.state, current.label);
+  const primaryFailureState = (primaryFailure?.gateway.connectionState ?? "Unknown") as ConnectionState;
+  const primaryFailureTone = nexusTone(primaryFailureState);
+  const primaryFailureCopy = runtimeFailurePresentation(primaryFailureState, failures.length);
   const activityTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const sidePanel = copilotOpen ? "copilot" : inspectorOpen ? "inspector" : "closed";
 
@@ -648,6 +750,20 @@ export function App() {
     refresh(true);
   }
 
+  const showsHostedContext = operationalSession.authenticated && (OPERATIONAL_AREAS.has(active) || HOSTED_CONTRACT_AREAS.has(active));
+  const hostedContextData = showsHostedContext ? {
+    capabilityState: hostedCapability.state,
+    status: hostedPresentation.status,
+    tone: hostedPresentation.tone,
+    title: hostedPresentation.title,
+    summary: hostedPresentation.summary,
+    gatewayState: state,
+    reason: hostedCapability.reason,
+    tenantId: operationalSession.tenantId ?? "Unavailable",
+    workspaceId: operationalSession.workspaceId ?? "Unavailable",
+    expiresAt: operationalSession.expiresAt ?? null,
+  } : null;
+
   const webModuleComponents: Record<string, ReactNode> = {
     "web.dashboard.command-center": <HostedCommandDirectory onAsk={() => { setCopilotOpen(true); setInspectorOpen(false); }} onNavigate={navigate} />,
     "web.dashboard.executive-status": <ExecutiveStatusBar snapshot={snapshot} connectionState={state} />,
@@ -656,7 +772,7 @@ export function App() {
     "web.missions.runtime-evidence": <MissionRuntimeEvidence />,
     "web.missions.step-execution": <MissionStepExecutionPosture readiness={operationalReadiness} />,
     "web.replay.timeline": <OperationalReplay requestedTarget={replayTarget} />,
-    "web.conclave.workspace": <ConclaveWorkspace onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
+    "web.conclave.workspace": <ConclaveWorkspace onReplay={openReplay} readiness={operationalReadiness} session={operationalSession} capabilityRegistry={capabilityRegistry} availability={hostedContextData} />,
     "web.knowledge.workspace": <KnowledgeWorkspace snapshot={snapshot} session={operationalSession} capabilityRegistry={capabilityRegistry} />,
     "web.edge.monitoring": <EdgeRuntime snapshot={snapshot} />,
     "web.edge.diagnostics-topology": <RuntimeTopology snapshot={snapshot} />,
@@ -704,11 +820,11 @@ export function App() {
       ? <HostedCapabilityBoundary
           configured={hostedOperationalConfigured}
           title={module.label}
-          capability={capabilityStateView(
+          capability={moduleCapabilityStateView(
             capabilityRegistry,
+            module.moduleId,
             module.capabilityIds,
             capabilityRegistryFailure,
-            MODULE_MOUNT_ACTION_REQUIREMENTS[module.moduleId] ?? [],
           )}
         >{component}</HostedCapabilityBoundary>
       : component;
@@ -721,19 +837,42 @@ export function App() {
   }
 
   const requiresOperationalSession = OPERATIONAL_AREAS.has(active) || (hostedOperationalConfigured && HOSTED_CONTRACT_AREAS.has(active));
-  const showsHostedContext = operationalSession.authenticated && (OPERATIONAL_AREAS.has(active) || HOSTED_CONTRACT_AREAS.has(active));
   const renderedModules = current.modules.map(renderWebModule);
-  const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length) ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section> : ["local_only", "unavailable"].includes(current.clients.web.state) ? <SurfaceAvailabilityBoundary surface={current} /> : requiresOperationalSession && !operationalSession.authenticated ? <OperationalAccessGate workspace={current.label} onAuthenticated={acceptOperationalSession} /> : <>
-    {showsHostedContext && <section className="hosted-operational-context" aria-label="Authenticated hosted operational context">
-      <article><span>Gateway transport</span><StatusPill value={state} /></article>
-      <article><span>Capability state</span><StatusPill value={hostedCapability.state} /></article>
-      <article className="hosted-operational-context__reason"><span>Capability reason</span><strong>{hostedCapability.reason}</strong></article>
-      <article><span>Tenant</span><strong>{operationalSession.tenantId ?? "Unavailable"}</strong></article>
-      <article><span>Workspace</span><strong>{operationalSession.workspaceId ?? "Unavailable"}</strong></article>
-      <article><span>Session expires</span><strong>{operationalSession.expiresAt ? new Date(operationalSession.expiresAt).toLocaleString() : "Unavailable"}</strong></article>
-    </section>}
-    {active === "settings" ? <div className="settings-workspaces">{renderedModules}</div> : renderedModules}
-  </>;
+  const renderedWorkspace = active === "settings"
+    ? <div className="settings-workspaces">{renderedModules}</div>
+    : renderedModules;
+  const hostedOperationalContext = hostedContextData && active !== "conclave" ? <section
+    className="hosted-operational-context"
+    aria-label="Workspace availability"
+    data-capability-state={hostedCapability.state}
+  >
+    <header className="hosted-operational-context__summary">
+      <StatusPill value={hostedPresentation.status} tone={hostedPresentation.tone} />
+      <div>
+        <strong>{hostedPresentation.title}</strong>
+        <p>{hostedPresentation.summary}</p>
+      </div>
+    </header>
+    <details className="hosted-operational-context__details">
+      <summary>Technical details</summary>
+      <dl>
+        <div><dt>Gateway connection</dt><dd><StatusPill value={state} /></dd></div>
+        <div><dt>Capability state</dt><dd><StatusPill value={hostedCapability.state} /></dd></div>
+        <div><dt>Tenant</dt><dd>{operationalSession.tenantId ?? "Unavailable"}</dd></div>
+        <div><dt>Workspace</dt><dd>{operationalSession.workspaceId ?? "Unavailable"}</dd></div>
+        <div><dt>Session expires</dt><dd>{operationalSession.expiresAt ? <time dateTime={operationalSession.expiresAt}>{new Date(operationalSession.expiresAt).toLocaleString()}</time> : "Unavailable"}</dd></div>
+        <div className="hosted-operational-context__reason"><dt>Verified Runtime reason</dt><dd>{hostedCapability.reason}</dd></div>
+      </dl>
+    </details>
+  </section> : null;
+  const workspaceWithContext = <>{hostedOperationalContext}{renderedWorkspace}</>;
+  const content = !sessionBootstrapComplete || (loading && !Object.keys(snapshot).length)
+    ? <section className="loading-state"><div /><p>Connecting through the Experience Gateway…</p></section>
+    : ["local_only", "unavailable"].includes(current.clients.web.state)
+      ? <SurfaceAvailabilityBoundary surface={current} />
+      : requiresOperationalSession && !operationalSession.authenticated
+        ? <OperationalAccessGate workspace={current.label} onAuthenticated={acceptOperationalSession} />
+        : workspaceWithContext;
 
   return <div
     className="nx-app-shell nx-hosted-shell"
@@ -778,7 +917,21 @@ export function App() {
           onToggleCopilot={toggleCopilot}
           onToggleInspector={toggleInspector}
         />
-        {failures.length > 0 && <section className="nx-runtime-alert" role="alert" data-tone={connectionTone}><Activity size={17} /><div><strong>{state}</strong><span>{primaryFailure?.error?.message ?? "One or more Runtime signals are unavailable."}</span></div></section>}
+        {failures.length > 0 && <section className="nx-runtime-alert" role="alert" data-tone={primaryFailureTone}>
+          <Activity size={17} />
+          <div>
+            <strong>{primaryFailureCopy.title}</strong>
+            <span>{primaryFailureCopy.summary}</span>
+            <details className="nx-runtime-alert__details">
+              <summary>{failures.length === 1 ? "Technical details" : `Technical details (${failures.length})`}</summary>
+              <ul>
+                {failures.map((failure, index) => <li key={`${failure.gateway.route}-${index}`}>
+                  <strong>{failure.gateway.connectionState}</strong> · {failure.gateway.route || "Unknown route"} · {failure.error?.message ?? "Runtime signal unavailable."}
+                </li>)}
+              </ul>
+            </details>
+          </div>
+        </section>}
         <main id="main-content" className="nx-primary-workspace">
           <NexusWorkspaceFrame
             eyebrow={current.group === "Platform" ? "Hosted Experience Gateway" : "Platform capability"}

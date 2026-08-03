@@ -16,6 +16,10 @@ const compiled = ts.transpileModule(source, {
 const gate = await import(
   `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`
 );
+const surfaceRegistry = JSON.parse(await readFile(
+  new URL("../src/platform/surface-registry.json", import.meta.url),
+  "utf8",
+));
 
 const action = ({
   actionId,
@@ -101,6 +105,70 @@ test("a partially available Work Session capability still mounts its workspace",
   assert.match(state.reason, /independent action remains unavailable/i);
 });
 
+test("repeated Runtime limitations are composed once for diagnostic presentation", () => {
+  const repeated = "A verified operator must authorize this independent action.";
+  const blocked = ["work-sessions.step", "work-sessions.close"].map((actionId) => ({
+    ...action({
+      actionId,
+      capabilityId: "operational.work_sessions",
+      method: "POST",
+      pathTemplate: `/work-sessions/{session_id}/${actionId.split(".").at(-1)}`,
+      invocable: false,
+      classification: "unavailable",
+    }),
+    requiredNextAction: repeated,
+    limitations: [repeated],
+  }));
+  const state = gate.capabilityStateView(
+    projection([
+      action({
+        actionId: "work-sessions.read",
+        capabilityId: "operational.work_sessions",
+        method: "GET",
+        pathTemplate: "/work-sessions",
+        invocable: true,
+        classification: "live_verified",
+      }),
+      ...blocked,
+    ]),
+    ["operational.work_sessions"],
+    "",
+    [readRequirement],
+  );
+  assert.equal(state.state, "degraded");
+  assert.equal(state.reason.split(repeated).length - 1, 1);
+  assert.equal(state.diagnostics.filter((item) => item === repeated).length, 1);
+});
+
+test("a degraded capability keeps its Registry limitation even when no action repeats it", () => {
+  const capabilityLimitation = "Saved reviews may lag while Runtime reconciliation completes.";
+  const degradedProjection = projection([
+    action({
+      actionId: "work-sessions.read",
+      capabilityId: "operational.work_sessions",
+      method: "GET",
+      pathTemplate: "/work-sessions",
+      invocable: true,
+      classification: "live_verified",
+    }),
+  ]);
+  degradedProjection.capabilities = [{
+    capabilityId: "operational.work_sessions",
+    classification: "live_degraded",
+    limitations: [capabilityLimitation],
+    requiredNextAction: "Wait for Runtime reconciliation.",
+  }];
+  const state = gate.capabilityStateView(
+    degradedProjection,
+    ["operational.work_sessions"],
+    "",
+    [readRequirement],
+  );
+  assert.equal(state.state, "degraded");
+  assert.equal(state.diagnostics.filter((item) => item === capabilityLimitation).length, 1);
+  assert.match(state.reason, /Runtime reconciliation/);
+});
+
 test("the same unavailable mutation stays disabled at its own control", () => {
   const result = gate.canonicalHostedActionAvailability(
     projection([
@@ -151,6 +219,72 @@ test("a missing or blocked required read/base action fails closed", () => {
     );
     assert.equal(state.state, "unavailable");
   }
+});
+
+test("a blocked mount preserves a degraded capability's own limitation", () => {
+  const capabilityLimitation = "Runtime reconciliation has not completed.";
+  const degradedProjection = projection([
+    action({
+      actionId: "work-sessions.read",
+      capabilityId: "operational.work_sessions",
+      method: "GET",
+      pathTemplate: "/work-sessions",
+      invocable: false,
+      classification: "unavailable",
+    }),
+  ]);
+  degradedProjection.capabilities = [{
+    capabilityId: "operational.work_sessions",
+    classification: "live_degraded",
+    limitations: [capabilityLimitation],
+    requiredNextAction: "Complete Runtime reconciliation.",
+  }];
+  const state = gate.capabilityStateView(
+    degradedProjection,
+    ["operational.work_sessions"],
+    "",
+    [readRequirement],
+  );
+  assert.equal(state.state, "unavailable");
+  assert.equal(state.diagnostics.filter((item) => item === capabilityLimitation).length, 1);
+  assert.match(state.reason, /Verify work-sessions\.read/);
+});
+
+test("every gated hosted module has an explicit mount contract", () => {
+  const gatedModules = surfaceRegistry.surfaces.flatMap((surface) => {
+    if (!surface.webOperationalSessionRequired && !surface.webHostedContract) return [];
+    return surface.modules.filter((module) => (
+      ["functional", "read_only"].includes(module.clients.web.state)
+      && module.capabilityIds.length > 0
+    ));
+  });
+  assert.equal(gatedModules.length, 18);
+  for (const module of gatedModules) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(gate.MODULE_MOUNT_ACTION_REQUIREMENTS, module.moduleId),
+      true,
+      module.moduleId,
+    );
+    for (const requirement of gate.MODULE_MOUNT_ACTION_REQUIREMENTS[module.moduleId]) {
+      assert.equal(module.capabilityIds.includes(requirement.capabilityId), true, module.moduleId);
+    }
+  }
+  assert.deepEqual(gate.MODULE_MOUNT_ACTION_REQUIREMENTS["voice.operator"], [{
+    capabilityId: "interaction.human",
+    method: "GET",
+    pathTemplate: "/voice-operator/status",
+  }]);
+});
+
+test("an unregistered module mount contract fails closed", () => {
+  const state = gate.moduleCapabilityStateView(
+    projection([]),
+    "unregistered.workspace",
+    ["operational.work_sessions"],
+    "",
+  );
+  assert.equal(state.state, "unavailable");
+  assert.match(state.reason, /mount contract.*not registered/i);
 });
 
 test("canonical interaction admission stays available when execute-step is unavailable", () => {

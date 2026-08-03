@@ -15,6 +15,12 @@ export type HostedSessionAccess = {
   scopes?: readonly string[];
 };
 
+export type HostedCapabilityStateView = {
+  state: string;
+  reason: string;
+  diagnostics: readonly string[];
+};
+
 // Compatibility identity from the canonical Runtime registry. Keep it out of
 // presentation copy while the versioned Runtime contract retains this ID.
 export const PROJECTS_PLANNING_CAPABILITY_ID = "projects.nexicron_planning";
@@ -55,10 +61,53 @@ export const MODULE_MOUNT_ACTION_REQUIREMENTS: Readonly<
   "documents.intake": [
     { capabilityId: "knowledge.document_intake", method: "GET", pathTemplate: "/intake/history" },
   ],
+  "edge.monitoring": [
+    { capabilityId: "edge_monitoring", method: "GET", pathTemplate: "/runtime-coordination/nodes" },
+  ],
+  "edge.admission-request": [
+    { capabilityId: "edge_node_admission", method: "GET", pathTemplate: "/runtime-coordination/admissions" },
+  ],
+  "projects.planning": [
+    { capabilityId: PROJECTS_PLANNING_CAPABILITY_ID, method: "GET", pathTemplate: "/projects/artifact-types" },
+  ],
+  "governance.readiness-diagnostics": [
+    { capabilityId: "governance", method: "GET", pathTemplate: "/governance/readiness" },
+  ],
+  "governance.authority-diagnostics": [
+    { capabilityId: "authority", method: "GET", pathTemplate: "/authority/readiness" },
+  ],
+  "voice.operator": [
+    { capabilityId: "interaction.human", method: "GET", pathTemplate: "/voice-operator/status" },
+  ],
+  "voice.runtime-status": [
+    { capabilityId: "interaction.human", method: "GET", pathTemplate: "/voice-operator/status" },
+  ],
 });
 
 function live(classification: string): boolean {
   return ["live_verified", "live_degraded"].includes(classification);
+}
+
+function uniqueDiagnosticText(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function hostedCapabilityStateView(
+  state: string,
+  values: readonly string[],
+  fallback = "",
+): HostedCapabilityStateView {
+  const diagnostics = uniqueDiagnosticText(values);
+  const normalized = diagnostics.length > 0
+    ? diagnostics
+    : fallback
+      ? [fallback]
+      : [];
+  return {
+    state,
+    reason: normalized.join(" "),
+    diagnostics: normalized,
+  };
 }
 
 function actionMatches(
@@ -203,19 +252,17 @@ export function capabilityStateView(
   required: readonly string[],
   registryFailure: string,
   mountRequirements: readonly HostedActionRequirement[] = [],
-) {
+): HostedCapabilityStateView {
   if (!required.length) {
-    return {
-      state: "not_applicable",
-      reason: "This workspace has no hosted capability contract.",
-    };
+    return hostedCapabilityStateView("not_applicable", [
+      "This workspace has no hosted capability contract.",
+    ]);
   }
-  if (registryFailure) return { state: "unavailable", reason: registryFailure };
+  if (registryFailure) return hostedCapabilityStateView("unavailable", [registryFailure]);
   if (!projection) {
-    return {
-      state: "checking",
-      reason: "The Runtime-owned Capability Registry projection is being verified.",
-    };
+    return hostedCapabilityStateView("checking", [
+      "The Runtime-owned Capability Registry projection is being verified.",
+    ]);
   }
 
   const applicable = projection.capabilities.filter(
@@ -243,17 +290,17 @@ export function capabilityStateView(
     || (mountRequirements.length === 0
       && (!liveCapabilities.length || !liveActions.length))
   ) {
-    const reasons = [
+    const reasons = uniqueDiagnosticText([
       ...blockedMountActions.map((item) => item.reason),
       ...applicable
-        .filter((item) => !live(item.classification))
+        .filter((item) => item.classification !== "live_verified")
         .flatMap((item) => [item.requiredNextAction ?? "", ...item.limitations]),
-    ].filter(Boolean);
-    return {
-      state: "unavailable",
-      reason: [...new Set(reasons)].join(" ")
-        || "The required hosted read/base action set is unavailable.",
-    };
+    ]);
+    return hostedCapabilityStateView(
+      "unavailable",
+      reasons,
+      "The required hosted read/base action set is unavailable.",
+    );
   }
 
   const blockedActions = capabilityActions.filter(
@@ -268,12 +315,15 @@ export function capabilityStateView(
       return action?.classification === "live_degraded";
     })
     || blockedActions.length > 0;
-  const limitations = blockedActions.flatMap(
+  const limitations = uniqueDiagnosticText(blockedActions.flatMap(
     (item) => [item.requiredNextAction ?? "", ...item.limitations],
-  ).filter(Boolean);
-  return {
-    state: degraded ? "degraded" : "live",
-    reason: [
+  ));
+  const capabilityLimitations = uniqueDiagnosticText(applicable
+    .filter((item) => item.classification !== "live_verified")
+    .flatMap((item) => [item.requiredNextAction ?? "", ...item.limitations]));
+  return hostedCapabilityStateView(
+    degraded ? "degraded" : "live",
+    [
       mountRequirements.length
         ? `${mountRequirements.length} required hosted read/base action${mountRequirements.length === 1 ? " is" : "s are"} usable.`
         : `${liveActions.length} canonical action${liveActions.length === 1 ? " is" : "s are"} usable.`,
@@ -283,8 +333,28 @@ export function capabilityStateView(
       missingCapabilities.length
         ? `Supplemental capabilities not returned: ${missingCapabilities.join(", ")}.`
         : "",
+      ...capabilityLimitations,
       ...limitations,
       "Authority remains a separate per-action requirement.",
-    ].filter(Boolean).join(" "),
-  };
+    ],
+  );
+}
+
+export function moduleCapabilityStateView(
+  projection: CapabilityRegistryProjection | null,
+  moduleId: string,
+  required: readonly string[],
+  registryFailure: string,
+): HostedCapabilityStateView {
+  if (!Object.prototype.hasOwnProperty.call(MODULE_MOUNT_ACTION_REQUIREMENTS, moduleId)) {
+    return hostedCapabilityStateView("unavailable", [
+      `The hosted mount contract for ${moduleId} is not registered.`,
+    ]);
+  }
+  return capabilityStateView(
+    projection,
+    required,
+    registryFailure,
+    MODULE_MOUNT_ACTION_REQUIREMENTS[moduleId],
+  );
 }

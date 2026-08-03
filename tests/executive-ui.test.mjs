@@ -257,7 +257,8 @@ test("mission control consumes the versioned Runtime parity contract", async () 
   assert.match(app, /hosted-operational-context/);
   assert.match(app, /localNexusClient\.capabilityReadiness\(\)/);
   assert.match(app, /Capability state/);
-  assert.match(app, /Capability reason/);
+  assert.match(app, /Verified Runtime reason/);
+  assert.match(app, /Technical details/);
   assert.match(app, /AREA_CAPABILITY_IDS/);
   assert.match(app, /Runtime commit/);
   assert.match(app, /runtimeCommit=\{deployedRuntimeCommit\}/);
@@ -306,8 +307,8 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
     read("../src/lib/local-client.ts"), read("../src/styles.css")
   ]);
   assert.equal(registry.surfaces.find((surface) => surface.id === "conclave")?.label, "Conclave");
-  assert.match(app, /<ConclaveWorkspace onReplay=\{openReplay\} readiness=\{operationalReadiness\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\}/);
-  for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
+  assert.match(app, /<ConclaveWorkspace onReplay=\{openReplay\} readiness=\{operationalReadiness\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\} availability=\{hostedContextData\}/);
+  for (const label of ["Conclave synthesis", "authorize external actions", "Required before progression"]) assert.match(conclave, new RegExp(label));
   assert.doesNotMatch(client, /localNexusClient\.(?:createConclaveWorkspace|runConclaveWorkspace)/);
   assert.match(directory, /lifecyclePosture === "canonical_operational"/);
   assert.match(directory, /reviewIntegrityVerified === true/);
@@ -317,16 +318,17 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
   assert.match(client, /expectedWorkspaceVersion/);
   assert.doesNotMatch(client, /\/api\/runtime\/conclave\/reviews|runConclaveReview/);
   assert.match(conclave, /localNexusClient\.conclaveWorkspaces\(\)/);
-  assert.match(conclave, /Durable Runtime records/);
-  assert.match(conclave, /Browser-local Review draft/);
+  assert.match(conclave, /Saved Reviews/);
+  assert.match(conclave, /Operational question/);
   assert.match(conclave, /not yet a Runtime record/);
   assert.match(conclave, /defaultConclaveWorkspace/);
   assert.match(conclave, /conclaveDirectoryLabel/);
   assert.match(conclave, /Verified canonical Review result/);
   assert.match(conclave, /Historical prompt only — not a Review result/);
-  assert.match(conclave, /does not substitute a static one-shot review/);
-  assert.match(conclave, /Run governed review/);
-  assert.match(conclave, /Creation does not dispatch a run/);
+  assert.match(conclave, /does not substitute a browser-only result/);
+  assert.match(conclave, /Run review/);
+  assert.match(conclave, /requests creation of a governed Review record/);
+  assert.match(conclave, /does not run tasks or authorize external actions/);
   assert.match(conclave, /createAllowed: creationAllowed, runAllowed/);
   assert.match(conclave, /admitCanonicalActionIntent/);
   assert.match(conclave, /workspaceDisplayStatus\(workspace\)/);
@@ -706,7 +708,8 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(hostedGate, /action\.invocable !== true/);
   assert.match(hostedGate, /required hosted read\/base action set is unavailable/);
   assert.match(hostedGate, /must stay disabled at its control/);
-  assert.match(app, /MODULE_MOUNT_ACTION_REQUIREMENTS/);
+  assert.match(app, /moduleCapabilityStateView/);
+  assert.match(hostedGate, /MODULE_MOUNT_ACTION_REQUIREMENTS/);
   assert.match(app, /groups=\{registryRailGroups\}/);
   assert.doesNotMatch(app, /live: area\.id ===/);
   assert.match(app, /Hosted operational mode is not configured for this deployment/);
