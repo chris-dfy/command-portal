@@ -42,6 +42,34 @@ const TERMINAL_INTERACTION_LOOKUP_STATES = new Set(["approval_required", "comple
 const PENDING_INTERACTION_STORAGE_KEY = "nexus-command:pending-executive-interaction:v1";
 const PENDING_RECONCILIATION_STORAGE_KEY = "nexus-command:pending-executive-interaction-reconciliation:v1";
 
+const recordOf = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+
+const hasVerifiedNonEffect = (verification: Record<string, unknown>): boolean => {
+  if (verification.verified !== true) return verification.verified === false;
+  const evidence = recordOf(verification.evidence);
+  if (!evidence) return false;
+  if (
+    verification.method === "approval_denial_non_execution"
+    && evidence.execution_attempted === false
+  ) return true;
+  if (
+    verification.method === "governed_postcondition_checks"
+    && Array.isArray(evidence.checks)
+  ) {
+    return evidence.checks.some((item) => {
+      const check = recordOf(item);
+      return check?.name === "execution_attempted"
+        && check.passed === true
+        && check.observed === false;
+    });
+  }
+  return false;
+};
+
 export class CanonicalInteractionIndeterminateError extends Error {
   readonly interactionId: string;
   readonly retryProhibited = true;
@@ -476,6 +504,13 @@ export function projectExecutiveInteraction(
   if (!result.verification || typeof result.verification !== "object" || Array.isArray(result.verification)) {
     throw new Error("NEXUS Runtime returned no structured verification state.");
   }
+  if (
+    typeof result.execution.attempted !== "boolean"
+    || typeof result.execution.executed !== "boolean"
+    || typeof result.verification.verified !== "boolean"
+  ) {
+    throw new Error("NEXUS Runtime returned no explicit execution and verification truth values.");
+  }
   const hasPresentationClaim = result.presentation != null
     || result.execution_scope === "client_presentation";
   const admittedPresentation = result.classification === "action"
@@ -504,7 +539,6 @@ export function projectExecutiveInteraction(
       || result.execution.attempted !== false
       || result.execution.executed !== false
       || result.execution.execution_scope != null
-      || result.verification.verified !== false
     ) {
       throw new Error("NEXUS Runtime returned an answer without matching non-execution and Authority semantics.");
     }
@@ -551,9 +585,11 @@ export function projectExecutiveInteraction(
     if (
       !durableReceiptIdFrom(result)
       || result.execution.executed !== false
-      || result.verification.verified !== false
+      || (result.status === "blocked"
+        ? !hasVerifiedNonEffect(result.verification)
+        : result.verification.verified !== false)
       || !(runtimeAttempt || noAttempt)
-      || (result.status === "blocked" && !new Set(["deny", "capability_unavailable"]).has(String(authorityDecision)))
+      || (result.status === "blocked" && !new Set(["deny", "capability_unavailable", "insufficient_context"]).has(String(authorityDecision)))
       || (result.status === "failed" && !new Set(["deny", "withhold"]).has(String(authorityDecision)))
     ) {
       throw new Error("NEXUS Runtime returned an operational block or failure without matching Authority, execution state, and a durable receipt.");

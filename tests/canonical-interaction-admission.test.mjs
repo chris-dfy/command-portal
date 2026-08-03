@@ -94,6 +94,17 @@ test("canonical projection admits informational answers and validates the intera
   assert.equal(projected.path, "executive_interaction");
   assert.equal(projected.status, "answered");
   assert.equal(projected.spokenSummary, "Canonical Runtime response.");
+  const verifiedAnswer = result({
+    verification: {
+      verified: true,
+      method: "read_only_response_proof",
+      evidence: { checks: [{ name: "external_effects", passed: true, observed: false }] },
+    },
+  });
+  assert.equal(
+    admission.projectExecutiveInteraction(verifiedAnswer, request, INTERACTION_ID).status,
+    "answered",
+  );
   assert.throws(
     () => admission.projectExecutiveInteraction(result({ interaction_id: "33333333-3333-4333-8333-333333333333" }), request, INTERACTION_ID),
     /different interaction/,
@@ -103,11 +114,11 @@ test("canonical projection admits informational answers and validates the intera
     { execution: { attempted: true, executed: false, execution_scope: "runtime" } },
     { execution: { attempted: false, executed: true, execution_scope: "runtime" } },
     { execution_scope: "runtime" },
-    { verification: { verified: true } },
+    { verification: {} },
   ]) {
     assert.throws(
       () => admission.projectExecutiveInteraction(result(invalid), request, INTERACTION_ID),
-      /answer without matching non-execution and Authority semantics/,
+      /answer without matching non-execution and Authority semantics|explicit execution and verification truth values/,
     );
   }
 });
@@ -222,7 +233,13 @@ test("approval, blocked, and failed operational narration requires matching sema
     authority_decision: { decision: "capability_unavailable" },
     execution: { attempted: false, executed: false, execution_scope: null },
     execution_scope: null,
-    verification: { verified: false },
+    verification: {
+      verified: true,
+      method: "governed_postcondition_checks",
+      evidence: {
+        checks: [{ name: "execution_attempted", passed: true, observed: false }],
+      },
+    },
     receipt_id: "INTERACTION-RECEIPT-BLOCKED",
   };
   const failed = {
@@ -241,6 +258,7 @@ test("approval, blocked, and failed operational narration requires matching sema
     { ...blocked, receipt_id: null },
     { ...blocked, authority_decision: { decision: "allow" } },
     { ...blocked, execution: { ...blocked.execution, executed: true } },
+    { ...blocked, verification: { verified: true, method: "model_assertion", evidence: {} } },
     { ...failed, receipt_id: null },
     { ...failed, authority_decision: { decision: "allow" } },
     { ...failed, execution: { ...failed.execution, attempted: false } },
@@ -573,8 +591,18 @@ test("a retained nonterminal interaction blocks every new UUID until the exact o
 
 test("a verified not-found lookup permits only one same-key resubmission", async () => {
   const previousFetch = globalThis.fetch;
+  const previousStorage = globalThis.sessionStorage;
+  const storage = new Map();
   const observedKeys = [];
   let postCalls = 0;
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
+    },
+  });
   try {
     globalThis.fetch = async (_url, options = {}) => {
       if (options.method === "POST") {
@@ -606,5 +634,6 @@ test("a verified not-found lookup permits only one same-key resubmission", async
     assert.deepEqual(observedKeys, [INTERACTION_ID, INTERACTION_ID]);
   } finally {
     globalThis.fetch = previousFetch;
+    Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: previousStorage });
   }
 });
