@@ -3440,6 +3440,60 @@ test("private Replit ingress automatically establishes one server-derived worksp
   assert.equal(keyLogin.status, 404);
 });
 
+test("automatic workspace service cannot enter named-operator interaction or approval routes", async () => {
+  const upstreamCalls = [];
+  const upstreamFetch = async (url, options) => {
+    upstreamCalls.push({ url, options });
+    return localResponse({ connected: true });
+  };
+  const base = await start(upstreamFetch, {
+    operationalEnabled: true,
+    operationalApiBaseUrl: "http://127.0.0.1:9876",
+    operationalRuntimeToken: "runtime-token-at-least-24-characters",
+    operationalSessionSecret: "session-secret-at-least-thirty-two-characters",
+    operationalTenantId: "tenant-alpha",
+    operationalWorkspaceId: "workspace-alpha",
+    operationalUserId: "nexus-workspace-service",
+    operationalRole: "operator",
+    operationalScopes: ["operations:read", "approvals:decide"],
+    operationalCookieSecure: true,
+    replitDeployment: true,
+    replitDomains: "command-portal.replit.app",
+  }, upstreamFetch, upstreamFetch);
+  const trustedHeaders = {
+    Host: "command-portal.replit.app",
+    "X-Forwarded-Host": "command-portal.replit.app",
+    "X-Forwarded-Proto": "https",
+    "Sec-Fetch-Site": "same-origin",
+  };
+  const status = await fetch(`${base}/api/session`, { headers: trustedHeaders });
+  const session = await status.json();
+  const authenticatedHeaders = {
+    ...trustedHeaders,
+    Origin: "https://command-portal.replit.app",
+    Cookie: status.headers.get("set-cookie").split(";")[0],
+    "Content-Type": "application/json",
+    "X-CSRF-Token": session.session.csrfToken,
+  };
+
+  const interaction = await fetch(`${base}/api/operations/executive-interactions`, {
+    method: "POST",
+    headers: { ...authenticatedHeaders, "Idempotency-Key": CANONICAL_INTERACTION_ID },
+    body: JSON.stringify(canonicalInteraction()),
+  });
+  assert.equal(interaction.status, 403);
+  assert.equal((await interaction.json()).error.code, "named_operator_required");
+
+  const approval = await fetch(`${base}/api/operations/approvals/APPROVAL-001/approve`, {
+    method: "POST",
+    headers: { ...authenticatedHeaders, "Idempotency-Key": "automatic-approval-0001" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(approval.status, 403);
+  assert.equal((await approval.json()).error.code, "named_operator_required");
+  assert.equal(upstreamCalls.length, 0);
+});
+
 test("automatic workspace issuance fails closed outside the exact private Replit ingress", async () => {
   const config = {
     operationalEnabled: true,

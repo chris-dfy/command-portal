@@ -18,12 +18,12 @@ test("published deploy config pins the purpose-bound Portal signer and keeps M3 
   assert.equal(setting("NEXUS_CONTEXT_ASSERTION_SECRET_REF"), null);
   assert.equal(setting("COMMAND_PORTAL_EXECUTIVE_SESSION_ENABLED"), "false");
 });
-test("published deploy config preserves the named access-key operator boundary", () => {
-  assert.equal(setting("COMMAND_PORTAL_SESSION_MODE"), "access_key");
-  assert.equal(setting("COMMAND_PORTAL_OPERATOR_USER_ID"), "chris-whiskin");
-  assert.equal(setting("COMMAND_PORTAL_OPERATOR_ROLE"), "admin");
+test("published deploy config uses the bounded automatic workspace service", () => {
+  assert.equal(setting("COMMAND_PORTAL_SESSION_MODE"), "automatic_private_workspace");
+  assert.equal(setting("COMMAND_PORTAL_OPERATOR_USER_ID"), "nexus-workspace-service");
+  assert.equal(setting("COMMAND_PORTAL_OPERATOR_ROLE"), "operator");
   assert.equal(
     setting("COMMAND_PORTAL_OPERATIONAL_SCOPES"),
-    "operations:read,operations:write,repository:metadata:read,approvals:decide,evidence:write,edge:node_admission:request",
+    "operations:read,operations:write,repository:metadata:read,evidence:write,edge:node_admission:request",
   );
 });

@@ -96,12 +96,12 @@ test("Replit publishes the fixed hosted binding without committing server secret
   for (const binding of [
     'COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"',
     'COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"',
-    'COMMAND_PORTAL_SESSION_MODE = "access_key"',
-    'COMMAND_PORTAL_OPERATOR_USER_ID = "chris-whiskin"',
+    'COMMAND_PORTAL_SESSION_MODE = "automatic_private_workspace"',
+    'COMMAND_PORTAL_OPERATOR_USER_ID = "nexus-workspace-service"',
     'COMMAND_PORTAL_TENANT_ID = "nexicron"',
     'COMMAND_PORTAL_WORKSPACE_ID = "primary"',
-    'COMMAND_PORTAL_OPERATOR_ROLE = "admin"',
-    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,repository:metadata:read,approvals:decide,evidence:write,edge:node_admission:request"',
+    'COMMAND_PORTAL_OPERATOR_ROLE = "operator"',
+    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,repository:metadata:read,evidence:write,edge:node_admission:request"',
     'COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED = "true"',
     'COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF = "secret-manager:experience-gateway/mission-3/provider-session-current"',
     'COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID = "provider-session-current"',
@@ -110,6 +110,7 @@ test("Replit publishes the fixed hosted binding without committing server secret
     'COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION = "1.0.0"',
     'COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST = "sha256:b1f6a2cdf2153ac48236867e5e1aeab794842256410f3f314fc2655008a2be78"',
   ]) assert.match(replit, new RegExp(binding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(replit, /approvals:decide/);
   for (const secretName of [
     "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN",
     "COMMAND_PORTAL_OPERATOR_ACCESS_KEY",
@@ -123,7 +124,7 @@ test("Replit publishes the fixed hosted binding without committing server secret
   ]) assert.doesNotMatch(replit, new RegExp(`^${secretName}\\s*=`, "m"));
 });
 
-test("hosted workspaces require explicit named-operator authentication", async () => {
+test("hosted workspaces bootstrap automatically without a browser credential form", async () => {
   const [gate, client, app, operations] = await Promise.all([
     read("../src/components/OperationalAccessGate.tsx"),
     read("../src/lib/local-client.ts"),
@@ -131,11 +132,12 @@ test("hosted workspaces require explicit named-operator authentication", async (
     read("../src/components/OperationsWorkspace.tsx"),
   ]);
   assert.match(app, /operationalSessionClient\.status\(\)/);
-  assert.match(gate, /Operator access key/);
-  assert.match(gate, /named operator/i);
-  assert.match(gate, /current-password|KeyRound/);
+  assert.match(gate, /operationalSessionClient\.status\(\)/);
+  assert.match(gate, /Retry secure connection/);
+  assert.match(gate, /private deployment admits the user/);
+  assert.doesNotMatch(gate, /password|accessKey|Operator access key|current-password|KeyRound/);
   assert.match(client, /login: \(accessKey: string\)/);
-  assert.match(operations, /Operator established/);
+  assert.match(operations, /Private workspace managed/);
   assert.match(operations, /Authentication and access scope do not create operational Authority/);
 });
 
@@ -498,8 +500,9 @@ test("canonical shell bootstraps the hosted operational session before mounting 
   assert.match(app, /const requiresOperationalSession = OPERATIONAL_AREAS\.has\(active\) \|\| \(hostedOperationalConfigured && HOSTED_CONTRACT_AREAS\.has\(active\)\)/);
   assert.match(app, /requiresOperationalSession && !operationalSession\.authenticated/);
   assert.match(app, /<OperationalAccessGate workspace=\{current\.label\}/);
-  assert.match(gate, /operationalSessionClient\.login\(accessKey\)/);
-  assert.match(gate, /accessKey|type="password"|Operator access key/);
+  assert.match(gate, /operationalSessionClient\.status\(\)/);
+  assert.match(gate, /Retry secure connection/);
+  assert.doesNotMatch(gate, /accessKey|type="password"|Operator access key/);
   assert.match(gate, /HttpOnly, scoped session/);
   assert.doesNotMatch(gate, /localStorage|sessionStorage/);
   for (const mapping of ['replay: "replay"', 'missions: "missions"', 'knowledge: "knowledge"', 'edge: "edge"']) assert.match(app, new RegExp(mapping));
