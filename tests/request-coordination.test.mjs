@@ -205,6 +205,9 @@ test("portal connection state keeps capability readiness separate from healthy t
 
   assert.equal(derivePortalConnectionState({}, [], true), "Connecting");
   assert.equal(derivePortalConnectionState({}, [], false), "Unavailable");
+  assert.equal(derivePortalConnectionState({}, [envelope("Unknown")], false), "Unknown");
+  assert.equal(derivePortalConnectionState({}, [envelope("Timed Out")], false), "Timed Out");
+  assert.equal(derivePortalConnectionState({}, [envelope("Unauthorized")], false), "Unauthorized");
   assert.equal(derivePortalConnectionState({
     health: envelope("Healthy"),
     ready: envelope("Degraded"),
@@ -261,7 +264,9 @@ test("portal startup wires one bounded serialized bootstrap request", async () =
   ]);
   assert.match(source, /const CLIENT_REQUEST_TIMEOUT_MS = 10_000;/);
   assert.match(source, /const CLIENT_SNAPSHOT_TIMEOUT_MS = 20_000;/);
-  assert.match(source, /const RUNTIME_BOOTSTRAP_ROUTE = "\/api\/runtime\/bootstrap";/);
+  assert.match(source, /from "\.\.\/\.\.\/shared\/runtime-bootstrap-contract\.mjs";/);
+  assert.match(source, /RUNTIME_BOOTSTRAP_ROUTE,/);
+  assert.doesNotMatch(source, /const RUNTIME_BOOTSTRAP_ROUTE =/);
   assert.match(source, /response = await fetch\(RUNTIME_BOOTSTRAP_ROUTE/);
   assert.doesNotMatch(source, /registryFirstSettledMap\(RUNTIME_ROUTES/);
   assert.match(source, /const snapshot = createSerializedRefresh\(loadSnapshot\);/);

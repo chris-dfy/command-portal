@@ -90,6 +90,59 @@ function runtimeResponse(data, options = {}) {
   });
 }
 
+function canonicalProductionReadiness(overrides = {}) {
+  return {
+    record_type: "nexus_production_readiness",
+    schema_version: "nexus.production-readiness@1.0.0",
+    production_ready: false,
+    conversation: { ready: true },
+    voice: {
+      ready: false,
+      contract_ready: true,
+      canonical_interaction_connected: false,
+    },
+    execution: {
+      ready: true,
+      authority_ready: true,
+      receipt_store_ready: true,
+      interaction_state_store_ready: true,
+      verification_ready: true,
+      live_handler_count: 1,
+    },
+    handlers: [{
+      schema_version: "nexus.execution-handler@1.0.0",
+      capability_id: "workspace.open",
+      plan_type: "workspace_open",
+      handler_id: "nexus.handler.workspace-open.v1",
+      target_system: "nexus.runtime.workspace-state",
+      effect_classification: "bounded_runtime_state_change",
+      required_permissions: ["operations:write"],
+      approval_policy: "no_human_approval_for_authenticated_current_workspace",
+      idempotency_strategy: "tenant-session-workspace-last-write",
+      timeout_seconds: 5,
+      verification_method: "independent_durable_workspace_state_read",
+      rollback_support: "restore_prior_active_workspace_record",
+      receipt_fields: [
+        "workspaceId",
+        "tenantId",
+        "statePath",
+        "stateDigest",
+        "activatedAt",
+      ],
+      enabled: true,
+      ready: true,
+      credentials_available: true,
+      target_reachable: true,
+      verifier_available: true,
+      receipts_enabled: true,
+      missing_requirements: [],
+    }],
+    checked_at: "2026-08-03T12:00:00Z",
+    process_liveness_inferred: false,
+    ...overrides,
+  };
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
   if (value && typeof value === "object") {
@@ -1643,6 +1696,42 @@ test("malformed or unauthorized bootstrap Registry responses fail closed before 
   }
 });
 
+test("an all-failed server bootstrap preserves all route-specific failures through the portal client", async () => {
+  let registryCalls = 0;
+  let childCalls = 0;
+  const base = await start(async (url) => {
+    if (url.endsWith("/runtime/capability-registry")) {
+      registryCalls += 1;
+      return runtimeResponse({}, { status: 401 });
+    }
+    childCalls += 1;
+    return runtimeResponse({ shouldNotDispatch: true });
+  }, {
+    testUseProvidedCapabilityRegistry: true,
+  });
+  globalThis.fetch = (input, init) => originalFetch(`${base}${String(input)}`, init);
+
+  const result = await portalClient.snapshot(true);
+  const routes = Object.keys(RUNTIME_BOOTSTRAP_ROUTES);
+
+  assert.equal(routes.length, 15);
+  assert.deepEqual(Object.keys(result.data).sort(), [...routes].sort());
+  assert.equal(result.failures.length, routes.length);
+  for (const [route, gatewayPath] of Object.entries(RUNTIME_BOOTSTRAP_ROUTES)) {
+    const envelope = result.data[route];
+    assert.equal(envelope.ok, false, route);
+    assert.equal(envelope.gateway.route, gatewayPath, route);
+    assert.equal(envelope.gateway.connectionState, "Unauthorized", route);
+    assert.equal(envelope.error.code, "runtime_unauthorized", route);
+  }
+  assert.equal(
+    result.failures.some((envelope) => envelope.error?.code === "gateway_snapshot_failed"),
+    false,
+  );
+  assert.equal(registryCalls, 1);
+  assert.equal(childCalls, 0);
+});
+
 test("Runtime bootstrap remains an exact same-origin read-only route", async () => {
   let runtimeCalls = 0;
   const base = await start(async () => {
@@ -2211,7 +2300,99 @@ test("proofs, receipts, health, readiness, and diagnostics bypass cache", async 
   }
 });
 
-test("process-ready Runtime 503 maps to one-attempt Degraded readiness without degrading healthy modules", async () => {
+test("canonical production readiness 503 adapts once to Degraded while preserving Runtime truth", async () => {
+  const projection = canonicalProductionReadiness();
+  let readinessCalls = 0;
+  let healthCalls = 0;
+  const base = await start(async (url) => {
+    if (url.endsWith("/ready")) {
+      readinessCalls += 1;
+      return new Response(JSON.stringify(projection), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    healthCalls += 1;
+    return runtimeResponse({ processLivenessOnly: true });
+  }, { maxAttempts: 3 });
+
+  const readyResponse = await fetch(`${base}/api/runtime/ready`);
+  const ready = await readyResponse.json();
+
+  assert.equal(readyResponse.status, 200);
+  assert.equal(ready.ok, true);
+  assert.deepEqual(ready.data, projection);
+  assert.equal(ready.runtime.status, "not_ready");
+  assert.equal(ready.runtime.timestamp, projection.checked_at);
+  assert.equal(ready.gateway.connectionState, "Degraded");
+  assert.equal(ready.gateway.attempts, 1);
+  assert.match(ready.gateway.warning, /not_ready.*independently reported/i);
+  assert.equal(readinessCalls, 1);
+
+  const health = await (await fetch(`${base}/api/runtime/health`)).json();
+  assert.equal(health.ok, true);
+  assert.equal(health.gateway.connectionState, "Healthy");
+  assert.equal(health.data.processLivenessOnly, true);
+  assert.equal(healthCalls, 1);
+});
+
+test("invalid canonical production readiness 503 projections fail closed without retries", async () => {
+  const statusInconsistent = canonicalProductionReadiness({
+    production_ready: true,
+    voice: {
+      ready: true,
+      contract_ready: true,
+      canonical_interaction_connected: true,
+    },
+  });
+  const scenarios = [
+    {
+      name: "malformed",
+      projection: canonicalProductionReadiness({ handlers: "not-an-array" }),
+    },
+    {
+      name: "schema mismatch",
+      projection: canonicalProductionReadiness({
+        schema_version: "nexus.production-readiness@2.0.0",
+      }),
+    },
+    {
+      name: "execution readiness invariant mismatch",
+      projection: canonicalProductionReadiness({
+        execution: {
+          ...canonicalProductionReadiness().execution,
+          authority_ready: false,
+        },
+      }),
+    },
+    {
+      name: "HTTP status contradicts production readiness",
+      projection: statusInconsistent,
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    let calls = 0;
+    const base = await start(async () => {
+      calls += 1;
+      return new Response(JSON.stringify(scenario.projection), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }, { maxAttempts: 3 });
+
+    const response = await fetch(`${base}/api/runtime/ready`);
+    const body = await response.json();
+    assert.equal(response.status, 502, scenario.name);
+    assert.equal(body.ok, false, scenario.name);
+    assert.equal(body.data, null, scenario.name);
+    assert.equal(body.gateway.connectionState, "Unknown", scenario.name);
+    assert.equal(body.error.code, "runtime_readiness_response_invalid", scenario.name);
+    assert.equal(calls, 1, scenario.name);
+  }
+});
+
+test("legacy process-ready Runtime envelope remains a compatible one-attempt Degraded readiness response", async () => {
   let readinessCalls = 0;
   let healthCalls = 0;
   const base = await start(async (url) => {
@@ -2242,7 +2423,7 @@ test("process-ready Runtime 503 maps to one-attempt Degraded readiness without d
   assert.equal(ready.data.platformContractReady, false);
   assert.equal(ready.gateway.connectionState, "Degraded");
   assert.equal(ready.gateway.attempts, 1);
-  assert.match(ready.gateway.warning, /process is reachable/i);
+  assert.match(ready.gateway.warning, /not_ready.*independently reported/i);
   assert.equal(readinessCalls, 1);
 
   const health = await (await fetch(`${base}/api/runtime/health`)).json();

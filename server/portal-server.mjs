@@ -34,6 +34,19 @@ import {
   createProviderSessionIdentityVerifier,
   createReplitAuthInteractiveHandler,
 } from "./replit-auth-oidc.mjs";
+import {
+  RUNTIME_BOOTSTRAP_RECORD_TYPE,
+  RUNTIME_BOOTSTRAP_ROUTE,
+  RUNTIME_BOOTSTRAP_ROUTES,
+  RUNTIME_BOOTSTRAP_SCHEMA_VERSION,
+} from "../shared/runtime-bootstrap-contract.mjs";
+
+export {
+  RUNTIME_BOOTSTRAP_RECORD_TYPE,
+  RUNTIME_BOOTSTRAP_ROUTE,
+  RUNTIME_BOOTSTRAP_ROUTES,
+  RUNTIME_BOOTSTRAP_SCHEMA_VERSION,
+};
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DIST = join(ROOT, "dist");
@@ -45,6 +58,8 @@ export const CAPABILITY_REGISTRY_RECORD_TYPE = "nexus_live_capability_registry_p
 export const CAPABILITY_REGISTRY_CONTRACT_RECORD_TYPE = "nexus_capability_registry_contract_identity";
 export const CAPABILITY_REGISTRY_SCHEMA_DIGEST = "sha256:52f825444f39d285afd1d3bac82ebdab4125f85feb381339314a39faa05fa166";
 export const CAPABILITY_REGISTRY_VALIDATOR_VERSION = "nexus.capability-registry-validator@1.0.0";
+export const PRODUCTION_READINESS_RECORD_TYPE = "nexus_production_readiness";
+export const PRODUCTION_READINESS_SCHEMA_VERSION = "nexus.production-readiness@1.0.0";
 const CAPABILITY_REGISTRY_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const JSON_GZIP_MINIMUM_BYTES = 64 * 1024;
 const CAPABILITY_REGISTRY_OWNER = "context_runtime";
@@ -109,26 +124,6 @@ export const RUNTIME_ROUTES = Object.freeze({
   "/api/runtime/replay": "/runtime/replay"
 });
 
-export const RUNTIME_BOOTSTRAP_ROUTE = "/api/runtime/bootstrap";
-export const RUNTIME_BOOTSTRAP_ROUTES = Object.freeze({
-  status: "/api/runtime/status",
-  health: "/api/runtime/health",
-  ready: "/api/runtime/ready",
-  version: "/api/runtime/version",
-  providers: "/api/runtime/providers",
-  capabilities: "/api/runtime/capabilities",
-  proofs: "/api/runtime/proofs",
-  receipts: "/api/runtime/receipts",
-  environment: "/api/runtime/environment",
-  diagnostics: "/api/runtime/diagnostics",
-  governance: "/api/runtime/governance",
-  connectors: "/api/runtime/connectors",
-  "capability-registry": "/api/runtime/capability-registry",
-  conclave: "/api/runtime/conclave",
-  eox: "/api/runtime/eox",
-});
-const RUNTIME_BOOTSTRAP_RECORD_TYPE = "nexus_experience_runtime_bootstrap";
-const RUNTIME_BOOTSTRAP_SCHEMA_VERSION = "1.0.0";
 const RUNTIME_BOOTSTRAP_CONCURRENCY = 3;
 
 const REPLAY_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,160}$/;
@@ -4281,11 +4276,117 @@ function validateRuntimeEnvelope(body) {
   return body;
 }
 
+function readinessFailure(message) {
+  throw new GatewayFailure(
+    "runtime_readiness_response_invalid",
+    message,
+    "Unknown",
+    502,
+  );
+}
+
+function looksLikeProductionReadinessProjection(value) {
+  const projection = objectRecord(value);
+  return Boolean(
+    projection
+    && [
+      "record_type",
+      "schema_version",
+      "production_ready",
+      "conversation",
+      "voice",
+      "execution",
+      "handlers",
+      "checked_at",
+      "process_liveness_inferred",
+    ].some((field) => Object.hasOwn(projection, field)),
+  );
+}
+
+function validateProductionReadinessProjection(value) {
+  const projection = objectRecord(value);
+  if (!projection) readinessFailure("Runtime production readiness was not a JSON object.");
+  if (projection.record_type !== PRODUCTION_READINESS_RECORD_TYPE) {
+    readinessFailure("Runtime production readiness record type is invalid.");
+  }
+  if (projection.schema_version !== PRODUCTION_READINESS_SCHEMA_VERSION) {
+    readinessFailure("Runtime production readiness schema version is incompatible.");
+  }
+
+  const conversation = objectRecord(projection.conversation);
+  const voice = objectRecord(projection.voice);
+  const execution = objectRecord(projection.execution);
+  if (
+    typeof projection.production_ready !== "boolean"
+    || typeof conversation?.ready !== "boolean"
+    || typeof voice?.ready !== "boolean"
+    || typeof voice?.contract_ready !== "boolean"
+    || typeof voice?.canonical_interaction_connected !== "boolean"
+    || typeof execution?.ready !== "boolean"
+    || typeof execution?.authority_ready !== "boolean"
+    || typeof execution?.receipt_store_ready !== "boolean"
+    || typeof execution?.interaction_state_store_ready !== "boolean"
+    || typeof execution?.verification_ready !== "boolean"
+    || !Number.isInteger(execution?.live_handler_count)
+    || execution.live_handler_count < 0
+    || !Array.isArray(projection.handlers)
+    || !validTimestamp(projection.checked_at)
+    || projection.process_liveness_inferred !== false
+  ) {
+    readinessFailure("Runtime production readiness field types or required values are invalid.");
+  }
+
+  const handlerReadiness = projection.handlers.map((handler) => objectRecord(handler)?.ready);
+  const verificationReady = handlerReadiness.length > 0 && handlerReadiness.every(Boolean);
+  const executionReady = (
+    execution.authority_ready
+    && execution.receipt_store_ready
+    && execution.interaction_state_store_ready
+    && execution.verification_ready
+  );
+  if (
+    handlerReadiness.some((ready) => typeof ready !== "boolean")
+    || execution.live_handler_count !== handlerReadiness.filter(Boolean).length
+    || execution.verification_ready !== verificationReady
+    || execution.ready !== executionReady
+    || voice.ready !== voice.canonical_interaction_connected
+    || projection.production_ready !== (execution.ready && voice.ready)
+  ) {
+    readinessFailure("Runtime production readiness invariants are inconsistent.");
+  }
+  if (projection.secretValuesExposed === true) {
+    readinessFailure("Runtime production readiness exposed a prohibited secret-value marker.");
+  }
+  return projection;
+}
+
+function productionReadinessEnvelope(projection) {
+  return {
+    status: projection.production_ready ? "ready" : "not_ready",
+    timestamp: projection.checked_at,
+    schemaVersion: SUPPORTED_SCHEMA_VERSION,
+    runtimeVersion: SUPPORTED_RUNTIME_VERSION,
+    proofIds: [],
+    limitations: [
+      "The Runtime-owned production-readiness projection does not by itself establish process liveness, capability availability, or execution Authority.",
+    ],
+    data: projection,
+  };
+}
+
 function validateRuntimeReadResponse(
   body,
   runtimePath,
   clock = () => Date.now(),
 ) {
+  if (runtimePath === "/ready") {
+    const readinessProjection = sanitizeOperationalResponse(body);
+    if (looksLikeProductionReadinessProjection(readinessProjection)) {
+      return productionReadinessEnvelope(
+        validateProductionReadinessProjection(readinessProjection),
+      );
+    }
+  }
   if (runtimePath !== "/runtime/capability-registry") return validateRuntimeEnvelope(body);
   const sanitized = sanitizeOperationalResponse(body);
   if (sanitized?.recordType === CAPABILITY_REGISTRY_RECORD_TYPE) {
@@ -4305,22 +4406,30 @@ function validateRuntimeReadResponse(
   return envelope;
 }
 
-function validateDegradedReadinessEnvelope(body) {
+function validateReadinessHttpEnvelope(body, httpStatus) {
   const data = body?.data;
-  if (
-    body?.status !== "not_ready"
-    || !data
-    || typeof data !== "object"
-    || Array.isArray(data)
-    || data.processReady !== true
-    || data.platformContractReady !== false
-  ) {
-    throw new GatewayFailure(
-      "runtime_readiness_response_invalid",
-      "Runtime returned an invalid process-ready degraded readiness response.",
-      "Unknown",
-      502,
-    );
+  if (data?.record_type === PRODUCTION_READINESS_RECORD_TYPE) {
+    const projection = validateProductionReadinessProjection(data);
+    const expectedHttpStatus = projection.production_ready ? 200 : 503;
+    const expectedStatus = projection.production_ready ? "ready" : "not_ready";
+    if (httpStatus !== expectedHttpStatus || body.status !== expectedStatus) {
+      readinessFailure("Runtime production readiness HTTP status and projection state disagree.");
+    }
+    return body;
+  }
+  if (httpStatus === 503) {
+    if (
+      body?.status !== "not_ready"
+      || !objectRecord(data)
+      || data.processReady !== true
+      || data.platformContractReady !== false
+    ) {
+      readinessFailure("Runtime returned an invalid legacy degraded readiness response.");
+    }
+    return body;
+  }
+  if (body?.status === "not_ready") {
+    readinessFailure("Runtime readiness reported not_ready with an incompatible HTTP status.");
   }
   return body;
 }
@@ -4358,8 +4467,8 @@ async function fetchRuntime(
     if (response.status === 401 || response.status === 403) {
       throw new GatewayFailure("runtime_unauthorized", "Runtime rejected the server credential.", "Unauthorized", 502);
     }
-    const processReadyDegraded = runtimePath === "/ready" && response.status === 503;
-    if (!response.ok && !processReadyDegraded) {
+    const degradedReadinessResponse = runtimePath === "/ready" && response.status === 503;
+    if (!response.ok && !degradedReadinessResponse) {
       throw new GatewayFailure(
         "runtime_unavailable",
         `Runtime returned status ${response.status}.`,
@@ -4382,8 +4491,8 @@ async function fetchRuntime(
     try { body = JSON.parse(raw.toString("utf8")); }
     catch { throw new GatewayFailure("runtime_response_invalid", "Runtime returned invalid JSON.", "Unknown", 502); }
     const validated = validateRuntimeReadResponse(body, runtimePath, clock);
-    return processReadyDegraded
-      ? validateDegradedReadinessEnvelope(validated)
+    return runtimePath === "/ready"
+      ? validateReadinessHttpEnvelope(validated, response.status)
       : validated;
   } finally {
     clearTimeout(timer);
@@ -4538,12 +4647,11 @@ async function fetchWithRetry(
 }
 
 function successfulEnvelope(config, tracker, route, body, entry, cached, stale, attempts) {
-  const processReadyDegraded = (
+  const readinessDegraded = (
     route === "/api/runtime/ready"
     && body.status === "not_ready"
-    && body?.data?.processReady === true
   );
-  const degraded = stale || processReadyDegraded;
+  const degraded = stale || readinessDegraded;
   return {
     ok: true,
     data: body.data,
@@ -4560,8 +4668,8 @@ function successfulEnvelope(config, tracker, route, body, entry, cached, stale, 
       cache: cacheMetadata(entry, cached, stale),
       warning: stale
         ? "Runtime refresh failed; displaying the last validated response."
-        : processReadyDegraded
-          ? "The Runtime process is reachable, but its readiness contract reports not_ready."
+        : readinessDegraded
+          ? "The Runtime production-readiness contract reports not_ready; process liveness and capability readiness remain independently reported."
           : null
     }),
     truth: TRUTH

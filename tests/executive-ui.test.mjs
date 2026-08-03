@@ -60,7 +60,8 @@ test("connection lifecycle renders every required state", async () => {
     assert.match(source, new RegExp(`\"${state}\"`));
   }
   assert.match(app, /derivePortalConnectionState\(snapshot, failures, loading\)/);
-  assert.match(coordination, /return loading \? "Connecting" : "Unavailable"/);
+  assert.match(coordination, /if \(loading\) return "Connecting"/);
+  assert.match(coordination, /CONNECTION_FAILURE_PRIORITY\.find/);
   assert.doesNotMatch(coordination, /if \(loading\) return "Retrying"/);
 });
 
@@ -267,8 +268,12 @@ test("mission control consumes the versioned Runtime parity contract", async () 
 });
 
 test("Operations Center manifests the Runtime-owned Executive Operating Loop", async () => {
-  const [app, center, contract, portalClient] = await Promise.all([
-    read("../src/App.tsx"), read("../src/components/OperationsCenter.tsx"), read("../src/lib/eox-client.ts"), read("../src/lib/portal-client.ts")
+  const [app, center, contract, portalClient, bootstrapContract] = await Promise.all([
+    read("../src/App.tsx"),
+    read("../src/components/OperationsCenter.tsx"),
+    read("../src/lib/eox-client.ts"),
+    read("../src/lib/portal-client.ts"),
+    read("../shared/runtime-bootstrap-contract.mjs"),
   ]);
   assert.match(app, /areaFromPath\(window\.location\.pathname\)/);
   assert.match(app, /"web\.dashboard\.operations-center": <OperationsCenter/);
@@ -276,7 +281,8 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
   for (const label of ["Operations Center", "Executive Brief", "Operational Health", "Attention Queue", "Recommended Actions", "Operational Understanding", "Mission Timeline", "Executive state"]) assert.match(center, new RegExp(label));
   assert.match(center, /assessment\.loop\.map/);
   assert.match(center, /Executive Operating Loop/);
-  assert.match(portalClient, /"eox"/);
+  assert.match(portalClient, /RUNTIME_BOOTSTRAP_ROUTE_KEYS/);
+  assert.match(bootstrapContract, /\["eox", "\/api\/runtime\/eox"\]/);
   for (const significance of ["Business impact", "Operational impact", "Mission impact", "Why this matters"]) assert.match(center, new RegExp(significance, "i"));
   assert.doesNotMatch(center, /Begin Executive Briefing|speechSynthesis|HighlightRequested|eoxClient/);
   assert.match(center, /persistent NEXUS copilot is the client presentation surface/i);
