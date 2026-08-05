@@ -44,7 +44,9 @@ test("main and release subjects are blocked on the quarantine and exact-artifact
   ]);
 
   assert.match(corrective, /push:\n\s+branches:\n\s+- main\n\s+- "codex\/\*\*"/);
+  assert.match(release, /pull_request:\n\s+branches:\n\s+- main/);
   assert.match(release, /push:\n\s+branches:\n\s+- main/);
+  assert.doesNotMatch(release, /codex\/command-portal-direct-voice-quarantine/);
   assert.match(release, /ref: \$\{\{ github\.sha \}\}/);
   assert.match(release, /readFileSync\("dist\/index\.html"/);
   assert.match(release, /javascript: javascript\[0\]/);

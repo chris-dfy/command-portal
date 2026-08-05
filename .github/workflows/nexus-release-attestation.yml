@@ -1,12 +1,14 @@
 name: NEXUS release attestation
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
       - codex/eo-exec-001-live-release
       - codex/runtime-readiness-contract-recovery
-      - codex/command-portal-direct-voice-quarantine
   workflow_dispatch:
 
 permissions:
