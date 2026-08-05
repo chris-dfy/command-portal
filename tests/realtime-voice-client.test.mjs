@@ -1,145 +1,664 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { afterEach, test } from "node:test";
-import { RealtimeVoiceClient } from "../src/lib/realtime-voice-client.ts";
-
-// The realtime voice cancellation state machine (barge-in cancel, benign
-// cancellation-race settlement, stale-response filtering, queued creation)
-// must never silently regress into a stuck session or duplicate answers.
+import {
+  CLIENT_SPEECH_TURN_POLICY,
+  COMMAND_PORTAL_PROVES_FULL_DUPLEX_READINESS,
+  COMMAND_PORTAL_REALTIME_PROFILE,
+  COMMAND_PORTAL_REALTIME_QUARANTINE_CODE,
+  ClientSpeechTurnSegmenter,
+  isVerifiedManualCommitStatus,
+  RealtimeVoiceClient,
+  RUNTIME_REALTIME_INPUT_MODE,
+  RUNTIME_REALTIME_INPUT_MODE_HEADER,
+  runtimeRealtimeInputModeFromHeaders,
+} from "../src/lib/realtime-voice-client.ts";
+import {
+  RealtimePcmAppendCoordinator,
+  encodePcm16Base64,
+} from "../src/lib/realtime-pcm-input.ts";
 
 const clients = [];
+const SPEECH_AMPLITUDE = CLIENT_SPEECH_TURN_POLICY.speechStartThreshold + 0.08;
+const SILENCE_AMPLITUDE = Math.max(0, CLIENT_SPEECH_TURN_POLICY.speechEndThreshold - 0.01);
 
-function makeClient() {
+function makeClient({ admit = async (text) => ({ admitted: true, spokenSummary: `Runtime: ${text}` }) } = {}) {
   const states = [];
   const errors = [];
-  const transcripts = { user: [], assistant: [] };
-  const audio = {
-    muted: false,
-    srcObject: null,
-    pause() {},
-    play() { return Promise.resolve(); },
-  };
-  const client = new RealtimeVoiceClient(audio, {
+  const transcripts = [];
+  const admissions = [];
+  const narrated = [];
+  const amplitudes = [];
+  const errorContexts = [];
+  const client = new RealtimeVoiceClient({
     onState: (state) => states.push(state),
-    onAmplitude: () => {},
-    onUserTranscript: (text) => transcripts.user.push(text),
-    onAssistantTranscript: (text) => transcripts.assistant.push(text),
-    onError: (message, code) => errors.push({ message, code }),
+    onAmplitude: (amplitude) => amplitudes.push(amplitude),
+    onUserTranscript: async (text, idempotencyKey) => {
+      transcripts.push({ text, idempotencyKey });
+      const admission = await admit(text, idempotencyKey);
+      admissions.push(admission);
+      return admission;
+    },
+    onRuntimeResponse: (text) => narrated.push(text),
+    onError: (message, context) => {
+      errors.push(message);
+      errorContexts.push(context);
+    },
   });
   const sent = [];
-  // Compile-time private fields are reachable at runtime; install a fake
-  // open data channel so send() records outbound provider events.
   client.channel = {
     readyState: "open",
     send: (raw) => sent.push(JSON.parse(raw)),
     close() {},
   };
+  client.promptEchoSignature = "nexus governed runtime prompt signature boundary";
+  client.transportReady = true;
+  const microphoneTrack = { enabled: true, stopped: false, stop() { this.stopped = true; } };
+  client.stream = {
+    getAudioTracks: () => [microphoneTrack],
+    getTracks: () => [microphoneTrack],
+  };
   const dispatch = (event) => client.handleEvent(JSON.stringify(event));
+  const fixture = {
+    client,
+    dispatch,
+    sent,
+    states,
+    errors,
+    errorContexts,
+    transcripts,
+    admissions,
+    narrated,
+    amplitudes,
+    microphoneTrack,
+    now: 0,
+  };
   clients.push(client);
-  return { client, dispatch, sent, states, errors, transcripts };
+  return fixture;
+}
+
+function sample(fixture, amplitude, elapsedMs = 1) {
+  fixture.now += elapsedMs;
+  fixture.client.processAmplitudeSample(amplitude, fixture.now);
+}
+
+function beginDetectedSpeech(fixture) {
+  sample(fixture, SPEECH_AMPLITUDE);
+  sample(fixture, SPEECH_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.speechStartHoldMs);
+}
+
+function endDetectedSpeech(fixture) {
+  sample(fixture, SILENCE_AMPLITUDE);
+  sample(fixture, SILENCE_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.speechEndSilenceMs);
+}
+
+function detectAndBindTurn(fixture, itemId) {
+  const commitsBefore = fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length;
+  beginDetectedSpeech(fixture);
+  endDetectedSpeech(fixture);
+  assert.equal(
+    fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length,
+    commitsBefore + 1,
+  );
+  fixture.dispatch({ type: "input_audio_buffer.committed", item_id: itemId });
+}
+
+async function admitTurn(fixture, transcript, itemId) {
+  detectAndBindTurn(fixture, itemId);
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript,
+    item_id: itemId,
+  });
+  await fixture.client.admissionQueue;
 }
 
 afterEach(() => {
-  // Clear any pending response-boundary timers so the test runner exits.
   for (const client of clients.splice(0)) client.stop();
 });
 
-test("barge-in cancels the active response by id and clears output audio", () => {
-  const { dispatch, sent, states } = makeClient();
-  dispatch({ type: "response.created", response: { id: "resp_1" } });
-  dispatch({ type: "input_audio_buffer.speech_started" });
-
-  assert.deepEqual(sent, [
-    { type: "response.cancel", response_id: "resp_1" },
-    { type: "output_audio_buffer.clear" },
-  ]);
-  assert.equal(states.at(-1), "interrupted");
-
-  // While cancelling, a second speech_started must not send another cancel.
-  dispatch({ type: "input_audio_buffer.speech_started" });
-  assert.equal(sent.filter((e) => e.type === "response.cancel").length, 1);
+test("Runtime manual-commit status cannot override the Command Portal quarantine", () => {
+  const verified = {
+    state: "available",
+    serverVAD: false,
+    clientAudioAppendRequired: true,
+    inputAudioAppendEvent: "input_audio_buffer.append",
+    clientAudioCommitRequired: true,
+    inputAudioCommitEvent: "input_audio_buffer.commit",
+    providerOfferAudioDirection: "inactive",
+    providerOfferAudioTrackAttached: false,
+    rtpAudioNegotiated: false,
+  };
+  assert.equal(COMMAND_PORTAL_REALTIME_PROFILE, "continuity_only");
+  assert.equal(COMMAND_PORTAL_PROVES_FULL_DUPLEX_READINESS, false);
+  assert.equal(isVerifiedManualCommitStatus(verified), false);
+  for (const status of [
+    undefined,
+    null,
+    { ...verified, state: "unavailable" },
+    { ...verified, serverVAD: true },
+    { ...verified, serverVAD: undefined },
+    { ...verified, clientAudioAppendRequired: false },
+    { ...verified, inputAudioAppendEvent: "response.create" },
+    { ...verified, clientAudioCommitRequired: false },
+    { ...verified, clientAudioCommitRequired: undefined },
+    { ...verified, inputAudioCommitEvent: "input_audio_buffer.speech_stopped" },
+    { ...verified, inputAudioCommitEvent: undefined },
+    { ...verified, providerOfferAudioDirection: "sendonly" },
+    { ...verified, providerOfferAudioDirection: undefined },
+    { ...verified, providerOfferAudioTrackAttached: true },
+    { ...verified, providerOfferAudioTrackAttached: undefined },
+    { ...verified, rtpAudioNegotiated: true },
+  ]) assert.equal(isVerifiedManualCommitStatus(status), false);
 });
 
-test("benign cancellation-race error settles the cancel and fires the queued response.create", () => {
-  const { dispatch, sent, states, errors } = makeClient();
-  dispatch({ type: "response.created", response: { id: "resp_1" } });
-  dispatch({ type: "input_audio_buffer.speech_started" });
-  // Finalized transcript arrives while cancelling: creation must be queued.
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "next question" });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 0);
-
-  // The response finished before response.cancel arrived: benign race.
-  dispatch({ type: "error", error: { message: "Cancellation failed: no active response found" } });
-
-  assert.equal(errors.length, 0, "benign cancellation race must not fail the session");
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 1);
-  assert.equal(states.at(-1), "thinking");
+test("only the exact per-call Runtime input-mode attestation is accepted", () => {
+  assert.equal(
+    runtimeRealtimeInputModeFromHeaders(new Headers({
+      [RUNTIME_REALTIME_INPUT_MODE_HEADER]: RUNTIME_REALTIME_INPUT_MODE,
+    })),
+    RUNTIME_REALTIME_INPUT_MODE,
+  );
+  for (const value of [undefined, "", "client-pcm-append-commit-v0", "CLIENT-PCM-APPEND-COMMIT-V1", "client-pcm-append-commit-v1 "]) {
+    const headers = { get: () => value ?? null };
+    assert.equal(runtimeRealtimeInputModeFromHeaders(headers), null);
+  }
 });
 
-test("non-benign errors still fail the session", () => {
-  const { dispatch, errors, states } = makeClient();
-  dispatch({ type: "error", error: { message: "provider exploded" } });
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0].message, "provider exploded");
-  assert.equal(states.at(-1), "error");
+test("PCM pre-roll, live audio, and commit use one ordered data-channel path", () => {
+  const encoded = Buffer.from(encodePcm16Base64(new Float32Array([-1, 0, 1])), "base64");
+  assert.deepEqual([...encoded], [0x00, 0x80, 0x00, 0x00, 0xff, 0x7f]);
+  const events = [];
+  const pcm = new RealtimePcmAppendCoordinator((event) => {
+    events.push(event);
+    return true;
+  }, 2);
+  assert.equal(pcm.acceptSamples(new Float32Array([0.1, -0.1])), true);
+  assert.equal(pcm.acceptSamples(new Float32Array([0.2, -0.2])), true);
+  assert.equal(pcm.beginTurn(), true);
+  assert.equal(pcm.acceptSamples(new Float32Array([0.3, -0.3])), true);
+  assert.equal(pcm.commitTurn(), true);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    [
+      "input_audio_buffer.clear",
+      "input_audio_buffer.append",
+      "input_audio_buffer.append",
+      "input_audio_buffer.append",
+      "input_audio_buffer.commit",
+    ],
+  );
+  assert.ok(events.filter((event) => event.type === "input_audio_buffer.append")
+    .every((event) => typeof event.audio === "string" && event.audio.length > 0));
+  assert.equal(pcm.commitTurn(), false);
 });
 
-test("delta and done events from a stale response id are ignored", () => {
-  const { dispatch, states, transcripts } = makeClient();
-  dispatch({ type: "response.created", response: { id: "resp_2" } });
+test("the quarantined browser adapter fails before status, media capture, offer, or Gateway POST", async () => {
+  const keys = [
+    "window",
+    "navigator",
+    "RTCPeerConnection",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "fetch",
+  ];
+  const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const restore = () => {
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  };
+  const remoteDescriptions = [];
+  const transceiverOffers = [];
+  let mediaCalls = 0;
+  let fetchCalls = 0;
+  const track = { enabled: true, stop() {} };
+  const stream = { getAudioTracks: () => [track], getTracks: () => [track] };
+  class FakeAudioContext {
+    state = "running";
+    sampleRate = 24_000;
+    destination = {};
+    createAnalyser() {
+      return {
+        fftSize: 256,
+        smoothingTimeConstant: 0,
+        frequencyBinCount: 1,
+        getByteFrequencyData(values) { values[0] = 0; },
+      };
+    }
+    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+    createScriptProcessor() { return { onaudioprocess: null, connect() {}, disconnect() {} }; }
+    createGain() { return { gain: { value: 1 }, connect() {}, disconnect() {} }; }
+    async resume() {}
+    async close() {}
+  }
+  class FakePeer {
+    connectionState = "connected";
+    addTransceiver(kind, options) {
+      transceiverOffers.push({ kind, options });
+      return { direction: options?.direction, sender: { track: null } };
+    }
+    createDataChannel() {
+      return { readyState: "connecting", addEventListener() {}, close() {} };
+    }
+    async createOffer() { return { type: "offer", sdp: "v=0\r\na=offer\r\n" }; }
+    async setLocalDescription() {}
+    async setRemoteDescription(description) { remoteDescriptions.push(description); }
+    close() {}
+  }
+  try {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        RTCPeerConnection: FakePeer,
+        AudioContext: FakeAudioContext,
+        dispatchEvent() {},
+      },
+    });
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { mediaDevices: { getUserMedia: async () => { mediaCalls += 1; return stream; } } },
+    });
+    Object.defineProperty(globalThis, "RTCPeerConnection", { configurable: true, value: FakePeer });
+    Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: () => 1 });
+    Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: async (url) => {
+        fetchCalls += 1;
+        if (String(url).endsWith("/realtime-voice")) {
+          return new Response(JSON.stringify({
+            ok: true,
+            data: {
+              state: "available",
+              serverVAD: false,
+              clientAudioAppendRequired: true,
+              inputAudioAppendEvent: "input_audio_buffer.append",
+              clientAudioCommitRequired: true,
+              inputAudioCommitEvent: "input_audio_buffer.commit",
+              providerOfferAudioDirection: "inactive",
+              providerOfferAudioTrackAttached: false,
+              rtpAudioNegotiated: false,
+            },
+          }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        return new Response("v=0\r\na=answer\r\n", {
+          status: 201,
+          headers: {
+            "Content-Type": "application/sdp",
+            "X-NEXUS-Prompt-Echo-Signature": "nexus governed runtime prompt signature boundary",
+            [RUNTIME_REALTIME_INPUT_MODE_HEADER]: RUNTIME_REALTIME_INPUT_MODE,
+          },
+        });
+      },
+    });
 
-  dispatch({ type: "response.output_audio_transcript.delta", response_id: "resp_1", delta: "stale " });
-  dispatch({ type: "response.output_audio.delta", response_id: "resp_1" });
-  assert.deepEqual(transcripts.assistant, []);
-  assert.equal(states.includes("speaking"), false);
-
-  // Stale response.done must not settle the active response.
-  dispatch({ type: "response.done", response: { id: "resp_1" } });
-  assert.notEqual(states.at(-1), "listening");
-
-  // Active-response events still flow.
-  dispatch({ type: "response.output_audio_transcript.delta", response_id: "resp_2", delta: "fresh" });
-  assert.deepEqual(transcripts.assistant, ["fresh"]);
-  assert.equal(states.at(-1), "speaking");
-  dispatch({ type: "response.done", response: { id: "resp_2" } });
-  assert.equal(states.at(-1), "listening");
+    const states = [];
+    const quarantined = new RealtimeVoiceClient({
+      onState(state) { states.push(state); }, onAmplitude() {}, onUserTranscript: async () => ({ admitted: false }),
+      onRuntimeResponse() {}, onError() {},
+    });
+    clients.push(quarantined);
+    await assert.rejects(
+      quarantined.connect(),
+      (error) => error?.code === COMMAND_PORTAL_REALTIME_QUARANTINE_CODE,
+    );
+    assert.deepEqual(states, ["error"]);
+    assert.equal(fetchCalls, 0);
+    assert.equal(mediaCalls, 0);
+    assert.equal(remoteDescriptions.length, 0);
+    assert.equal(transceiverOffers.length, 0);
+  } finally {
+    for (const client of clients.splice(0)) client.stop();
+    restore();
+  }
 });
 
-test("deltas arriving while cancelling are suppressed", () => {
-  const { dispatch, transcripts, states } = makeClient();
-  dispatch({ type: "response.created", response: { id: "resp_1" } });
-  dispatch({ type: "input_audio_buffer.speech_started" });
-  dispatch({ type: "response.output_audio_transcript.delta", response_id: "resp_1", delta: "tail" });
-  assert.deepEqual(transcripts.assistant, []);
-  assert.equal(states.at(-1), "interrupted");
+test("deterministic segmentation ignores silence and transient noise", () => {
+  const segmenter = new ClientSpeechTurnSegmenter();
+  assert.equal(segmenter.observe(SILENCE_AMPLITUDE, 0), null);
+  assert.equal(segmenter.observe(SILENCE_AMPLITUDE, 10_000), null);
+  assert.equal(segmenter.observe(SPEECH_AMPLITUDE, 10_001), null);
+  assert.equal(
+    segmenter.observe(SPEECH_AMPLITUDE, 10_001 + CLIENT_SPEECH_TURN_POLICY.speechStartHoldMs - 1),
+    null,
+  );
+  assert.equal(segmenter.observe(SILENCE_AMPLITUDE, 10_001 + CLIENT_SPEECH_TURN_POLICY.speechStartHoldMs), null);
+
+  const fixture = makeClient();
+  sample(fixture, SILENCE_AMPLITUDE, 20_000);
+  sample(fixture, SPEECH_AMPLITUDE);
+  sample(fixture, SILENCE_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.speechStartHoldMs - 1);
+  sample(fixture, SILENCE_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.speechEndSilenceMs * 2);
+  assert.deepEqual(fixture.sent, []);
+  assert.deepEqual(fixture.transcripts, []);
 });
 
-test("repeated turns produce exactly one response.create each", () => {
-  const { dispatch, sent, transcripts } = makeClient();
+test("extended idle silence is cleared without creating a speech turn or commit", () => {
+  const fixture = makeClient();
+  sample(fixture, SILENCE_AMPLITUDE);
+  sample(fixture, SILENCE_AMPLITUDE, 4_000);
+  sample(fixture, SILENCE_AMPLITUDE, 4_000);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.clear").length, 2);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 0);
+  assert.deepEqual(fixture.transcripts, []);
+});
 
-  // Turn 1: plain finalized transcript with no active response.
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "turn one" });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 1);
-  // A duplicate finalized transcript while the response is active must not create another.
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "turn one again" });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 1);
-  dispatch({ type: "response.created", response: { id: "resp_1" } });
-  dispatch({ type: "response.done", response: { id: "resp_1" } });
+test("sustained speech followed by bounded silence emits exactly one manual commit", () => {
+  const fixture = makeClient();
+  beginDetectedSpeech(fixture);
+  sample(fixture, SILENCE_AMPLITUDE);
+  sample(fixture, SILENCE_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.speechEndSilenceMs - 1);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 0);
+  sample(fixture, SILENCE_AMPLITUDE, 1);
+  sample(fixture, SILENCE_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.speechEndSilenceMs * 4);
+  assert.deepEqual(
+    fixture.sent.filter((event) => event.type === "input_audio_buffer.commit"),
+    [{ type: "input_audio_buffer.commit" }],
+  );
+  assert.equal(fixture.states.at(-1), "thinking");
+});
 
-  // Turn 2: barge-in path — queued creation fires once after settlement.
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "turn two" });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 2);
-  dispatch({ type: "response.created", response: { id: "resp_2" } });
-  dispatch({ type: "input_audio_buffer.speech_started" });
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "turn three" });
-  dispatch({ type: "response.done", response: { id: "resp_2" } });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 3);
+test("speech resuming inside the trailing-silence window remains one turn", () => {
+  const fixture = makeClient();
+  beginDetectedSpeech(fixture);
+  sample(fixture, SILENCE_AMPLITUDE);
+  sample(fixture, SILENCE_AMPLITUDE, Math.floor(CLIENT_SPEECH_TURN_POLICY.speechEndSilenceMs / 2));
+  sample(fixture, SPEECH_AMPLITUDE);
+  sample(fixture, SILENCE_AMPLITUDE);
+  sample(fixture, SILENCE_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.speechEndSilenceMs);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+});
 
-  // Empty transcripts never create responses.
-  dispatch({ type: "response.created", response: { id: "resp_3" } });
-  dispatch({ type: "response.done", response: { id: "resp_3" } });
-  dispatch({ type: "conversation.item.input_audio_transcription.completed", transcript: "   " });
-  assert.equal(sent.filter((e) => e.type === "response.create").length, 3);
+test("each committed provider item is bound to one turn and each final transcript enters Runtime once", async () => {
+  const fixture = makeClient();
+  await admitTurn(fixture, "check runtime status", "item_1");
 
-  // The whitespace transcript is still surfaced to the UI, but never creates a response.
-  assert.deepEqual(transcripts.user, ["turn one", "turn one again", "turn two", "turn three", "   "]);
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "check runtime status",
+    item_id: "item_1",
+  });
+  await fixture.client.admissionQueue;
+
+  assert.equal(fixture.transcripts.length, 1);
+  assert.equal(fixture.narrated.length, 1);
+  assert.deepEqual(fixture.narrated, ["Runtime: check runtime status"]);
+  assert.match(fixture.transcripts[0].idempotencyKey, /^[0-9a-f-]{36}$/i);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+  assert.equal(fixture.sent.some((event) => event.type === "response.create"), false);
+});
+
+test("a committed turn disables the microphone and rejects a second commit before provider binding", () => {
+  const fixture = makeClient();
+  beginDetectedSpeech(fixture);
+  endDetectedSpeech(fixture);
+  assert.equal(fixture.microphoneTrack.enabled, false);
+  beginDetectedSpeech(fixture);
+  endDetectedSpeech(fixture);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+  fixture.dispatch({ type: "input_audio_buffer.committed", item_id: "item_1" });
+  beginDetectedSpeech(fixture);
+  endDetectedSpeech(fixture);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+});
+
+test("a Runtime POST cannot be superseded and its first verified result narrates exactly once", async () => {
+  let releaseFirst;
+  const firstAdmission = new Promise((resolve) => { releaseFirst = resolve; });
+  const fixture = makeClient({
+    admit: async () => firstAdmission,
+  });
+
+  detectAndBindTurn(fixture, "item_1");
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "execute the governed request",
+    item_id: "item_1",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fixture.transcripts.length, 1);
+
+  beginDetectedSpeech(fixture);
+  endDetectedSpeech(fixture);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+  assert.equal(fixture.microphoneTrack.enabled, false);
+
+  releaseFirst({ admitted: true, spokenSummary: "Verified Runtime result" });
+  await fixture.client.admissionQueue;
+  assert.deepEqual(fixture.narrated, ["Verified Runtime result"]);
+  assert.equal(fixture.admissions.length, 1);
+  assert.equal(fixture.microphoneTrack.enabled, true);
+
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "execute the governed request",
+    item_id: "item_1",
+  });
+  await fixture.client.admissionQueue;
+  assert.deepEqual(fixture.narrated, ["Verified Runtime result"]);
+  assert.equal(fixture.transcripts.length, 1);
+});
+
+test("a later turn can begin only after the first Runtime disposition releases it", async () => {
+  const fixture = makeClient();
+  await admitTurn(fixture, "first request", "item_first");
+  assert.equal(fixture.microphoneTrack.enabled, true);
+
+  detectAndBindTurn(fixture, "item_next");
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "next request",
+    item_id: "item_next",
+  });
+  await fixture.client.admissionQueue;
+  assert.deepEqual(fixture.transcripts.map(({ text }) => text), ["first request", "next request"]);
+  assert.deepEqual(fixture.narrated, ["Runtime: first request", "Runtime: next request"]);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 2);
+  assert.equal(fixture.sent.some((event) => event.type === "response.create"), false);
+});
+
+test("stopping transport cannot invalidate an already submitted canonical Runtime interaction", async () => {
+  let releaseAdmission;
+  const pendingAdmission = new Promise((resolve) => { releaseAdmission = resolve; });
+  const fixture = makeClient({ admit: async () => pendingAdmission });
+  detectAndBindTurn(fixture, "item_submitted");
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "submitted request",
+    item_id: "item_submitted",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fixture.transcripts.length, 1);
+  fixture.client.stop();
+
+  releaseAdmission({ admitted: true, spokenSummary: "Runtime result delivered to the UI callback" });
+  await fixture.client.admissionQueue;
+  assert.equal(fixture.admissions.length, 1);
+  assert.equal(fixture.admissions[0].spokenSummary, "Runtime result delivered to the UI callback");
+  assert.deepEqual(fixture.narrated, []);
+  assert.equal(fixture.states.at(-1), "idle");
+});
+
+test("a provider failure during canonical admission prohibits a competing retry identity", async () => {
+  let releaseAdmission;
+  const pendingAdmission = new Promise((resolve) => { releaseAdmission = resolve; });
+  const fixture = makeClient({ admit: async () => pendingAdmission });
+  detectAndBindTurn(fixture, "item_provider_failure");
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "execute exactly once",
+    item_id: "item_provider_failure",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const interactionId = fixture.transcripts[0].idempotencyKey;
+
+  fixture.dispatch({ type: "error", error: { message: "provider transport lost" } });
+  assert.deepEqual(fixture.errorContexts.at(-1), {
+    interactionId,
+    retryProhibited: true,
+  });
+  assert.match(fixture.errors.at(-1), /remains in flight; do not retry it under a new identifier/);
+
+  releaseAdmission({ admitted: true, spokenSummary: "Original Runtime result" });
+  await fixture.client.admissionQueue;
+  assert.equal(fixture.admissions.length, 1);
+  assert.deepEqual(fixture.narrated, []);
+});
+
+test("an indeterminate canonical POST is surfaced as do-not-retry and cannot stage a competing turn", async () => {
+  const interactionId = "11111111-1111-4111-8111-111111111111";
+  const error = Object.assign(new Error(`Interaction ${interactionId} is indeterminate.`), {
+    interactionId,
+    retryProhibited: true,
+  });
+  const fixture = makeClient({ admit: async () => { throw error; } });
+  detectAndBindTurn(fixture, "item_indeterminate");
+  fixture.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "execute once",
+    item_id: "item_indeterminate",
+  });
+  await fixture.client.admissionQueue;
+  assert.equal(fixture.states.at(-1), "error");
+  assert.deepEqual(fixture.errorContexts.at(-1), {
+    interactionId,
+    retryProhibited: true,
+  });
+  beginDetectedSpeech(fixture);
+  endDetectedSpeech(fixture);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+});
+
+test("mute discards a partial turn and unmute starts a clean turn", async () => {
+  const fixture = makeClient();
+  beginDetectedSpeech(fixture);
+  fixture.client.setMicrophoneMuted(true);
+  sample(fixture, SPEECH_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.maximumTurnMs);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 0);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.clear").length, 2);
+  assert.equal(fixture.amplitudes.at(-1), 0);
+
+  fixture.client.setMicrophoneMuted(false);
+  await admitTurn(fixture, "clean request", "item_clean");
+  assert.deepEqual(fixture.transcripts.map(({ text }) => text), ["clean request"]);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+});
+
+test("stop abandons detected speech without committing or admitting it", () => {
+  const fixture = makeClient();
+  beginDetectedSpeech(fixture);
+  fixture.client.stop();
+  sample(fixture, SILENCE_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.speechEndSilenceMs * 2);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 0);
+  assert.deepEqual(fixture.transcripts, []);
+  assert.equal(fixture.states.at(-1), "idle");
+});
+
+test("maximum turn duration creates one bounded commit even without trailing silence", () => {
+  const fixture = makeClient();
+  beginDetectedSpeech(fixture);
+  sample(fixture, SPEECH_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.maximumTurnMs);
+  sample(fixture, SPEECH_AMPLITUDE, CLIENT_SPEECH_TURN_POLICY.maximumTurnMs);
+  assert.equal(fixture.sent.filter((event) => event.type === "input_audio_buffer.commit").length, 1);
+});
+
+test("duplicate, unknown, and server-VAD commit bindings fail closed", () => {
+  const duplicate = makeClient();
+  detectAndBindTurn(duplicate, "item_duplicate");
+  duplicate.dispatch({ type: "input_audio_buffer.committed", item_id: "item_duplicate" });
+  assert.equal(duplicate.states.at(-1), "error");
+  assert.match(duplicate.errors.at(-1), /exactly one detected speech turn/);
+
+  const unknown = makeClient();
+  unknown.dispatch({ type: "input_audio_buffer.committed", item_id: "item_unknown" });
+  assert.equal(unknown.states.at(-1), "error");
+  assert.match(unknown.errors.at(-1), /exactly one detected speech turn/);
+
+  for (const type of ["input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped"]) {
+    const serverVad = makeClient();
+    serverVad.dispatch({ type, item_id: "item_vad" });
+    assert.equal(serverVad.states.at(-1), "error");
+    assert.match(serverVad.errors.at(-1), /server-VAD event/);
+  }
+});
+
+test("prompt echoes are deleted and unbound completions terminate without canonical submission", async () => {
+  const echo = makeClient();
+  await admitTurn(echo, "nexus governed runtime prompt signature boundary", "item_echo");
+  assert.deepEqual(echo.transcripts, []);
+  assert.deepEqual(echo.narrated, []);
+  assert.ok(echo.sent.some((event) => event.type === "conversation.item.delete" && event.item_id === "item_echo"));
+
+  const unbound = makeClient();
+  unbound.dispatch({
+    type: "conversation.item.input_audio_transcription.completed",
+    transcript: "unbound request",
+    item_id: "item_unbound",
+  });
+  await unbound.client.admissionQueue;
+  assert.deepEqual(unbound.transcripts, []);
+  assert.equal(unbound.states.at(-1), "error");
+  assert.match(unbound.errors.at(-1), /no detected speech-turn binding/);
+});
+
+test("provider response and output events are protocol violations and fail closed", () => {
+  for (const type of [
+    "response.created",
+    "response.output_audio.delta",
+    "response.output_audio_transcript.delta",
+    "response.done",
+    "output_audio_buffer.started",
+  ]) {
+    const fixture = makeClient();
+    fixture.dispatch({ type });
+    assert.equal(fixture.states.at(-1), "error", type);
+    assert.match(fixture.errors.at(-1), /forbidden output event/, type);
+    assert.equal(fixture.sent.some((event) => event.type === "response.create"), false, type);
+  }
+});
+
+test("malformed provider protocol data fails closed", () => {
+  const fixture = makeClient();
+  fixture.client.handleEvent("{not-json");
+  assert.equal(fixture.states.at(-1), "error");
+  assert.deepEqual(fixture.errors, ["Realtime provider emitted malformed protocol data."]);
+});
+
+test("provider protocol data without an event type fails closed", () => {
+  const fixture = makeClient();
+  fixture.dispatch({ transcript: "not a typed protocol event" });
+  assert.equal(fixture.states.at(-1), "error");
+  assert.match(fixture.errors.at(-1), /without an event type/);
+});
+
+test("invalid or non-monotonic acoustic samples fail closed", () => {
+  const fixture = makeClient();
+  fixture.client.processAmplitudeSample(Number.NaN, 1);
+  assert.equal(fixture.states.at(-1), "error");
+  assert.match(fixture.errors.at(-1), /invalid acoustic sample/);
+
+  const nonMonotonic = makeClient();
+  sample(nonMonotonic, SILENCE_AMPLITUDE, 10);
+  nonMonotonic.client.processAmplitudeSample(SILENCE_AMPLITUDE, 9);
+  assert.equal(nonMonotonic.states.at(-1), "error");
+  assert.match(nonMonotonic.errors.at(-1), /invalid acoustic sample/);
+});
+
+test("the browser offer has one inactive trackless audio section and no provider answer path", async () => {
+  const source = await readFile(new URL("../src/lib/realtime-voice-client.ts", import.meta.url), "utf8");
+  const pcmSource = await readFile(new URL("../src/lib/realtime-pcm-input.ts", import.meta.url), "utf8");
+  assert.match(source, /addTransceiver\("audio", \{ direction: "inactive" \}\)/);
+  assert.doesNotMatch(source, /\.addTrack\(/);
+  assert.match(source, /Boolean\(window\.AudioContext\)/);
+  assert.match(source, /context\.state !== "running"/);
+  assert.equal((pcmSource.match(/type: "input_audio_buffer\.append"/g) ?? []).length, 1);
+  assert.equal((pcmSource.match(/type: "input_audio_buffer\.commit"/g) ?? []).length, 1);
+  assert.doesNotMatch(source, /\.play\(/);
+  assert.doesNotMatch(source, /type:\s*["']response\.create["']/);
+  assert.doesNotMatch(source, /session\.update|\binstructions\b|\btools\s*:/);
+  assert.doesNotMatch(source, /srcObject\s*=\s*event\.streams/);
+  assert.doesNotMatch(source, /HTMLAudioElement|document\.createElement\(['"]audio/);
+  assert.match(source, /attempted to attach output media to a transcription-only session/);
 });

@@ -111,14 +111,13 @@ export function createSessionAuthority(config, clock = () => Date.now()) {
 
 export function requiredScope(runtimePath, method) {
   if (method === "GET") return "operations:read";
+  if (runtimePath === "/executive/interactions") return "operations:read";
   if (runtimePath === "/knowledge/promotions") return "knowledge:promote";
   if (runtimePath === "/knowledge/intake" || /^\/conclave\/workspaces\/.+\/tasks\/.+\/evidence$/.test(runtimePath)) return "evidence:write";
-  if (runtimePath === "/intake/query" || runtimePath === "/voice-operator/route-transcript") return "operations:read";
+  if (runtimePath === "/intake/query") return "operations:read";
   if (/^\/runtime-coordination\/admissions\/[A-Za-z0-9_.%:@-]+\/challenge\/reissue$/.test(runtimePath)) return "edge:node_admission:review";
   if (/^\/runtime-coordination\/admissions(?:\/[A-Za-z0-9_.%:@-]+\/cancel)?$/.test(runtimePath)) return "edge:node_admission:request";
   if (/^\/approvals\/.+\/(approve|deny)$/.test(runtimePath)) return "approvals:decide";
-  if (runtimePath === "/actions/execute") return "actions:execute";
-  if (runtimePath === "/actions/dry-run") return "actions:simulate";
   if (runtimePath === "/intake/upload") return "evidence:write";
   return "operations:write";
 }

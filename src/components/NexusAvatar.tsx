@@ -6,8 +6,8 @@ import type { RealtimeVoiceState } from "../lib/realtime-voice-client";
  * Every state maps to actual interaction state — never a decorative timer:
  * - idle: no live voice session and no text request in flight.
  * - listening: a live Realtime voice session is capturing operator audio.
- * - thinking: NEXUS is forming a response (Realtime turn or governed HIF text request), or the voice session is negotiating.
- * - speaking: NEXUS Realtime audio output is streaming.
+ * - thinking: NEXUS is forming a response after canonical Runtime admission, or the voice session is negotiating.
+ * - speaking: governed browser narration of the canonical Runtime response is active.
  * - interrupted: the operator interrupted NEXUS mid-response.
  * - error: the voice session or governed request failed; presentation fails closed.
  */

@@ -1,0 +1,164 @@
+name: NEXUS release attestation
+
+on:
+  push:
+    branches:
+      - codex/eo-exec-001-live-release
+      - codex/runtime-readiness-contract-recovery
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  attest-release:
+    name: Build, verify, and attest release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the exact release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Select the production toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Enforce the vulnerability gate
+        run: npm audit --audit-level=moderate
+
+      - name: Verify contracts, tests, and production build
+        run: npm run check
+
+      - name: Validate the tracked CycloneDX SBOM
+        run: |
+          jq -e '
+            .bomFormat == "CycloneDX" and
+            .specVersion == "1.6" and
+            .serialNumber == "urn:uuid:eefb437b-666b-4c27-9edd-a4c7b4d10f71" and
+            .metadata.component.name == "command-portal" and
+            .metadata.component.version == "0.6.0" and
+            any(.components[]; .name == "postcss" and .version == "8.5.25")
+          ' docs/mission5/NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json >/dev/null
+
+      - name: Assemble the deterministic release subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_name="command-portal-${GITHUB_SHA}"
+          source_tree="$(git rev-parse "${GITHUB_SHA}^{tree}")"
+          npm_version="$(npm --version)"
+          mkdir -p "release/stage/source" "release/stage/dist"
+          git archive "${GITHUB_SHA}" | tar -x -C "release/stage/source"
+          cp -R dist/. "release/stage/dist/"
+          cp docs/mission5/NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json "release/stage/"
+          SOURCE_TREE="${source_tree}" NPM_VERSION="${npm_version}" node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            const metadata = {
+              recordType: "nexus_release_subject",
+              schemaVersion: "nexus.release-subject@1.0.0",
+              repository: process.env.GITHUB_REPOSITORY,
+              sourceCommit: process.env.GITHUB_SHA,
+              sourceRef: process.env.GITHUB_REF,
+              sourceTree: process.env.SOURCE_TREE,
+              nodeVersion: process.version,
+              npmVersion: process.env.NPM_VERSION,
+              javascript: "/assets/index-UVpvI6wT.js",
+              stylesheet: "/assets/index-BIIqbpcf.css",
+              sbom: "NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json",
+              vulnerabilityGate: "zero_known_info_low_moderate_high_critical",
+              secretValuesExposed: false
+            };
+            writeFileSync("release/stage/release-metadata.json", `${JSON.stringify(metadata, null, 2)}\n`);
+          '
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -czf "release/${release_name}.tar.gz" -C release/stage .
+          sha256sum "release/${release_name}.tar.gz" | tee release/subjects.sha256
+
+      - name: Attest SLSA build provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        with:
+          subject-path: release/command-portal-${{ github.sha }}.tar.gz
+
+      - name: Attest the release SBOM
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        with:
+          subject-path: release/command-portal-${{ github.sha }}.tar.gz
+          sbom-path: docs/mission5/NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json
+
+      - name: Validate and read deployment receipt metadata
+        id: deployment-receipt
+        shell: bash
+        run: |
+          receipt="docs/mission5/NEXUS-COMMAND-PORTAL-DEPLOYMENT-20260803.receipt.json"
+          if [[ ! -f "${receipt}" ]]; then
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          jq -e '
+            .recordType == "nexus_engineering_receipt" and
+            .schemaVersion == "1.0.0" and
+            .completionStatus == "completed" and
+            .completionClaimed == true and
+            .sanitized == true and
+            .constitutionalBasis.releaseId == "NCR-1.0.0" and
+            .constitutionalBasis.releaseDigest == "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa" and
+            .constitutionalBasis.applicablePrincipleResolutionDigest == "sha256:e4d7beb5788a8cd1aac589161c68f33303a1e6c31bb4e1d54cdf1a72c8cffda2" and
+            .authorization.operatorInstruction == "PUBLISH IT." and
+            .operatorAcceptance.accepted == true and
+            .sourceLineage.releaseCommit == "64d1e2211f377c4a4c4fd7748583d636fd5c3d1f" and
+            .sourceLineage.releaseTree == "813632d6dfe72099e2e8a00112df288efe68a922" and
+            .attestation.subjectName == "command-portal-64d1e2211f377c4a4c4fd7748583d636fd5c3d1f.tar.gz" and
+            .attestation.subjectDigest == "sha256:e7287068cb2b564b9d1891c2c65dcc934a9279b62d568ae7362984ebf10b4311" and
+            .replitActivation.deploymentId == "350e836b-a349-4504-bab6-efbf6db43022" and
+            .replitActivation.finalBuildId == "dc11c97f-3a6a-40f8-b6a5-ea9b6fed604c" and
+            .replitActivation.published == true and
+            .deploymentLineage.rollbackActivation.livePostconditionsPassed == true and
+            .deploymentLineage.recoveryActivation.livePostconditionsPassed == true and
+            .deploymentLineage.finalServingRevision == "recoveryActivation" and
+            .livePostconditions.gatewayStatus == "Healthy" and
+            .livePostconditions.runtimeBootstrapRouteCount == 15 and
+            .livePostconditions.unknownSignalsObserved == 0 and
+            .livePostconditions.fabricatedGatewaySnapshotFailureFanoutObserved == false and
+            .livePostconditions.statusDetailsUnavailableAlertObserved == false and
+            .livePostconditions.askNexusStatus == "Online" and
+            .rollbackAndRecovery.drillExecuted == true and
+            .rollbackAndRecovery.rollbackPostconditionsPassed == true and
+            .rollbackAndRecovery.recoveryPostconditionsPassed == true and
+            .security.vulnerabilityGatePassed == true and
+            .security.slsaAndSbomAttestationsVerified == true and
+            .nonChanges.productionReadinessChanged == false and
+            .nonChanges.capabilityStateChanged == false
+          ' "${receipt}" >/dev/null
+          echo "present=true" >> "${GITHUB_OUTPUT}"
+          echo "subject_name=$(jq -r '.attestation.subjectName' "${receipt}")" >> "${GITHUB_OUTPUT}"
+          echo "subject_digest=$(jq -r '.attestation.subjectDigest' "${receipt}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Attest the deployment receipt
+        if: steps.deployment-receipt.outputs.present == 'true'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        with:
+          subject-name: ${{ steps.deployment-receipt.outputs.subject_name }}
+          subject-digest: ${{ steps.deployment-receipt.outputs.subject_digest }}
+          predicate-type: https://nexus.local/attestations/experience-deployment/v1
+          predicate-path: docs/mission5/NEXUS-COMMAND-PORTAL-DEPLOYMENT-20260803.receipt.json
+
+      - name: Retain the attested release subject
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nexus-command-portal-release-${{ github.sha }}
+          path: |
+            release/command-portal-${{ github.sha }}.tar.gz
+            release/subjects.sha256
+          if-no-files-found: error
+          retention-days: 90

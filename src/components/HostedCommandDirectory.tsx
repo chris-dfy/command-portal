@@ -12,7 +12,7 @@ const destinations: Array<{
   { id: "missions", label: "Missions", detail: "Plan and inspect governed Mission work.", icon: Waypoints },
   { id: "projects", label: "Projects", detail: "Create, load, and compile evidence-backed project artifacts.", icon: FolderKanban },
   { id: "documents", label: "Documents", detail: "Ingest and query tenant-bound source Evidence.", icon: Files },
-  { id: "voice", label: "Voice", detail: "Use typed Voice or verified provider-backed Realtime voice.", icon: Mic2 },
+  { id: "voice", label: "Voice", detail: "Use typed or bounded browser-speech continuity; full-duplex Realtime is quarantined.", icon: Mic2 },
   { id: "work-sessions", label: "Work Sessions", detail: "Plan and control supported bounded-session actions.", icon: Route },
 ];
 

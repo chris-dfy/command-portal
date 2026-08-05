@@ -25,6 +25,7 @@ import {
   type PrivateDraftOperation,
 } from "../lib/private-draft-operation";
 import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
+import { admitCanonicalActionIntent, canonicalExecutionResult } from "../lib/canonical-action-intent";
 
 type ProjectCreatePayload = { name: string };
 type ProjectCompilePayload = {
@@ -98,10 +99,14 @@ export function ProjectStudio({
     setPendingCreate(operation);
     setBusy(true); setMessage(null);
     try {
-      const project = await localNexusClient.projectCreate(operation.payload.name, operation.idempotencyKey);
+      const admission = await admitCanonicalActionIntent(
+        `Create a governed NEXUS Project named ${JSON.stringify(operation.payload.name)}.`,
+        operation.idempotencyKey,
+      );
+      const project = canonicalExecutionResult(admission);
       setPendingCreate(clearPrivateDraftAfterSuccess());
-      setProjectId(project.projectId);
-      setMessage(`Created ${project.name}. Add evidence before relying on scope or pricing.`);
+      if (typeof project.projectId === "string") setProjectId(project.projectId);
+      setMessage(admission.spokenSummary);
     } catch (error) {
       setPendingCreate(retainPrivateDraftAfterFailure(operation));
       setMessage(messageFrom(error));
@@ -146,15 +151,14 @@ export function ProjectStudio({
     setPendingCompile(operation);
     setBusy(true); setMessage(null);
     try {
-      const result = await localNexusClient.projectCompile(
-        operation.payload.projectId,
-        operation.payload.artifactType,
-        operation.payload.options,
+      const admission = await admitCanonicalActionIntent(
+        `Compile the ${JSON.stringify(operation.payload.artifactType)} artifact for NEXUS Project ${JSON.stringify(operation.payload.projectId)} with these operator-supplied options: ${JSON.stringify(operation.payload.options)}.`,
         operation.idempotencyKey,
       );
+      const result = canonicalExecutionResult(admission) as CompiledArtifact;
       setPendingCompile(clearPrivateDraftAfterSuccess());
-      setArtifact(result);
-      setMessage(result.status === "compiled_verified" ? "Artifact compiled and recorded with proof." : `Artifact ${result.status ?? "unavailable"}: ${result.reason ?? "not implemented"}.`);
+      if (result.status || result.artifactId) setArtifact(result);
+      setMessage(admission.spokenSummary);
     } catch (error) {
       setPendingCompile(retainPrivateDraftAfterFailure(operation));
       setMessage(messageFrom(error));

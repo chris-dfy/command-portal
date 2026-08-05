@@ -78,8 +78,8 @@ const configOverrides = (overrides = {}) => ({
   contextAssertionSecret:
     "mission-one-context-assertion-secret-material-00001",
   contextAssertionSecretRef:
-    "secret-manager:experience/context-assertion-current",
-  contextAssertionKeyId: "context-assertion-current",
+    "secret-manager:experience/context-assertion-command-portal-v1",
+  contextAssertionKeyId: "context-assertion-command-portal-v1",
   contextAssertionIssuer: "command-portal-experience-gateway",
   contextAssertionAudience: "nexus-runtime",
   contextAssertionClientIds: "nexus-web",
@@ -474,7 +474,7 @@ test("login, read, and revoke preserve separate human/service identities and exp
   assert.equal(calls.length, 3);
 });
 
-test("canonical execution requires a fresh Registered Executive assertion, CSRF, exact input, and separate service credentials", async () => {
+test("canonical execution preserves authenticated read-only evidence while all direct mutations are tombstoned", async () => {
   let admittedClaims;
   let operationalMode = "status";
   const operationalCalls = [];
@@ -526,50 +526,22 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
         { status: 200 },
       );
     }
-    if (path.endsWith("/missions")) {
-      assert.equal(options.method, "POST");
-      assert.deepEqual(JSON.parse(options.body), {
-        objective:
-          "Prove one governed reversible non-production repository fixture Action.",
-        authorizationAcknowledged: true,
-      });
+    if (path.endsWith("/missions/MISSION-M4:TEST")) {
+      assert.equal(options.method, "GET");
       return new Response(
         JSON.stringify({
-          recordType: "nexus_canonical_execution_mission_result",
-          status: "created",
+          recordType: "nexus_canonical_execution_mission_evidence",
           mission: {
             missionId: "MISSION-M4:TEST",
-            state: "authorized",
+            state: "completed",
             fixture: {
               path: "mission-fixture/nexus/m4/canonical-execution.json",
               baselineDigest: `sha256:${"a".repeat(64)}`,
               currentDigest: `sha256:${"a".repeat(64)}`,
-              version: 1,
+              version: 3,
             },
-            actions: [],
+            actions: [{ action: "repository.edit", status: "verified_success" }],
           },
-          authorityGranted: false,
-          actionAuthorized: false,
-          secretValuesExposed: false,
-        }),
-        { status: 201 },
-      );
-    }
-    if (
-      path ===
-        "/executive-authority/canonical-execution/missions/MISSION-M4:TEST/actions"
-    ) {
-      assert.equal(options.method, "POST");
-      assert.deepEqual(JSON.parse(options.body), {
-        action: "repository.edit",
-        path: "mission-fixture/nexus/m4/canonical-execution.json",
-        expectedSha256: `sha256:${"a".repeat(64)}`,
-        content: "{\"version\":1}",
-      });
-      return new Response(
-        JSON.stringify({
-          recordType: "nexus_canonical_execution_action_result",
-          status: "verified_success",
           authorityGranted: false,
           actionAuthorized: false,
           secretValuesExposed: false,
@@ -647,7 +619,7 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
     body: "{}",
   });
   assert.equal(login.status, 201);
-  const loginBody = await login.json();
+  await login.json();
   const cookie = login.headers.get("set-cookie").split(";", 1)[0];
   const status = await fetch(`${base}/api/canonical-execution`, {
     headers: { Cookie: cookie },
@@ -659,7 +631,7 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
   assert.equal(statusBody.authorityGranted, false);
   assert.equal(statusBody.secretValuesExposed, false);
 
-  const missingCsrf = await fetch(
+  const retiredWithoutCsrf = await fetch(
     `${base}/api/canonical-execution/missions`,
     {
       method: "POST",
@@ -676,10 +648,11 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
       }),
     },
   );
-  assert.equal(missingCsrf.status, 403);
+  assert.equal(retiredWithoutCsrf.status, 410);
+  assert.equal((await retiredWithoutCsrf.json()).error.code, "canonical_interaction_required");
   assert.equal(operationalCalls.length, 1);
 
-  const created = await fetch(
+  const retiredCreate = await fetch(
     `${base}/api/canonical-execution/missions`,
     {
       method: "POST",
@@ -687,7 +660,7 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
         Cookie: cookie,
         Origin: base,
         "Content-Type": "application/json",
-        "X-CSRF-Token": loginBody.sessionAccess.csrfToken,
+        "X-CSRF-Token": "retired-route-csrf-is-never-consumed",
         "Idempotency-Key": "mission4-create-test",
       },
       body: JSON.stringify({
@@ -697,22 +670,19 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
       }),
     },
   );
-  assert.equal(created.status, 201);
-  const createdBody = await created.json();
-  assert.equal(createdBody.data.mission.state, "authorized");
-  assert.equal(operationalCalls.length, 2);
+  assert.equal(retiredCreate.status, 410);
+  assert.equal((await retiredCreate.json()).error.details.canonical_endpoint, "/executive/interactions");
+  assert.equal(operationalCalls.length, 1);
 
-  const action = await fetch(
-    `${base}/api/canonical-execution/missions/${
-      encodeURIComponent(createdBody.data.mission.missionId)
-    }/actions`,
+  const retiredAction = await fetch(
+    `${base}/api/canonical-execution/missions/${encodeURIComponent("MISSION-M4:TEST")}/actions`,
     {
       method: "POST",
       headers: {
         Cookie: cookie,
         Origin: base,
         "Content-Type": "application/json",
-        "X-CSRF-Token": loginBody.sessionAccess.csrfToken,
+        "X-CSRF-Token": "retired-route-csrf-is-never-consumed",
         "Idempotency-Key": "mission4-action-test",
       },
       body: JSON.stringify({
@@ -723,9 +693,17 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
       }),
     },
   );
-  assert.equal(action.status, 200);
-  assert.equal((await action.json()).data.status, "verified_success");
-  assert.equal(operationalCalls.length, 3);
+  assert.equal(retiredAction.status, 410);
+  assert.equal((await retiredAction.json()).error.code, "canonical_interaction_required");
+  assert.equal(operationalCalls.length, 1);
+
+  const retainedMission = await fetch(
+    `${base}/api/canonical-execution/missions/${encodeURIComponent("MISSION-M4:TEST")}`,
+    { headers: { Cookie: cookie } },
+  );
+  assert.equal(retainedMission.status, 200);
+  assert.equal((await retainedMission.json()).data.mission.state, "completed");
+  assert.equal(operationalCalls.length, 2);
 
   operationalMode = "sensitive";
   const sensitive = await fetch(`${base}/api/canonical-execution`, {
@@ -738,6 +716,7 @@ test("canonical execution requires a fresh Registered Executive assertion, CSRF,
     ),
     false,
   );
+  assert.equal(operationalCalls.length, 3);
 });
 
 test("route boundary rejects client-controlled claims, unregistered humans, invalid methods, CSRF failures, and Runtime rejection without mutation", async () => {

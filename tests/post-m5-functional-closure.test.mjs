@@ -66,18 +66,22 @@ test("new directory and lineage controls remain container-responsive and keyboar
   assert.match(lineage, /<code title=\{reference\.value\}>/);
 });
 
-test("Voice distinguishes provider-backed live availability from governed fallback", async () => {
-  const [voice, client] = await Promise.all([
+test("Voice preserves governed continuity without claiming quarantined full-duplex readiness", async () => {
+  const [voice, client, admission] = await Promise.all([
     read("../src/components/VoiceWorkspace.tsx"),
     read("../src/lib/local-client.ts"),
+    read("../src/lib/runtime-voice-admission.ts"),
   ]);
-  assert.match(voice, /const liveProviderAvailable = realtimeAction\.available[\s\S]*supported[\s\S]*status\?\.state === "available"/);
-  assert.match(voice, /Live voice unavailable/);
-  assert.match(voice, /<dt>Realtime provider<\/dt>/);
-  assert.match(voice, /<dt>Browser capture<\/dt>/);
+  assert.match(voice, /COMMAND_PORTAL_REALTIME_PROFILE/);
+  assert.match(voice, /Continuity only/);
+  assert.match(voice, /Full-duplex adapter<\/dt><dd>Quarantined/);
+  assert.match(voice, /Full-duplex proof<\/dt><dd>Not established by this artifact/);
+  assert.doesNotMatch(voice, /Start live|Live voice is connected|RealtimeVoiceClient/);
+  assert.match(voice, /<dt>Browser continuity<\/dt>/);
   assert.match(voice, /<dt>Governed fallback<\/dt>/);
-  assert.match(voice, /\["listening", "thinking", "speaking", "interrupted"\]\.includes\(voiceState\)/);
   assert.match(voice, /Retry exact governed Voice request/);
-  assert.match(client, /idempotencyKey = `voice-transcript:\$\{globalThis\.crypto\.randomUUID\(\)\}`/);
-  assert.match(client, /routeTranscript:[\s\S]*idempotencyKey,[\s\S]*\),/);
+  assert.match(client, /newExecutiveInteractionId[\s\S]*globalThis\.crypto\.randomUUID\(\)/);
+  assert.match(client, /executiveInteraction:[\s\S]*"\/executive-interactions"[\s\S]*interaction\.interaction_id/);
+  assert.match(admission, /admitRuntimeVoiceTranscript[\s\S]*admitExecutiveInteraction\(transcript, "voice", sessionId, interactionId\)/);
+  assert.doesNotMatch(client, /routeTranscript:|\/voice-operator\/route/);
 });
