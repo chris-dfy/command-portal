@@ -6,9 +6,11 @@ import {
 } from "../src/lib/portal-client.ts";
 
 const originalFetch = globalThis.fetch;
+const originalSetTimeout = globalThis.setTimeout;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  globalThis.setTimeout = originalSetTimeout;
 });
 
 const gatewayEnvelope = ({
@@ -67,6 +69,18 @@ const rejectsWithEnvelope = (code, connectionState) => (error) => {
   assert.equal(error?.envelope?.gateway?.connectionState, connectionState);
   return true;
 };
+
+function assertCoordinatorFailure(result, code, connectionState) {
+  assert.deepEqual(result.data, {});
+  assert.equal(result.failures.length, 1);
+  const [failure] = result.failures;
+  assert.equal(failure.ok, false);
+  assert.equal(failure.data, null);
+  assert.equal(failure.runtime, null);
+  assert.equal(failure.gateway.route, "/api/runtime/bootstrap");
+  assert.equal(failure.gateway.connectionState, connectionState);
+  assert.equal(failure.error.code, code);
+}
 
 const validCapabilityRegistryProjection = () => ({
   recordType: "nexus_live_capability_registry_projection",
@@ -270,4 +284,46 @@ test("portal client classifies transport failure and parent-boundary expiry with
   assert.equal(started, true);
   parent.abort();
   await pending;
+});
+
+test("a corrupt bootstrap aggregate yields one coordinator failure without replacing prior snapshot data", async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    recordType: "nexus_experience_runtime_bootstrap",
+    schemaVersion: "1.0.0",
+    data: { fabricated: true },
+  }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+
+  const result = await portalClient.snapshot(true);
+
+  assertCoordinatorFailure(result, "gateway_bootstrap_response_invalid", "Unknown");
+});
+
+test("an unreachable bootstrap yields one precise coordinator failure with empty replacement data", async () => {
+  globalThis.fetch = async () => {
+    throw new TypeError("Gateway network boundary is unavailable.");
+  };
+
+  const result = await portalClient.snapshot(true);
+
+  assertCoordinatorFailure(result, "gateway_unreachable", "Unavailable");
+});
+
+test("a timed-out bootstrap yields one precise coordinator failure with empty replacement data", async () => {
+  globalThis.setTimeout = (callback, delay, ...args) => originalSetTimeout(
+    callback,
+    delay === 20_000 ? 1 : delay,
+    ...args,
+  );
+  globalThis.fetch = async (_input, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => {
+      reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    }, { once: true });
+  });
+
+  const result = await portalClient.snapshot(true);
+
+  assertCoordinatorFailure(result, "gateway_snapshot_timed_out", "Timed Out");
 });

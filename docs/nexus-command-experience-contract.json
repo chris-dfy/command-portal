@@ -1,0 +1,149 @@
+{
+  "contract": "nexus-command-experience",
+  "version": "1.0.0",
+  "application": "command-portal",
+  "constitutionalBasis": {
+    "registryRelease": "NCR-1.0.0",
+    "registryDigest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "publication": "NCA-2.0.0",
+    "publicationDigest": "sha256:26a405ff76a5ae001a8d0ddff1069cb00870c240b8fb26148273ff031a819b4a",
+    "principleContextDigest": "sha256:0736cbc647bb90c241133e296ec43d6b5130af5bef9f9023d8758564923f1505",
+    "applicablePrinciples": [
+      "NCR-CON-0013",
+      "NCR-CON-0016",
+      "NCR-CON-0018",
+      "NCR-CON-0019",
+      "NCR-CON-0020",
+      "NCR-CON-0021",
+      "NCR-CON-0022",
+      "NCR-CON-0023",
+      "NCR-CON-0024",
+      "NCR-CON-0025",
+      "NCR-CON-0026",
+      "NCR-CON-0027",
+      "NCR-CON-0029",
+      "NCR-CON-0032",
+      "NCR-CON-0033",
+      "NCR-ARC-0001",
+      "NCR-ARC-0002",
+      "NCR-ARC-0016",
+      "NCR-ARC-0017",
+      "NCR-ARC-0019",
+      "NCR-ENG-0002",
+      "NCR-ENG-0007",
+      "NCR-ENG-0009",
+      "NCR-ENG-0010",
+      "NCR-ENG-0014",
+      "NCR-ENG-0015",
+      "NCR-OPS-0008",
+      "NCR-OPS-0009",
+      "NCR-OPS-0017",
+      "NCR-OPS-0018",
+      "NCR-OPS-0020",
+      "NCR-OPS-0022",
+      "NCR-OPS-0029",
+      "NCR-EXE-0001",
+      "NCR-EXE-0004",
+      "NCR-EXE-0007",
+      "NCR-EXE-0008",
+      "NCR-EXE-0014"
+    ]
+  },
+  "identity": {
+    "canonicalProduct": "NEXUS",
+    "experience": "NEXUS Command",
+    "platform": "NEXUS Platform",
+    "definition": "Enterprise eXecutive Unified System"
+  },
+  "interaction": {
+    "states": [
+      "idle",
+      "listening",
+      "thinking",
+      "speaking",
+      "interrupted",
+      "error"
+    ],
+    "inputs": [
+      "text",
+      "voice",
+      "contextual action"
+    ],
+    "outputControls": [
+      "microphone mute",
+      "voice output mute",
+      "interrupt",
+      "minimize"
+    ],
+    "requiredBehavior": [
+      "Typed input and every finalized voice transcript enter POST /executive/interactions.",
+      "Runtime classifies each interaction before conversation, presentation, or execution.",
+      "The provider remains silent until Runtime admits the finalized voice transcript.",
+      "Each completed user turn has one authoritative response_text rendered and narrated once.",
+      "Risk, confirmation, approval, and tenant context survive every transport.",
+      "Approval continuation preserves the exact interaction and returns through the same canonical endpoint.",
+      "A client presentation effect requires execution_scope client_presentation.",
+      "The Experience never upgrades a model response into operational fact or execution proof."
+    ]
+  },
+  "architectureProjection": {
+    "causalSpine": [
+      "Source",
+      "Observation",
+      "Evidence",
+      "Representation",
+      "Context",
+      "Understanding",
+      "Conclave",
+      "Recommendation",
+      "Governance and Authority",
+      "Decision",
+      "Mission",
+      "Verification and Outcome",
+      "Operational Replay",
+      "Promotion Review",
+      "Durable Knowledge"
+    ],
+    "cooperatingSystems": [
+      "Reality",
+      "Understanding",
+      "Deliberation",
+      "Authority",
+      "Mission",
+      "Knowledge",
+      "Accountability",
+      "Runtime"
+    ],
+    "systemSemantics": "Cooperating constitutional responsibilities, not request-path tiers or deployment layers."
+  },
+  "truthBoundary": {
+    "experienceRole": "Present Runtime-established state and collect user intent.",
+    "runtimeRole": "Establish operational truth, Authority, capability posture, execution, receipts, postconditions, and replay.",
+    "demoData": "Illustrative unless a Runtime response includes explicit evidence.",
+    "providerKnowledge": "model_native and never proof of current facts, organization facts, operational state, or capability."
+  },
+  "integration": {
+    "runtimeOwner": "NEXUS Runtime",
+    "canonicalEndpoint": "POST /executive/interactions",
+    "localGatewayEndpoint": "POST /api/local/executive-interactions",
+    "hostedGatewayEndpoint": "POST /api/operations/executive-interactions",
+    "serverIdentityBinding": "The Experience Gateway injects actor and context.workspace_id from authenticated or server-configured identity; browser identity fields are rejected.",
+    "retiredInteractionSideChannels": [
+      "/runtime/executive-operating-loop/briefing",
+      "/runtime/conclave/reviews",
+      "/runtime/interactions",
+      "/voice-operator/route-transcript",
+      "/executive/intents",
+      "/actions/dry-run",
+      "/actions/execute",
+      "/missions/plan",
+      "/work-sessions/plan",
+      "/executive-authority/canonical-execution/missions",
+      "/executive-authority/canonical-execution/missions/{mission_id}/actions",
+      "provider-direct response generation"
+    ],
+    "retiredRouteBehavior": "Browser-facing retired interaction, free-form planning, and generic action routes return 410 canonical_interaction_required and identify /executive/interactions as the only coordinator.",
+    "voiceSelection": "Runtime-configured; the Experience does not invent a client-only voice profile.",
+    "capabilityStateChange": false
+  }
+}

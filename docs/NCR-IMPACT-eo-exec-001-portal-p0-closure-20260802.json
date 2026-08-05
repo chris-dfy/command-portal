@@ -1,0 +1,50 @@
+{
+  "impact_id": "NCR-IMPACT-eo-exec-001-portal-p0-closure-20260802",
+  "artifact_id": "nexus.command.portal.eo-exec-001-p0-closure",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "principle_entry_ids": [
+      "NCR-CON-0019@1",
+      "NCR-CON-0020@1",
+      "NCR-CON-0021@1",
+      "NCR-CON-0026@1",
+      "NCR-CON-0027@1",
+      "NCR-CON-0033@1",
+      "NCR-ENG-0009@1",
+      "NCR-OPS-0010@1",
+      "NCR-OPS-0011@1",
+      "NCR-OPS-0012@1",
+      "NCR-OPS-0017@1",
+      "NCR-OPS-0018@1",
+      "NCR-OPS-0020@1",
+      "NCR-OPS-0029@1",
+      "NCR-EXE-0004@1",
+      "NCR-EXE-0007@1",
+      "NCR-EXE-0009@1"
+    ],
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:aa99f216815ad498bb58bf5992823018de795becda271cef162ccf1664886c48"
+  },
+  "disposition": "no_constitutional_change",
+  "rationale": "This EO-EXEC-001 Portal repair implements the active identity, Authority, execution, verification, and receipt boundaries without changing them. Realtime speech turns are serialized from the sole client commit through the terminal Runtime disposition, the microphone track is disabled while a turn is committed or in flight, and transport closure cannot invalidate an already submitted canonical interaction. The same SDP response must carry the exact Runtime manual-commit attestation, closing the status-preflight race. Canonical results fail closed unless operational statuses carry matching Authority, execution scope and state, verification truth, and durable receipt evidence. Ambiguous POST outcomes remain bound to the original interaction UUID and are reconciled through Runtime lookup; no new interaction identity may bypass an unresolved outcome.",
+  "evidence_references": [
+    "path:server/portal-server.mjs",
+    "path:src/lib/realtime-voice-client.ts",
+    "path:src/lib/runtime-admission-policy.ts",
+    "path:src/lib/runtime-voice-admission.ts",
+    "path:src/components/NexusCopilot.tsx",
+    "path:src/components/VoiceWorkspace.tsx",
+    "test:tests/realtime-voice-client.test.mjs",
+    "test:tests/runtime-admission-policy.test.mjs",
+    "test:tests/canonical-interaction-admission.test.mjs",
+    "test:tests/experience-gateway.test.mjs",
+    "command:npm run test (329 passed; 0 failed)",
+    "command:npm run build (TypeScript noEmit and Vite production build passed)",
+    "rollback:revert only this scoped Portal successor commit; an unresolved canonical interaction UUID must still be reconciled before rollback permits another request"
+  ],
+  "conflicts": [],
+  "recorded_by": "NEXUS Engineering",
+  "recorded_at": "2026-08-02T20:10:00Z"
+}

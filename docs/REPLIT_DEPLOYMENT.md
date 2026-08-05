@@ -6,7 +6,7 @@ Configure these server-only secrets and variables in the hosting environment:
 
 - `COMMAND_PORTAL_RUNTIME_API_BASE_URL=https://nexus-runtime-dev.fly.dev`
 - `COMMAND_PORTAL_RUNTIME_READ_TOKEN` as a scoped server secret
-- `NEXUS_CONTEXT_ASSERTION_SECRET` as the same randomly generated, minimum-32-character secret stored in the Runtime secret manager
+- `NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET` as a randomly generated, minimum-32-character Command Portal-only secret stored under the matching Runtime key ID `context-assertion-command-portal-v1`
 - `COMMAND_PORTAL_CONTEXT_PRINCIPAL_ID=command-portal-observer` as a non-human service principal used only when no authenticated operational session is present
 - `COMMAND_PORTAL_REQUEST_TIMEOUT_MS=8000`
 - `COMMAND_PORTAL_REASONING_TIMEOUT_MS=35000`
@@ -39,7 +39,7 @@ To enable the fixed-workspace Hosted Operational Gateway, publish the app as a *
 - `NEXUS_HOSTED_WORKSPACE_ID` matches `COMMAND_PORTAL_WORKSPACE_ID`;
 - `NEXUS_HOSTED_SERVICE_ID` matches `COMMAND_PORTAL_OPERATOR_USER_ID`;
 - `NEXUS_HOSTED_SERVICE_ROLE` matches `COMMAND_PORTAL_OPERATOR_ROLE`; and
-- `NEXUS_HOSTED_SERVICE_SCOPES` matches `COMMAND_PORTAL_OPERATIONAL_SCOPES` using the same comma-separated values.
+- `NEXUS_HOSTED_SERVICE_SCOPES` matches the Gateway's canonical, deduplicated `COMMAND_PORTAL_OPERATIONAL_SCOPES` value in lexicographic order. Scope order is part of the fail-closed Runtime identity corroboration contract.
 
 Published Replit deployments select the automatic workspace-session contract from Replit's predefined `REPLIT_DEPLOYMENT=1` marker and require the exact `REPLIT_DOMAINS` binding, HTTPS, and a same-origin browser request. The browser receives only a signed HttpOnly session cookie and CSRF token; it never receives or submits an operator access key. Non-Replit development retains the explicit `access_key` compatibility mode.
 
@@ -92,7 +92,7 @@ Their provider references and public key IDs are
 presence, and provider metadata. Do not read values. The provider-session
 secret, Registered Executive cookie secret, human-assertion secret, Hosted
 Operational session secret, Runtime bearer tokens, and Mission 1
-context-assertion secret must be purpose-bound and distinct.
+Command Portal context-assertion secret must be purpose-bound, client-specific, and distinct.
 
 The implementation supports a fail-closed recovery/bootstrap configuration in
 which `COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED=true` while
@@ -141,6 +141,14 @@ rotate or delete them merely because a release was superseded. Record the
 rolled-back release identities and revocation status in the sanitized receipt.
 
 Build with `npm run build` and start with `npm run start`. Never create a browser-visible `VITE_` runtime variable. After deployment, verify every allowlisted route, mutation rejection, secret isolation, failure rendering, and the live topology.
+
+## Governed Realtime voice promotion gate
+
+Every Command Portal promotion that can expose voice must run an authenticated synthetic browser canary through the published Experience Gateway, not directly against Runtime. The canary must first negotiate the exact `nexus.realtime-voice@2.0.0` contract and `trackless-pcm-transcription-v1` profile, then prove the browser activation sequence: readiness, `getUserMedia`, one live microphone track, 24 kHz PCM capture, analyser activity, an inactive trackless audio SDP offer, the Gateway `POST /api/runtime/realtime/call`, connected peer transport, and open ordered data channel.
+
+The successful SDP response must bind the current deployment to the exact Runtime artifact identity and a verified Realtime receipt digest. The promotion record must bind the root/program source commit, Runtime source commit, immutable carrier, composed-source digest, image or artifact digest, contract version, deployment identity, and those postconditions. A receipt from an earlier artifact or deployment is historical evidence only and cannot satisfy current readiness.
+
+No governed SDP call, no current-artifact receipt, or no verified audio postconditions means the promotion is blocked or rolled back. Push-to-talk remains continuity-only and cannot satisfy this gate. Unknown or masked Runtime errors fail closed with only a bounded safe reason code and request ID. The published UI must report Runtime reachable, Runtime ready, voice contract ready, provider connected, production ready, and live connection established separately; it must never derive one from another or report live voice before `connectionState=live`.
 
 For the earlier Mission 1 tenant-context assertion rollout, deploy in this
 order: first add that context-assertion secret to this portal and republish it

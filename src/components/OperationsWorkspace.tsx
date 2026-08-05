@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, ClipboardCheck, FileCheck2, Network, RefreshCw, Route, ShieldAlert, ShieldCheck } from "lucide-react";
 import { DataPanel, EmptyRecord } from "./DataPanel";
 import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 import { StatusPill } from "./StatusPill";
-import { localNexusClient, operationalSessionClient, type OperationalSession } from "../lib/local-client";
-import { canonicalHostedControlAvailability } from "../lib/hosted-capability-gate";
+import { localNexusClient, newExecutiveInteractionId, operationalSessionClient, type OperationalSession } from "../lib/local-client";
+import { hostedSessionActionAvailability } from "../lib/hosted-capability-gate";
+import { canonicalActionAvailability, PORTAL_CANONICAL_ACTIONS } from "../lib/portal-client";
+import { admitExecutiveInteraction, rememberPendingExecutiveApproval } from "../lib/runtime-voice-admission";
 import type { CapabilityRegistryProjection } from "../lib/types";
 import {
   beginPrivateDraftAttempt,
@@ -67,6 +69,7 @@ export function OperationsWorkspace({
   const [result, setResult] = useState<RuntimeRecord | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const conversationId = useRef(newExecutiveInteractionId());
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -141,19 +144,17 @@ export function OperationsWorkspace({
     missionCapability?.available === true
     || text(missionCapability?.state ?? missionCapability?.status, "unavailable").toLowerCase() === "available"
   );
-  const missionPlanAction = canonicalHostedControlAvailability(
-    capabilityRegistry,
-    {
-      capabilityId: "mission_executor",
-      method: "POST",
-      pathTemplate: "/missions/plan",
-    },
+  const missionPlanAction = hostedSessionActionAvailability(
+    canonicalActionAvailability(
+      capabilityRegistry,
+      PORTAL_CANONICAL_ACTIONS.copilotInteractionStart,
+    ),
     {
       hosted: operationalSessionClient.mode() === "hosted",
       authenticated: session.authenticated,
       scopes: session.scopes,
     },
-    "operations:write",
+    "operations:read",
   );
   const missionCreationAllowed = missionPlanAction.available;
   const missionCreationReason = missionPlanAction.reason;
@@ -173,7 +174,7 @@ export function OperationsWorkspace({
     ? text(missionReceipts[0].receiptId ?? missionReceipts[0].receipt_id, "")
     : "";
   const plannedMissionId = result
-    ? text(result.missionId ?? object(result.mission).missionId ?? object(result.mission).mission_id, "")
+    ? text(result.mission_id ?? result.missionId ?? object(result.mission).missionId ?? object(result.mission).mission_id, "")
     : "";
 
   async function planMission() {
@@ -187,7 +188,7 @@ export function OperationsWorkspace({
     }
     const staged = pendingPlan ?? snapshotPrivateDraftOperation(
       { objective: objective.trim() },
-      `mission-plan:${globalThis.crypto.randomUUID()}`,
+      newExecutiveInteractionId(),
     );
     if (!pendingPlan) setObjective("");
     const operation = beginPrivateDraftAttempt(staged);
@@ -195,9 +196,15 @@ export function OperationsWorkspace({
     setBusy(true);
     setErrors([]);
     try {
-      const next = await localNexusClient.planMission(operation.payload.objective, operation.idempotencyKey);
+      const admission = await admitExecutiveInteraction(
+        `Plan a governed Mission with this objective: ${operation.payload.objective}`,
+        "text",
+        conversationId.current,
+        operation.idempotencyKey,
+      );
+      rememberPendingExecutiveApproval(admission);
       setPendingPlan(clearPrivateDraftAfterSuccess());
-      setResult(next);
+      setResult(admission.interactionResult);
       await refresh();
     } catch (caught) {
       setPendingPlan(retainPrivateDraftAfterFailure(operation));
@@ -244,11 +251,11 @@ export function OperationsWorkspace({
     {errors.length > 0 && <section className="operation-error span-2" role="alert"><ShieldAlert size={18} /><span>{[...new Set(errors)].join(" ")}</span></section>}
 
     <DataPanel eyebrow="Mission Control" title="Plan a canonical Mission" icon={<Route size={18} />}>
-      <label className="operation-field"><span>Evidence-bound objective</span><textarea value={objective} onChange={(event) => { setObjective(event.target.value); setPendingPlan(null); }} placeholder="Describe the operational question NEXUS should investigate…" autoComplete="off" /></label>
+      <label className="operation-field"><span>Evidence-bound objective</span><textarea value={objective} onChange={(event) => { setObjective(event.target.value); setPendingPlan(null); setResult(null); }} placeholder="Describe the operational question NEXUS should investigate…" autoComplete="off" /></label>
       <div className="operation-actions"><button onClick={() => void planMission()} disabled={busy || (!objective.trim() && !pendingPlan) || !missionCreationAllowed}><ClipboardCheck size={15} /> {pendingPlan ? "Retry exact Mission plan" : "Plan governed Mission"}</button><button className="secondary-action" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15} /> Refresh</button></div>
-      <p className="boundary-note">Mission planning gate for <code>POST /missions/plan</code>: {missionCreationReason}</p>
+      <p className="boundary-note">Mission planning enters the sole canonical <code>POST /executive/interactions</code> coordinator: {missionCreationReason}</p>
       <p className="boundary-note">Readiness context only: {missionCapabilityReadinessNote}</p>
-      {result && <><p className="boundary-note">Runtime accepted mission {plannedMissionId || "response recorded"}.</p><OperationalResultLineage missionId={plannedMissionId} onOpenReplay={onReplay} empty="The accepted Mission response did not include a discoverable Mission identity." /></>}
+      {result && <><p className="boundary-note">{text(result.response_text, `Runtime admitted the interaction${plannedMissionId ? ` for Mission ${plannedMissionId}` : ""}.`)}</p><OperationalResultLineage missionId={plannedMissionId} onOpenReplay={onReplay} empty="The canonical interaction has not yet returned a discoverable Mission identity." /></>}
     </DataPanel>
 
     <DataPanel eyebrow="Mission portfolio" title="Runtime Mission Executor state" icon={<Network size={18} />}>

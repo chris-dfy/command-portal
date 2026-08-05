@@ -35,7 +35,7 @@ for (const forbidden of [
   "NEXUS_HUMAN_SESSION_ASSERTION_SECRET",
   "COMMAND_PORTAL_OPERATOR_ACCESS_KEY",
   "NEXUS_HOSTED_OPERATIONAL_TOKEN",
-  "NEXUS_CONTEXT_ASSERTION_SECRET",
+  "NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET",
   "BEGIN PRIVATE KEY",
 ]) assert.equal(bundle.includes(forbidden), false, `Client output contains forbidden server-only material: ${forbidden}`);
 

@@ -261,7 +261,7 @@ test("both navigation layers and every web route consume the canonical registry"
   assert.doesNotMatch(app, /const AREAS: Area\[\] = \[/);
 });
 
-test("Mission planning and step execution no longer substitute Conclave or reject hosted mode", async () => {
+test("Mission planning enters canonical interaction admission while step execution stays bounded", async () => {
   const [client, dashboard, operations, workSessions, document] = await Promise.all([
     readFile(clientPath, "utf8"),
     readFile(missionDashboardPath, "utf8"),
@@ -269,14 +269,13 @@ test("Mission planning and step execution no longer substitute Conclave or rejec
     readFile(workSessionsPath, "utf8"),
     registry(),
   ]);
-  const plan = client.match(/planMission:[\s\S]*?executeMissionStep:/)?.[0] ?? "";
-  const execute = client.match(/executeMissionStep:[\s\S]*?conclaveWorkspaces:/)?.[0] ?? "";
-  assert.match(plan, /"\/missions\/plan"/);
-  assert.doesNotMatch(plan, /conclave\/workspaces/);
-  assert.match(execute, /\/execute-step/);
-  assert.doesNotMatch(execute, /Promise\.reject|Hosted Mission execution is unavailable/);
-  assert.match(dashboard, /localNexusClient\.planMission/);
-  assert.match(dashboard, /localNexusClient\.executeMissionStep/);
+  assert.doesNotMatch(client, /planMission:|"\/missions\/plan"/);
+  assert.doesNotMatch(client, /executeMissionStep|\/execute-step/);
+  assert.match(dashboard, /admitExecutiveInteraction\(/);
+  assert.match(dashboard, /PORTAL_CANONICAL_ACTIONS\.copilotInteractionStart/);
+  assert.doesNotMatch(dashboard, /localNexusClient\.planMission|"\/missions\/plan"/);
+  assert.match(dashboard, /admitCanonicalActionIntent/);
+  assert.doesNotMatch(dashboard, /localNexusClient\.executeMissionStep/);
   assert.match(dashboard, /hostedMissionScope/);
   assert.match(dashboard, /operations:write/);
   assert.match(dashboard, /=== "mission_executor"/);
@@ -285,11 +284,11 @@ test("Mission planning and step execution no longer substitute Conclave or rejec
     dashboard,
     /New Conclave mission|Start canonical Conclave mission|governed execution route unavailable/,
   );
-  assert.match(operations, /capabilityId: "mission_executor"/);
-  assert.match(operations, /pathTemplate: "\/missions\/plan"/);
-  assert.match(operations, /canonicalHostedControlAvailability/);
+  assert.match(operations, /PORTAL_CANONICAL_ACTIONS\.copilotInteractionStart/);
+  assert.match(operations, /admitExecutiveInteraction\(/);
+  assert.match(operations, /hostedSessionActionAvailability/);
   assert.match(operations, /Plan a canonical Mission/);
-  assert.match(operations, /Mission planning gate for <code>POST \/missions\/plan<\/code>/);
+  assert.match(operations, /sole canonical <code>POST \/executive\/interactions<\/code> coordinator/);
   assert.match(operations, /const missionCreationAllowed = missionPlanAction\.available;/);
   assert.doesNotMatch(
     operations,
@@ -301,7 +300,9 @@ test("Mission planning and step execution no longer substitute Conclave or rejec
   const missionControl = document.surfaces.find((surface) => surface.id === "mission-control");
   assert.equal(missionControl.capabilityIds.includes("conclave"), false);
   assert.doesNotMatch(missionControl.clients.web.reason, /Conclave/);
-  assert.match(workSessions, /object\(response\.receipt\)/);
+  assert.match(workSessions, /object\(resultRecord\.receipt\)/);
+  assert.match(workSessions, /admitCanonicalActionIntent[\s\S]*bounded Work Session/);
+  assert.doesNotMatch(workSessions, /planWorkSession|"\/work-sessions\/plan"/);
   assert.match(workSessions, /No receipt is recorded for/);
   assert.match(workSessions, /setReceipt\(null\)/);
   assert.match(workSessions, /const terminal = new Set/);
