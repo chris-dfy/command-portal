@@ -1,0 +1,184 @@
+{
+  "record_type": "nexus_principle_impact_assessment_companion",
+  "schema_version": "1.0.0",
+  "impact_id": "NCR-IMPACT-experience-bootstrap-route-contract-readiness-adapter-20260803",
+  "impact_record_digest": "sha256:9f575d8b63d1db02a39a77ddb69e1fbffaaea3bd45ceaad44b364ed5bb4dbae9",
+  "validation_digest": "sha256:51bd96a2ab0beab8f8810145e790701e4182e298f73a19bec0c8bd666706f495",
+  "constitutional_basis": {
+    "registry_id": "NCR",
+    "release_id": "NCR-1.0.0",
+    "release_digest": "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+    "resolver_version": "1.0.0",
+    "resolution_digest": "sha256:e3061fec1630b83ed67c6397cea3f2ba51655c941387ecbcfffd4e6909e55520"
+  },
+  "authority_effect": "Traceability companion only. It creates no Authority, changes no Runtime truth, and does not amend the Registry or sealed Principle Impact Record.",
+  "principle_assessments": [
+    {
+      "principle_entry_id": "NCR-CON-0002@1",
+      "disposition": "conforms",
+      "executable_evidence": ["strict production-readiness projection and HTTP-state validation", "malformed and inconsistent readiness regression tests"],
+      "migration_consequence": "The adapter prefers explicit Runtime records and verified limitations over the legacy Gateway assumption."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0006@1",
+      "disposition": "implements",
+      "executable_evidence": ["validated sealed Principle Impact Record", "NCR-1.0.0 basis resolution sha256:e3061fec1630b83ed67c6397cea3f2ba51655c941387ecbcfffd4e6909e55520"],
+      "migration_consequence": "The repair is pinned to the active release and cannot silently inherit a later constitutional basis."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0009@1",
+      "disposition": "conforms",
+      "executable_evidence": ["no_constitutional_change impact disposition", "per-principle assessment companion"],
+      "migration_consequence": "No durable new principle was identified; the change implements existing deterministic and failure-recovery rules."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0019@1",
+      "disposition": "verifies",
+      "executable_evidence": ["read-only Gateway routes remain unchanged", "adapter limitation explicitly denies execution Authority"],
+      "migration_consequence": "No action, scope, policy, authorization, or Authority path is added or enlarged."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0020@1",
+      "disposition": "conforms",
+      "executable_evidence": ["fixed Runtime route map", "full 347-test portal suite"],
+      "migration_consequence": "Readiness adaptation does not create an executable capability or bypass Capability Registry admission."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0026@1",
+      "disposition": "implements",
+      "executable_evidence": ["preserved Runtime-owned nexus_production_readiness payload", "route-specific compatibility adapter in server/portal-server.mjs"],
+      "migration_consequence": "The Experience consumes the Runtime contract without taking ownership of Runtime readiness state."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0027@1",
+      "disposition": "implements",
+      "executable_evidence": ["raw projection preserved as Gateway data", "production_ready false remains a visible Degraded posture"],
+      "migration_consequence": "The browser no longer fabricates fifteen Runtime failures from one aggregate parsing failure."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0028@1",
+      "disposition": "verifies",
+      "executable_evidence": ["same-origin read-only bootstrap tests", "recursive secret-field sanitization and prohibited secret marker validation"],
+      "migration_consequence": "No tenant selector, browser credential, secret, or trust-boundary expansion is introduced."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0029@1",
+      "disposition": "verifies",
+      "executable_evidence": ["111 targeted integration tests passed", "347 complete portal tests and production build passed"],
+      "migration_consequence": "The recovery claim is limited to exercised Gateway/browser contracts; deployment remains a separate state change."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0030@1",
+      "disposition": "implements",
+      "executable_evidence": ["single coordinator failure retains exact cause", "empty replacement snapshot preserves previously verified route state"],
+      "migration_consequence": "Aggregate corruption, timeout, and transport failure no longer erase prior route truth or invent per-route causes."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0032@1",
+      "disposition": "implements",
+      "executable_evidence": ["shared versioned bootstrap record contract", "exact nexus.production-readiness@1.0.0 validation"],
+      "migration_consequence": "Legacy readiness envelopes remain compatible; incompatible production-readiness versions fail closed."
+    },
+    {
+      "principle_entry_id": "NCR-CON-0033@1",
+      "disposition": "implements",
+      "executable_evidence": ["production_ready false maps to Degraded rather than failure or readiness success", "malformed projections remain Unknown"],
+      "migration_consequence": "The Experience becomes usable without converting unavailable voice readiness into fabricated production readiness."
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0008@1",
+      "disposition": "implements",
+      "executable_evidence": ["canonical readiness 503 test", "independent /health Healthy assertion"],
+      "migration_consequence": "Health, process liveness, execution readiness, voice readiness, and production readiness remain separate dimensions."
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0012@1",
+      "disposition": "conforms",
+      "executable_evidence": ["shared contract is dependency-free", "Gateway and browser import the shared stable primitive"],
+      "migration_consequence": "Dependency direction remains shared contract to server and Experience, never Experience to Runtime implementation."
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0017@1",
+      "disposition": "implements",
+      "executable_evidence": ["Degraded readiness remains a successful read-only projection", "Capability Registry admission remains independent"],
+      "migration_consequence": "Production readiness no longer collapses capability availability, health, and authorization into one state."
+    },
+    {
+      "principle_entry_id": "NCR-ARC-0019@1",
+      "disposition": "implements",
+      "executable_evidence": ["one shared bootstrap manifest consumed by Gateway and TypeScript client", "cross-layer all-failed bootstrap integration test"],
+      "migration_consequence": "Hosted browser and Gateway now consume the same route identity contract."
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0002@1",
+      "disposition": "implements",
+      "executable_evidence": ["shared/runtime-bootstrap-contract.mjs", "duplicate local bootstrap manifests removed"],
+      "migration_consequence": "Bootstrap route identity and ordering have one authoritative contract."
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0006@1",
+      "disposition": "implements",
+      "executable_evidence": ["scoped shared manifest", "route-specific readiness adapter", "single coordinator recovery envelope"],
+      "migration_consequence": "The change is limited to the complete contract, truth, failure, and recovery boundaries behind the incident."
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0008@1",
+      "disposition": "implements",
+      "executable_evidence": ["failedRoutes exact-set validation", "duplicate, missing, and unknown routes remain rejected by aggregate validation"],
+      "migration_consequence": "Equivalent failed-route sets are accepted independent of delivery order; identities and membership remain exact."
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0010@1",
+      "disposition": "verifies",
+      "executable_evidence": ["TypeScript noEmit and Vite production build", "111 targeted tests", "347 full portal tests", "485 constitutional/executive tests"],
+      "migration_consequence": "Verification covers schema, component, server/client integration, build, engine, and constitutional boundaries."
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0011@1",
+      "disposition": "verifies",
+      "executable_evidence": ["all-failed Registry bootstrap composition test", "corrupt, unreachable, timeout, malformed, schema mismatch, and HTTP contradiction tests"],
+      "migration_consequence": "The exact screenshot failure path and its recovery behavior are now first-class regressions."
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0012@1",
+      "disposition": "verifies",
+      "executable_evidence": ["runtime-bootstrap-contract.mjs with matching .d.mts declaration", "server-to-TypeScript portalClient composition test"],
+      "migration_consequence": "JavaScript Gateway and TypeScript browser route identities are conformance-tested against one implementation-neutral manifest."
+    },
+    {
+      "principle_entry_id": "NCR-ENG-0018@1",
+      "disposition": "conforms",
+      "executable_evidence": ["PIR distinguishes local verification from deployment", "runtime evidence records only the observed /ready projection"],
+      "migration_consequence": "Passing fixtures and builds are not represented as proof that the hosted deployment has already changed."
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0028@1",
+      "disposition": "implements",
+      "executable_evidence": ["production readiness is Degraded in one attempt", "independent health remains Healthy"],
+      "migration_consequence": "A deterministic readiness 503 does not trigger retries or mark unrelated modules disconnected."
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0029@1",
+      "disposition": "implements",
+      "executable_evidence": ["unreachable aggregate returns one Unavailable coordinator envelope", "empty replacement data preserves but does not refresh route state"],
+      "migration_consequence": "Disconnected Experience state declares its limit and infers no new Runtime, tenant, mission, or Authority truth."
+    },
+    {
+      "principle_entry_id": "NCR-OPS-0030@1",
+      "disposition": "implements",
+      "executable_evidence": ["order-independent exact failedRoutes set validation", "shared deterministic route identities"],
+      "migration_consequence": "Reordered aggregate delivery cannot change admission, while duplicate or unknown route identities still fail closed."
+    },
+    {
+      "principle_entry_id": "NCR-EXE-0008@1",
+      "disposition": "implements",
+      "executable_evidence": ["validated readiness projection retains voice, execution, handler, and production postures", "Executive shell derives transport posture from independent health"],
+      "migration_consequence": "The Experience remains usable while the Runtime-owned projection preserves separate voice, execution, and production postures for downstream presentation."
+    }
+  ],
+  "rollback": {
+    "action": "Deploy the previously recorded Experience release and revert only the scoped bootstrap/readiness compatibility commit.",
+    "preservation": "Retain prior releases and receipts as historical evidence; no Runtime, root, secret, data, Mission, or Authority rollback is required."
+  },
+  "secret_values_exposed": false
+}

@@ -10,18 +10,17 @@ import {
   createSerializedRefresh,
   runBoundedTask,
 } from "./request-coordination.mjs";
+import {
+  RUNTIME_BOOTSTRAP_RECORD_TYPE,
+  RUNTIME_BOOTSTRAP_ROUTE,
+  RUNTIME_BOOTSTRAP_ROUTE_KEYS,
+  RUNTIME_BOOTSTRAP_SCHEMA_VERSION,
+} from "../../shared/runtime-bootstrap-contract.mjs";
 
-export const RUNTIME_ROUTES: RuntimeRoute[] = [
-  "status", "health", "ready", "version", "providers", "capabilities",
-  "proofs", "receipts", "environment", "diagnostics", "governance", "connectors",
-  "capability-registry", "eox", "conclave"
-];
+export const RUNTIME_ROUTES: readonly RuntimeRoute[] = RUNTIME_BOOTSTRAP_ROUTE_KEYS;
 
 const CLIENT_REQUEST_TIMEOUT_MS = 10_000;
 const CLIENT_SNAPSHOT_TIMEOUT_MS = 20_000;
-const RUNTIME_BOOTSTRAP_ROUTE = "/api/runtime/bootstrap";
-const RUNTIME_BOOTSTRAP_RECORD_TYPE = "nexus_experience_runtime_bootstrap";
-const RUNTIME_BOOTSTRAP_SCHEMA_VERSION = "1.0.0";
 const SUPPORTED_SCHEMA_VERSION = "1.0.0";
 const SUPPORTED_RUNTIME_VERSION = "0.1.0";
 const SEMANTIC_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -212,21 +211,9 @@ export function asCapabilityRegistryProjection(value: unknown): CapabilityRegist
 
 export const PORTAL_CANONICAL_ACTIONS = Object.freeze({
   copilotInteractionStart: Object.freeze({
-    actionId: "context.runtime.route.post.runtime.interactions",
+    actionId: "canonical.route.post.executive.interactions",
     method: "POST",
-    pathTemplate: "/runtime/interactions",
-    surface: "assistant",
-  }),
-  hifInteractionEvents: Object.freeze({
-    actionId: "context.runtime.route.get.runtime.interactions.events",
-    method: "GET",
-    pathTemplate: "/runtime/interactions/{interaction_id}/events",
-    surface: "assistant",
-  }),
-  hifInteractionInterrupt: Object.freeze({
-    actionId: "context.runtime.route.post.runtime.interactions.interrupt",
-    method: "POST",
-    pathTemplate: "/runtime/interactions/{interaction_id}/interrupt",
+    pathTemplate: "/executive/interactions",
     surface: "assistant",
   }),
   realtimeVoiceCall: Object.freeze({
@@ -236,9 +223,9 @@ export const PORTAL_CANONICAL_ACTIONS = Object.freeze({
     surface: "voice",
   }),
   voiceOperatorTranscript: Object.freeze({
-    actionId: "canonical.route.post.voice-operator.route-transcript",
+    actionId: "canonical.route.post.executive.interactions",
     method: "POST",
-    pathTemplate: "/voice-operator/route-transcript",
+    pathTemplate: "/executive/interactions",
     surface: "voice",
   }),
 });
@@ -343,6 +330,21 @@ export function portalFailureEnvelope(
     },
     error: code ? { code, message } : { code: "gateway_unreachable", message },
   };
+}
+
+function bootstrapFailureEnvelope(
+  code: string,
+  message: string,
+  connectionState: ConnectionState,
+): GatewayEnvelope {
+  const envelope = portalFailureEnvelope(
+    "status",
+    code,
+    message,
+    connectionState,
+  );
+  envelope.gateway.route = RUNTIME_BOOTSTRAP_ROUTE;
+  return envelope;
 }
 
 function asGatewayEnvelope<T>(value: unknown): GatewayEnvelope<T> | null {
@@ -484,7 +486,7 @@ function asRuntimeBootstrapEnvelope(
   if (
     failedRoutes.length !== expectedFailures.length
     || new Set(failedRoutes).size !== failedRoutes.length
-    || failedRoutes.some((route, index) => route !== expectedFailures[index])
+    || failedRoutes.some((route) => !expectedFailures.includes(route as RuntimeRoute))
   ) return null;
   return { data: snapshot, failures };
 }
@@ -625,25 +627,20 @@ async function loadSnapshot(
     const code = (error as { code?: string }).code;
     const timedOut = code === "task_timed_out" || code === "gateway_snapshot_timed_out";
     const unreachable = code === "gateway_unreachable";
-    const data: RuntimeSnapshot = {};
-    const failures = RUNTIME_ROUTES.map((route) => portalFailureEnvelope(
-      route,
+    const failure = bootstrapFailureEnvelope(
       timedOut
         ? "gateway_snapshot_timed_out"
         : unreachable
           ? "gateway_unreachable"
-          : "gateway_snapshot_failed",
+          : "gateway_bootstrap_response_invalid",
       timedOut
-        ? "The bounded startup snapshot expired and failed closed. Retry to request a fresh Runtime snapshot."
+        ? "The bounded Runtime bootstrap expired and failed closed. Previously verified route state remains visible."
         : unreachable
-          ? "The Experience Gateway could not be reached for the bounded Runtime bootstrap."
-          : "The browser snapshot coordinator failed closed before it could establish current Runtime state.",
+          ? "The Experience Gateway could not be reached for the bounded Runtime bootstrap. Previously verified route state remains visible."
+          : "The Experience Gateway returned an invalid Runtime bootstrap contract. Previously verified route state remains visible.",
       timedOut ? "Timed Out" : unreachable ? "Unavailable" : "Unknown",
-    ));
-    RUNTIME_ROUTES.forEach((route, index) => {
-      data[route] = failures[index];
-    });
-    return { data, failures };
+    );
+    return { data: {}, failures: [failure] };
   }
 }
 

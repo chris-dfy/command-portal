@@ -62,7 +62,7 @@
             },
             "web": {
               "state": "read_only",
-              "reason": "Hosted NEXUS provides a read-only command directory into governed Copilot, Mission, Project, Document, Voice, and Work Session modules; every mutation remains independently exact-action gated.",
+              "reason": "Hosted NEXUS provides a read-only command directory into governed Copilot, Mission, Project, Document, Voice, and Work Session modules; every downstream action request enters the single canonical interaction coordinator.",
               "componentKey": "web.dashboard.command-center"
             }
           }
@@ -600,7 +600,7 @@
         "web": {
           "route": "/settings",
           "state": "functional",
-          "reason": "The hosted surface manages the bounded Registered Executive session and the exact non-production canonical execution proof, while appearance remains client-local."
+          "reason": "The hosted surface manages the bounded Registered Executive session and presents retained non-production execution evidence read-only, while appearance remains client-local."
         }
       },
       "modules": [
@@ -680,7 +680,7 @@
         },
         {
           "moduleId": "settings.canonical-execution",
-          "label": "Canonical execution fixture",
+          "label": "Canonical execution evidence",
           "portability": "hosted_only",
           "capabilityIds": [
             "canonical_execution_spine"
@@ -692,8 +692,8 @@
               "componentKey": null
             },
             "web": {
-              "state": "functional",
-              "reason": "The hosted surface admits only the exact registered non-production Action and separately governed compensation.",
+              "state": "read_only",
+              "reason": "The hosted surface presents retained Mission 4 evidence. Its direct Mission and Action mutations are retired; new intent enters POST /executive/interactions.",
               "componentKey": "web.settings.canonical-execution"
             }
           }
@@ -721,7 +721,7 @@
         "web": {
           "route": "/documents",
           "state": "functional",
-          "reason": "The hosted surface uploads browser-selected evidence and queries admitted sources through authenticated canonical intake contracts."
+          "reason": "The hosted surface submits bounded evidence-intake and query intent through the canonical interaction coordinator and reads admitted-source history; raw attachment bytes remain browser-local pending a governed attachment transport."
         }
       },
       "modules": [
@@ -735,12 +735,12 @@
           "clients": {
             "desktop": {
               "state": "functional",
-              "reason": "Local NEXUS ingests bounded local documents through the canonical intake boundary.",
+              "reason": "Local NEXUS submits bounded document-intake intent through the canonical interaction coordinator and reads Runtime intake history; it does not expose a direct mutation path.",
               "componentKey": "desktop.documents.intake"
             },
             "web": {
               "state": "functional",
-              "reason": "Hosted NEXUS uses exact upload and query contracts with source classification and proof boundaries.",
+              "reason": "Hosted NEXUS submits intake and evidence-query intent only through canonical interaction admission, with source classification and proof boundaries rendered from Runtime outcomes.",
               "componentKey": "web.documents.intake"
             }
           }
@@ -763,12 +763,12 @@
         "desktop": {
           "route": "/projects",
           "state": "functional",
-          "reason": "Local NEXUS Command creates projects and compiles registered artifact types through the Runtime."
+          "reason": "Local NEXUS Command submits project-creation and compilation intent through the canonical interaction coordinator and reads Runtime project evidence."
         },
         "web": {
           "route": "/projects",
           "state": "functional",
-          "reason": "The hosted surface creates projects and reads scope, estimate, and planning models before canonical compilation."
+          "reason": "The hosted surface submits project-creation and compilation intent through canonical interaction admission and reads scope, estimate, and planning models."
         }
       },
       "modules": [
@@ -782,12 +782,12 @@
           "clients": {
             "desktop": {
               "state": "functional",
-              "reason": "Local NEXUS creates evidence-qualified project scopes and bounded planning artifacts.",
+              "reason": "Local NEXUS requests evidence-qualified project scopes and bounded planning artifacts through the single canonical interaction coordinator.",
               "componentKey": "desktop.projects.planning"
             },
             "web": {
               "state": "functional",
-              "reason": "Hosted NEXUS uses canonical project creation, scope, estimate, planning-model, and compile contracts.",
+              "reason": "Hosted NEXUS uses canonical interaction admission for project actions and exact read contracts for scope, estimate, planning-model, and artifact evidence.",
               "componentKey": "web.projects.planning"
             }
           }
@@ -2304,7 +2304,9 @@
         "web": {
           "route": "/voice",
           "state": "functional",
-          "reason": "The hosted Voice workspace binds governed transcript routing and live Realtime voice to canonical capability and session gates."
+          "reason": "The hosted Voice workspace preserves typed and bounded browser-speech continuity through canonical Runtime interaction admission; full-duplex Realtime is quarantined for this adapter.",
+          "voiceProfile": "continuity_only",
+          "provesFullDuplexReadiness": false
         }
       },
       "modules": [
@@ -2323,8 +2325,10 @@
             },
             "web": {
               "state": "functional",
-              "reason": "Hosted NEXUS exposes exact text and realtime voice adapters; voice never grants Approval or Authority.",
-              "componentKey": "web.voice.operator"
+              "reason": "Hosted NEXUS exposes typed and bounded browser-speech continuity; the quarantined full-duplex adapter never grants Approval or Authority and establishes no readiness proof.",
+              "componentKey": "web.voice.operator",
+              "voiceProfile": "continuity_only",
+              "provesFullDuplexReadiness": false
             }
           }
         },

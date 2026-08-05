@@ -18,13 +18,16 @@ The contract's comparison section is derived only from its listed registered Run
 
 ## Current registered operational scope
 
-- Mission planning and governed mission-step submission
-- Governed work-session planning, start, state control, and receipts
+- Mission-planning intent through canonical interaction admission, plus governed mission-step submission
+- Work-session planning intent through canonical interaction admission, plus governed start, state control, and receipts
+- Approval queue decisions
+- Canonical typed and finalized-voice interaction admission
 - Read-only connector registry projection
+- Connector readiness
 - Proof and receipt visibility through registered reads
-- Bounded Human Interaction Framework behavior
+- Runtime-scoped client presentation effects
 - Document intelligence
-- Nexicron project planning, scope, pricing, and artifact compilation
+- NEXUS project planning, scope, pricing, and artifact compilation
 
 The contract reports hosted execution separately from capability implementation. A hosted workspace is presented only when Runtime reports `hostedExecutionAvailable=true`, its capability entry is implemented for `nexusWeb`, and an exact authenticated gateway route exists. This does not claim production readiness, enterprise readiness, verified live model inference, or connector reachability.
 

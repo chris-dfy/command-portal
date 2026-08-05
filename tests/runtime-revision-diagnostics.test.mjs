@@ -24,20 +24,26 @@ test("Runtime revision is diagnostic provenance rather than shared workspace con
   ]);
 
   const hostedContext = app.match(
-    /showsHostedContext && <section className="hosted-operational-context"[\s\S]*?<\/section>}/,
+    /const hostedOperationalContext = hostedContextData && active !== "conclave" \? <section[\s\S]*?<\/section> : null;/,
   )?.[0];
   assert.ok(hostedContext);
   assert.doesNotMatch(hostedContext, /Runtime commit/);
   for (const label of [
-    "Gateway transport",
+    "Gateway connection",
     "Capability state",
-    "Capability reason",
+    "Verified Runtime reason",
     "Tenant",
     "Workspace",
     "Session expires",
   ]) {
     assert.match(hostedContext, new RegExp(label));
   }
+  const disclosure = hostedContext.indexOf("<details");
+  assert.ok(disclosure > hostedContext.indexOf("hosted-operational-context__summary"));
+  assert.ok(hostedContext.indexOf("hostedCapability.reason") > disclosure);
+  assert.ok(hostedContext.indexOf("operationalSession.tenantId") > disclosure);
+  assert.ok(hostedContext.indexOf("operationalSession.workspaceId") > disclosure);
+  assert.ok(hostedContext.indexOf("operationalSession.expiresAt") > disclosure);
 
   assert.match(app, /const \[inspectorOpen, setInspectorOpen\] = useState\(false\)/);
   assert.match(app, /eyebrow="Release provenance" title="Verified deployment revisions"/);
@@ -52,10 +58,9 @@ test("Runtime revision is diagnostic provenance rather than shared workspace con
   assert.match(releaseRevisionStyles, /overflow-wrap: anywhere/);
   assert.match(releaseRevisionStyles, /\.release-provenance-grid \{[^}]*repeat\(2, minmax\(0, 1fr\)\)/s);
 
-  assert.match(hostedContextStyles, /repeat\(2, minmax\(110px, 0\.8fr\)\)/);
-  assert.match(hostedContextStyles, /minmax\(220px, 1\.8fr\)/);
-  assert.match(hostedContextStyles, /repeat\(3, minmax\(110px, 0\.8fr\)\)/);
-  assert.match(hostedContextStyles, /@media \(max-width: 1180px\)/);
+  assert.match(hostedContextStyles, /hosted-operational-context__summary/);
+  assert.match(hostedContextStyles, /hosted-operational-context__details > summary:focus-visible/);
+  assert.match(hostedContextStyles, /repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(hostedContextStyles, /@media \(max-width: 760px\)/);
 
   assert.match(inspector, /Runtime revision/);

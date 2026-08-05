@@ -42,8 +42,8 @@ test("the persistent copilot, voice workspace, launcher, and introduction share 
     assert.match(source, /NexusAvatar/);
     assert.match(source, /NexusAvatar\.css/);
   }
-  assert.match(copilot, /deriveAssistantAvatarState\(\{ voiceState, textBusy: busy \|\| browserListening, hasError: Boolean\(error\) \}\)/);
-  assert.match(voice, /deriveAssistantAvatarState\(\{ voiceState, textBusy: busy, hasError: false \}\)/);
+  assert.match(copilot, /deriveAssistantAvatarState\(\{ voiceState: "idle", textBusy: busy \|\| browserListening, hasError: Boolean\(error\) \}\)/);
+  assert.match(voice, /deriveAssistantAvatarState\(\{ voiceState: "idle", textBusy: busy, hasError: false \}\)/);
   // The launcher mirrors presentation state through the presence store and owns no session state.
   assert.match(chrome, /assistantPresence/);
   assert.match(chrome, /useSyncExternalStore/);
@@ -64,23 +64,26 @@ test("disconnected presentation stays explicit and the panel remains reachable o
     read("../src/components/NexusCopilot.tsx"),
     read("../src/platform/nexus-platform.css"),
   ]);
-  assert.match(copilot, /Voice unavailable — Runtime voice cannot be established/);
+  assert.match(copilot, /COMMAND_PORTAL_REALTIME_QUARANTINE_MESSAGE/);
+  assert.match(copilot, /Continuity only/);
   // At 820px and below, the assistant panel scrolls so the composer and footer stay keyboard-reachable.
   const mobileBlock = platformCss.slice(platformCss.indexOf("@media (max-width: 820px)"));
   assert.match(mobileBlock, /\.nexus-copilot[\s\S]*?overflow-y: auto/);
   assert.match(mobileBlock, /overflow-x: clip/);
 });
 
-test("voice, mute, interruption, and Runtime truth contracts are preserved", async () => {
+test("voice continuity and the full-duplex quarantine preserve Runtime truth", async () => {
   const [copilot, voice, realtime] = await Promise.all([
     read("../src/components/NexusCopilot.tsx"),
     read("../src/components/VoiceWorkspace.tsx"),
     read("../src/lib/realtime-voice-client.ts"),
   ]);
-  assert.match(copilot, /hifClient\.start\(request, "text", \{\}, conversationId\.current\)/);
-  assert.match(copilot, /setMicrophoneMuted/);
-  assert.match(copilot, /setOutputMuted/);
-  assert.match(realtime, /"interrupted"/);
-  assert.match(voice, /Runtime owns the provider session and truth boundaries/i);
+  assert.match(copilot, /admitExecutiveInteraction\(request, "text", conversationId\.current\)/);
+  assert.match(copilot, /admitRuntimeVoiceTranscript/);
+  assert.match(voice, /continuity-only/i);
+  assert.match(realtime, /COMMAND_PORTAL_REALTIME_PROFILE = "continuity_only"/);
+  assert.match(realtime, /COMMAND_PORTAL_PROVES_FULL_DUPLEX_READINESS = false/);
+  assert.doesNotMatch(copilot, /Start live|setMicrophoneMuted|setOutputMuted/);
+  assert.doesNotMatch(voice, /Start live|setMicrophoneMuted|setOutputMuted/);
   assert.match(copilot, /Runtime evidence remains authoritative/);
 });

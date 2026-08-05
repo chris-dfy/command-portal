@@ -22,14 +22,14 @@ test("Project drafts retain exact private retry operations while project context
     "pendingCreate ?? snapshotPrivateDraftOperation(",
     'setProjectName("")',
     "beginPrivateDraftAttempt(staged)",
-    "localNexusClient.projectCreate(operation.payload.name, operation.idempotencyKey)",
+    "const admission = await admitCanonicalActionIntent(",
   ]);
   assertOrder(compile, [
     "pendingCompile ?? snapshotPrivateDraftOperation(",
     'setWeeks("")',
     'setAssumption("")',
     "beginPrivateDraftAttempt(staged)",
-    "await localNexusClient.projectCompile(",
+    "const admission = await admitCanonicalActionIntent(",
   ]);
   assert.match(create, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(compile, /operation\.idempotencyKey[\s\S]*retainPrivateDraftAfterFailure\(operation\)/);
@@ -46,7 +46,7 @@ test("Conclave clears the proposal without losing the exact pending retry identi
   assertOrder(source, [
     "setPendingCreate(createIdentity)",
     'setProposal("")',
-    "await createConclaveInvestigation(",
+    "const admission = await admitCanonicalActionIntent(",
   ]);
   assert.match(source, /!proposal\.trim\(\) && !pendingCreate\?\.proposal/);
   assert.match(source, /id="conclave-proposal"[\s\S]{0,300}autoComplete="off"/);
@@ -60,7 +60,7 @@ test("Conclave Evidence clears transient fields and retries the private exact ad
     "setPendingEvidence(admission)",
     'setEvidenceOrigin("")',
     'setEvidenceClaim("")',
-    "await localNexusClient.admitConclaveEvidence(",
+    "const result = await admitCanonicalActionIntent(",
   ]);
   assert.match(admission, /pendingEvidence\?\.missionId === workspace\.missionId/);
   assert.match(admission, /admission\.idempotencyKey/);
@@ -79,7 +79,7 @@ test("Knowledge intake snapshots payload and idempotency before clearing private
     'setIntakeOrigin("")',
     'setIntakeClaim("")',
     "const operation = beginPrivateDraftAttempt(staged)",
-    "await localNexusClient.knowledgeIntake(operation.payload, operation.idempotencyKey)",
+    "const admission = await admitCanonicalActionIntent(",
   ]);
   assert.match(intake, /let staged = pendingIntake/);
   assert.match(intake, /retainPrivateDraftAfterFailure\(operation\)/);
@@ -92,7 +92,7 @@ test("Knowledge intake snapshots payload and idempotency before clearing private
     "pendingBaseline ?? snapshotPrivateDraftOperation(",
     'setExpectedDeployedCommit("")',
     "beginPrivateDraftAttempt(staged)",
-    "localNexusClient.establishRuntimeBaseline(operation.payload, operation.idempotencyKey)",
+    "const admission = await admitCanonicalActionIntent(",
   ]);
   assert.match(baseline, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(source, /Retry exact Runtime baseline/);
@@ -106,7 +106,7 @@ test("Edge admission snapshots exact intent and key before clearing transient op
     "setPendingCreate(staged)",
     "setForm({",
     "const operation = beginPrivateDraftAttempt(staged)",
-    "await localNexusClient.createRuntimeAdmission(operation.payload, operation.idempotencyKey)",
+    "const admission = await admitCanonicalActionIntent(",
   ]);
   assert.match(creation, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(creation, /catch \(error\)[\s\S]*setActionError/);
@@ -118,18 +118,18 @@ test("Edge admission snapshots exact intent and key before clearing transient op
 
 test("Voice keeps transcripts in history and never rehydrates the typed draft", async () => {
   const source = await read("../src/components/VoiceWorkspace.tsx");
-  const userTranscript = source.slice(
-    source.indexOf("onUserTranscript:"),
-    source.indexOf("onAssistantTranscript:"),
+  const governedTranscript = source.slice(
+    source.indexOf("async function routeGovernedTranscript"),
+    source.indexOf("async function sendText"),
   );
-  assert.doesNotMatch(userTranscript, /setTranscript/);
-  assert.match(userTranscript, /setHistory/);
+  assert.match(governedTranscript, /setHistory/);
+  assert.match(governedTranscript, /admitRuntimeVoiceTranscript/);
+  assert.doesNotMatch(source, /onUserTranscript:|RealtimeVoiceClient/);
   assertOrder(source, [
     "async function routeGovernedTranscript(",
     'setTranscript("")',
     "await executeExplicitPrivateDraftAction(",
-    "runBoundedTask(",
-    "localNexusClient.routeTranscript(",
+    "admitRuntimeVoiceTranscript(",
   ]);
   const browserMicrophone = source.slice(
     source.indexOf("async function useBrowserMicrophone"),
@@ -144,8 +144,8 @@ test("Voice keeps transcripts in history and never rehydrates the typed draft", 
   assert.match(source, /pendingRequest && <button[\s\S]*Send captured transcript through governed Voice/);
   assert.match(source, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(source, /shouldPresentPrivateDraft\([\s\S]*staged\.payload\.historyAlreadyRecorded/);
-  assert.match(source, /code === "response_timeout" && captured[\s\S]*snapshotPrivateDraftOperation/);
-  assert.doesNotMatch(source, /code === "response_timeout" && captured[\s\S]{0,700}void routeGovernedTranscript/);
+  assert.match(browserMicrophone, /const captured = await recognizeBrowserSpeech\(\)[\s\S]*await routeGovernedTranscript\(captured, "browser_speech"\)/);
+  assert.doesNotMatch(source, /onError:|onUserTranscript:/);
   assert.doesNotMatch(source, /value=\{pendingRequest[^}]*\}/);
   assert.match(source, /value=\{transcript\}[\s\S]*autoComplete="off"/);
 });
@@ -159,7 +159,7 @@ test("Document and Work Session submissions retain exact private retry operation
     "pendingQuery ?? snapshotPrivateDraftOperation(",
     'setQuestion("")',
     "beginPrivateDraftAttempt(staged)",
-    "await localNexusClient.intakeQuery(",
+    "const admission = await admitCanonicalActionIntent(",
   ]);
   assert.match(documents, /operation\.idempotencyKey[\s\S]*retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(documents, /Retry exact source query/);
@@ -169,9 +169,12 @@ test("Document and Work Session submissions retain exact private retry operation
     "matchingPending ?? snapshotPrivateDraftOperation(",
     'setObjective("")',
     "beginPrivateDraftAttempt(staged)",
-    "localNexusClient.planWorkSession(operation.payload.objective, operation.idempotencyKey)",
+    "const admission = await admitCanonicalActionIntent(",
   ]);
-  assert.match(workSessions, /startWorkSession\(operation\.payload\.objective, operation\.idempotencyKey\)/);
+  assert.match(workSessions, /operation\.idempotencyKey/);
+  assert.doesNotMatch(workSessions, /planWorkSession|\/work-sessions\/plan/);
+  assert.doesNotMatch(workSessions, /startWorkSession|controlWorkSession/);
+  assert.match(workSessions, /admitCanonicalActionIntent/);
   assert.match(workSessions, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(workSessions, /Retry exact plan/);
   assert.match(workSessions, /Retry exact start/);
@@ -188,36 +191,39 @@ test("both Mission entry points retain exact private retry plans", async () => {
       "pendingPlan ?? snapshotPrivateDraftOperation(",
       'setObjective("")',
       "beginPrivateDraftAttempt(staged)",
-      "await localNexusClient.planMission(operation.payload.objective, operation.idempotencyKey)",
+      "await admitExecutiveInteraction(",
     ]);
+    assert.match(source, /conversationId\.current,[\s\S]*operation\.idempotencyKey/);
+    assert.doesNotMatch(source, /localNexusClient\.planMission|"\/missions\/plan"/);
     assert.match(source, /retainPrivateDraftAfterFailure\(operation\)/);
     assert.match(source, /Retry exact [Mm]ission plan/);
     assert.match(source, /value=\{objective\}[\s\S]{0,300}autoComplete="off"/);
   }
 });
 
-test("Copilot clears its visible HIF draft only after durable acceptance", async () => {
+test("Copilot clears its visible draft only after canonical Runtime acceptance", async () => {
   const source = await read("../src/components/NexusCopilot.tsx");
   assertOrder(source, [
     "const request = (text ?? input).trim()",
     "beginAcceptanceBoundDraft(input)",
-    "await hifClient.start(request",
-    "result.interaction.interactionId?.trim()",
+    "await admitExecutiveInteraction(request",
+    "presentAdmission(result)",
     "clearDraftAfterAcceptance(draftOperation)",
   ]);
   assert.match(source, /retainDraftAfterUnacceptedFailure\(draftOperation\)/);
   assert.match(source, /disabled=\{!interactionAction\.available \|\| busy \|\| Boolean\(pendingAskDraft\)\}/);
-  const askFlow = source.slice(source.indexOf("async function ask("), source.indexOf("async function startVoice"));
+  const askFlow = source.slice(source.indexOf("async function ask("), source.indexOf("async function routeGovernedVoice"));
   assert.doesNotMatch(askFlow, /idempotency|randomUUID/);
   assert.equal(source.includes("sessionStorage"), false);
   assert.equal((source.match(/localStorage/g) ?? []).length, 2);
   assert.match(source, /introductionKey/);
   assert.match(source, /aria-label="Ask NEXUS" autoComplete="off"/);
-  assert.match(source, /code === "response_timeout" && captured[\s\S]*snapshotPrivateDraftOperation/);
-  assert.doesNotMatch(source, /code === "response_timeout" && captured[\s\S]{0,700}void routeGovernedVoice/);
+  assert.match(source, /const captured = await recognizeBrowserSpeech\(\)[\s\S]*await routeGovernedVoice\(captured\)/);
+  assert.doesNotMatch(source, /onError:|onUserTranscript:/);
   assert.match(source, /pendingVoiceRequest && <button[\s\S]*Send captured transcript through governed Voice/);
   assert.match(source, /explicitOperation\.idempotencyKey/);
   assert.match(source, /retainPrivateDraftAfterFailure\(operation\)/);
   assert.match(source, /shouldPresentPrivateDraft\([\s\S]*staged\.payload\.operatorAlreadyVisible/);
   assert.doesNotMatch(source, /setInput\(captured\)/);
+  assert.doesNotMatch(source, /hifClient|\/api\/hif/);
 });
