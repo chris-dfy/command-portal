@@ -16,9 +16,17 @@ import {
   loadConfig,
   LOCAL_CAPABILITY_ROUTES,
   publicTrustBootstrap,
+  REALTIME_ARTIFACT_IDENTITY_HEADER,
+  REALTIME_CLIENT_PROFILE,
+  REALTIME_CLIENT_PROFILE_HEADER,
+  REALTIME_CONTRACT_HEADER,
+  REALTIME_CONTRACT_VERSION,
   REALTIME_INPUT_MODE,
   REALTIME_INPUT_MODE_HEADER,
   REALTIME_PROMPT_ECHO_HEADER,
+  REALTIME_RECEIPT_DIGEST_HEADER,
+  realtimeAnswerMatchesTracklessProfile,
+  realtimeOfferMatchesTracklessProfile,
   REPLAY_ROUTES,
   resolveCanonicalCapabilityActionAlias,
   resolveGatewayRuntimeActionAlias,
@@ -69,6 +77,25 @@ const GITHUB_READ_ONLY_OPERATIONS = Object.freeze([
     inputSchemaId: "contracts/capabilities/capability-registry-projection.schema.json#/$defs/githubActionsRunsReadInput",
   }),
 ]);
+
+const REALTIME_BROWSER_HEADERS = Object.freeze({
+  [REALTIME_CONTRACT_HEADER]: REALTIME_CONTRACT_VERSION,
+  [REALTIME_CLIENT_PROFILE_HEADER]: REALTIME_CLIENT_PROFILE,
+});
+const REALTIME_TRACKLESS_OFFER = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=inactive\r\na=rtpmap:111 opus/48000/2\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:1\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n";
+const REALTIME_TRACKLESS_ANSWER = "v=0\r\no=- 2 3 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=inactive\r\na=rtpmap:111 opus/48000/2\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:1\r\na=sctp-port:5000\r\n";
+
+function realtimeSuccessHeaders(promptSignature, inputMode = REALTIME_INPUT_MODE) {
+  return {
+    "Content-Type": "application/sdp",
+    [REALTIME_PROMPT_ECHO_HEADER]: promptSignature,
+    [REALTIME_INPUT_MODE_HEADER]: inputMode,
+    [REALTIME_CONTRACT_HEADER]: REALTIME_CONTRACT_VERSION,
+    [REALTIME_CLIENT_PROFILE_HEADER]: REALTIME_CLIENT_PROFILE,
+    [REALTIME_ARTIFACT_IDENTITY_HEADER]: `sha256:${"a".repeat(64)}`,
+    [REALTIME_RECEIPT_DIGEST_HEADER]: `sha256:${"b".repeat(64)}`,
+  };
+}
 
 function runtimeEnvelope(data = { observed: true }, overrides = {}) {
   return {
@@ -2059,15 +2086,17 @@ test("hosted conversational reasoning reports its own timeout truthfully", async
 });
 
 test("unavailable Realtime WebRTC never crosses the same-origin gateway", async () => {
-  const offer = "v=0\r\na=offer\r\n".repeat(12);
+  const offer = REALTIME_TRACKLESS_OFFER;
   let calls = 0;
   const base = await start(withActionRegistry(async () => {
     calls += 1;
-    return new Response("v=0\r\na=answer\r\n", { status: 201, headers: { "Content-Type": "application/sdp" } });
+    return new Response(REALTIME_TRACKLESS_ANSWER, { status: 201, headers: { "Content-Type": "application/sdp" } });
   }));
   await primeActionAdmission(base);
   const response = await fetch(`${base}/api/runtime/realtime/call`, {
-    method: "POST", headers: { "Content-Type": "application/sdp", Accept: "application/sdp" }, body: offer
+    method: "POST",
+    headers: { "Content-Type": "application/sdp", Accept: "application/sdp", ...REALTIME_BROWSER_HEADERS },
+    body: offer,
   });
   const body = await response.json();
   assert.equal(response.status, 503);
@@ -2075,8 +2104,95 @@ test("unavailable Realtime WebRTC never crosses the same-origin gateway", async 
   assert.equal(calls, 0);
 });
 
+test("Realtime gateway fails closed before Runtime contact when the browser contract is missing or incompatible", async () => {
+  const offer = REALTIME_TRACKLESS_OFFER;
+  let calls = 0;
+  const projection = actionAdmissionProjection({
+    classifications: {
+      "context.runtime.route.post.runtime.voice.realtime.call": "live_verified",
+    },
+  });
+  const base = await start(withActionRegistry(async () => {
+    calls += 1;
+    return new Response(REALTIME_TRACKLESS_ANSWER, { status: 201 });
+  }, projection));
+  await primeActionAdmission(base);
+
+  const missing = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST",
+    headers: { "Content-Type": "application/sdp" },
+    body: offer,
+  });
+  assert.equal(missing.status, 428);
+  assert.equal((await missing.json()).error.code, "realtime_contract_required");
+
+  const incompatible = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/sdp",
+      [REALTIME_CONTRACT_HEADER]: "nexus.realtime-voice@1.0.0",
+      [REALTIME_CLIENT_PROFILE_HEADER]: REALTIME_CLIENT_PROFILE,
+    },
+    body: offer,
+  });
+  assert.equal(incompatible.status, 409);
+  assert.equal((await incompatible.json()).error.code, "realtime_contract_incompatible");
+  const fullDuplexOffer = offer.replace("a=inactive", "a=sendrecv\r\na=msid:browser microphone");
+  assert.equal(realtimeOfferMatchesTracklessProfile(fullDuplexOffer), false);
+  assert.equal(realtimeOfferMatchesTracklessProfile(`${offer}m=video 9 UDP/TLS/RTP/SAVPF 96\r\n`), false);
+  const incompatibleOffer = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST",
+    headers: { "Content-Type": "application/sdp", ...REALTIME_BROWSER_HEADERS },
+    body: fullDuplexOffer,
+  });
+  assert.equal(incompatibleOffer.status, 409);
+  assert.equal((await incompatibleOffer.json()).error.code, "realtime_offer_incompatible");
+  assert.equal(calls, 0);
+});
+
+test("Realtime gateway preserves only bounded upstream reason and request identifiers", async () => {
+  const projection = actionAdmissionProjection({
+    classifications: {
+      "context.runtime.route.post.runtime.voice.realtime.call": "live_verified",
+    },
+  });
+  let forwardedRequestId = "";
+  const base = await start(withActionRegistry(async (_url, options) => {
+    forwardedRequestId = options.headers["X-Request-ID"];
+    return new Response(JSON.stringify({
+      error: {
+        code: "provider_auth_failed",
+        message: "masked-provider-secret-must-not-cross-the-gateway",
+      },
+    }), {
+      status: 502,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Request-ID": "runtime_req-123:voice",
+      },
+    });
+  }, projection));
+  await primeActionAdmission(base);
+  const response = await fetch(`${base}/api/runtime/realtime/call`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/sdp",
+      Accept: "application/sdp",
+      ...REALTIME_BROWSER_HEADERS,
+    },
+    body: REALTIME_TRACKLESS_OFFER,
+  });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.error.code, "realtime_unavailable");
+  assert.equal(body.error.reasonCode, "provider_auth_failed");
+  assert.equal(body.error.requestId, "runtime_req-123:voice");
+  assert.match(forwardedRequestId, /^[0-9a-f-]{36}$/);
+  assert.doesNotMatch(JSON.stringify(body), /masked-provider-secret/);
+});
+
 test("Realtime gateway requires and forwards the exact same-call manual-commit attestation", async () => {
-  const offer = "v=0\r\na=offer\r\n".repeat(12);
+  const offer = REALTIME_TRACKLESS_OFFER;
   const promptSignature = "nexus governed runtime prompt signature boundary";
   const projection = actionAdmissionProjection({
     classifications: {
@@ -2084,19 +2200,18 @@ test("Realtime gateway requires and forwards the exact same-call manual-commit a
     },
   });
   for (const inputMode of [null, "client-pcm-append-commit-v0", "CLIENT-PCM-APPEND-COMMIT-V1"]) {
-    const runtimeFetch = withActionRegistry(async () => new Response("v=0\r\na=answer\r\n", {
+    const runtimeFetch = withActionRegistry(async () => new Response(REALTIME_TRACKLESS_ANSWER, {
       status: 201,
       headers: {
-        "Content-Type": "application/sdp",
-        [REALTIME_PROMPT_ECHO_HEADER]: promptSignature,
-        ...(inputMode ? { [REALTIME_INPUT_MODE_HEADER]: inputMode } : {}),
+        ...realtimeSuccessHeaders(promptSignature),
+        ...(inputMode ? { [REALTIME_INPUT_MODE_HEADER]: inputMode } : { [REALTIME_INPUT_MODE_HEADER]: "" }),
       },
     }), projection);
     const base = await start(runtimeFetch);
     await primeActionAdmission(base);
     const response = await fetch(`${base}/api/runtime/realtime/call`, {
       method: "POST",
-      headers: { "Content-Type": "application/sdp", Accept: "application/sdp" },
+      headers: { "Content-Type": "application/sdp", Accept: "application/sdp", ...REALTIME_BROWSER_HEADERS },
       body: offer,
     });
     assert.equal(response.status, 502, String(inputMode));
@@ -2106,28 +2221,45 @@ test("Realtime gateway requires and forwards the exact same-call manual-commit a
   let upstreamCall;
   const runtimeFetch = withActionRegistry(async (url, options) => {
     upstreamCall = { url, options };
-    return new Response("v=0\r\na=answer\r\n", {
+    return new Response(REALTIME_TRACKLESS_ANSWER, {
       status: 201,
-      headers: {
-        "Content-Type": "application/sdp",
-        [REALTIME_PROMPT_ECHO_HEADER]: promptSignature,
-        [REALTIME_INPUT_MODE_HEADER]: REALTIME_INPUT_MODE,
-      },
+      headers: realtimeSuccessHeaders(promptSignature),
     });
   }, projection);
   const base = await start(runtimeFetch);
   await primeActionAdmission(base);
   const response = await fetch(`${base}/api/runtime/realtime/call`, {
     method: "POST",
-    headers: { "Content-Type": "application/sdp", Accept: "application/sdp" },
+    headers: { "Content-Type": "application/sdp", Accept: "application/sdp", ...REALTIME_BROWSER_HEADERS },
     body: offer,
   });
   assert.equal(response.status, 201);
   assert.equal(response.headers.get(REALTIME_PROMPT_ECHO_HEADER), promptSignature);
   assert.equal(response.headers.get(REALTIME_INPUT_MODE_HEADER), REALTIME_INPUT_MODE);
-  assert.equal(await response.text(), "v=0\r\na=answer\r\n");
+  assert.equal(response.headers.get(REALTIME_CONTRACT_HEADER), REALTIME_CONTRACT_VERSION);
+  assert.equal(response.headers.get(REALTIME_CLIENT_PROFILE_HEADER), REALTIME_CLIENT_PROFILE);
+  assert.match(response.headers.get(REALTIME_ARTIFACT_IDENTITY_HEADER), /^sha256:[0-9a-f]{64}$/);
+  assert.match(response.headers.get(REALTIME_RECEIPT_DIGEST_HEADER), /^sha256:[0-9a-f]{64}$/);
+  assert.equal(await response.text(), REALTIME_TRACKLESS_ANSWER);
   assert.equal(upstreamCall.url, "https://runtime.invalid/runtime/voice/realtime/call");
+  assert.equal(upstreamCall.options.headers[REALTIME_CONTRACT_HEADER], REALTIME_CONTRACT_VERSION);
+  assert.equal(upstreamCall.options.headers[REALTIME_CLIENT_PROFILE_HEADER], REALTIME_CLIENT_PROFILE);
   assert.equal(Buffer.from(upstreamCall.options.body).toString("utf8"), offer);
+  assert.equal(realtimeAnswerMatchesTracklessProfile(REALTIME_TRACKLESS_ANSWER), true);
+  assert.equal(realtimeAnswerMatchesTracklessProfile(REALTIME_TRACKLESS_ANSWER.replace("a=inactive", "a=sendrecv\r\na=msid:provider output")), false);
+
+  const unsafeBase = await start(withActionRegistry(async () => new Response(
+    REALTIME_TRACKLESS_ANSWER.replace("a=inactive", "a=sendrecv\r\na=msid:provider output"),
+    { status: 201, headers: realtimeSuccessHeaders(promptSignature) },
+  ), projection));
+  await primeActionAdmission(unsafeBase);
+  const unsafeResponse = await fetch(`${unsafeBase}/api/runtime/realtime/call`, {
+    method: "POST",
+    headers: { "Content-Type": "application/sdp", Accept: "application/sdp", ...REALTIME_BROWSER_HEADERS },
+    body: offer,
+  });
+  assert.equal(unsafeResponse.status, 502);
+  assert.equal((await unsafeResponse.json()).error.code, "realtime_response_invalid");
 });
 
 test("Realtime gateway rejects unavailable actions and unsafe methods before contacting Runtime", async () => {
@@ -2135,7 +2267,7 @@ test("Realtime gateway rejects unavailable actions and unsafe methods before con
   const base = await start(withActionRegistry(async () => { calls += 1; return runtimeResponse({}); }));
   await primeActionAdmission(base);
   const invalid = await fetch(`${base}/api/runtime/realtime/call`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+    method: "POST", headers: { "Content-Type": "application/json", ...REALTIME_BROWSER_HEADERS }, body: "{}"
   });
   assert.equal(invalid.status, 503);
   assert.equal((await invalid.json()).error.code, "canonical_action_unavailable");
@@ -2204,7 +2336,12 @@ test("hosted canonical interaction requires session, CSRF, and exact idempotency
   })).status, 403);
   const realtime = await fetch(`${base}/api/runtime/realtime/call`, {
     method: "POST",
-    headers: { Cookie: cookie, "Content-Type": "application/sdp", "X-CSRF-Token": session.session.csrfToken },
+    headers: {
+      Cookie: cookie,
+      "Content-Type": "application/sdp",
+      "X-CSRF-Token": session.session.csrfToken,
+      ...REALTIME_BROWSER_HEADERS,
+    },
     body: offer,
   });
   assert.equal(realtime.status, 503);

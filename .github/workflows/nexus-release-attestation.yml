@@ -3,8 +3,10 @@ name: NEXUS release attestation
 on:
   push:
     branches:
+      - main
       - codex/eo-exec-001-live-release
       - codex/runtime-readiness-contract-recovery
+      - codex/two-client-governed-voice
   workflow_dispatch:
 
 permissions:
@@ -63,7 +65,13 @@ jobs:
           cp -R dist/. "release/stage/dist/"
           cp docs/mission5/NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json "release/stage/"
           SOURCE_TREE="${source_tree}" NPM_VERSION="${npm_version}" node --input-type=module -e '
-            import { writeFileSync } from "node:fs";
+            import { readFileSync, writeFileSync } from "node:fs";
+            const html = readFileSync("dist/index.html", "utf8");
+            const javascript = [...html.matchAll(/<script[^>]+src="([^"]+\.js)"/g)].map(match => match[1]);
+            const stylesheets = [...html.matchAll(/<link[^>]+href="([^"]+\.css)"/g)].map(match => match[1]);
+            if (javascript.length !== 1 || stylesheets.length !== 1) {
+              throw new Error("release subject must contain exactly one authoritative JavaScript and stylesheet asset");
+            }
             const metadata = {
               recordType: "nexus_release_subject",
               schemaVersion: "nexus.release-subject@1.0.0",
@@ -73,8 +81,8 @@ jobs:
               sourceTree: process.env.SOURCE_TREE,
               nodeVersion: process.version,
               npmVersion: process.env.NPM_VERSION,
-              javascript: "/assets/index-UVpvI6wT.js",
-              stylesheet: "/assets/index-BIIqbpcf.css",
+              javascript: javascript[0],
+              stylesheet: stylesheets[0],
               sbom: "NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json",
               vulnerabilityGate: "zero_known_info_low_moderate_high_critical",
               secretValuesExposed: false

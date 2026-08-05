@@ -5,6 +5,11 @@ import type { CanonicalActionAvailability } from "../lib/portal-client";
 import {
   isVerifiedManualCommitStatus,
   RealtimeVoiceClient,
+  RUNTIME_REALTIME_CLIENT_PROFILE,
+  RUNTIME_REALTIME_CLIENT_PROFILE_HEADER,
+  RUNTIME_REALTIME_CONTRACT_HEADER,
+  RUNTIME_REALTIME_CONTRACT_VERSION,
+  type RealtimeActivationStep,
   type RealtimeManualCommitStatus,
   type RealtimeVoiceState,
 } from "../lib/realtime-voice-client";
@@ -85,6 +90,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
   const [error, setError] = useState<string | null>(null);
   const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [voiceState, setVoiceState] = useState<RealtimeVoiceState>("idle");
+  const [activationStep, setActivationStep] = useState<RealtimeActivationStep>("readiness");
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [nexusMuted, setNexusMuted] = useState(false);
   const nexusMutedRef = useRef(false);
@@ -109,7 +115,15 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
       assistantPresence.reset();
       return () => { liveClient.current?.stop(); assistantPresence.reset(); };
     }
-    void fetch("/api/runtime/realtime-voice", { credentials: "same-origin", headers: { Accept: "application/json", "Cache-Control": "no-cache" } })
+    void fetch("/api/runtime/realtime-voice", {
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-cache",
+        [RUNTIME_REALTIME_CONTRACT_HEADER]: RUNTIME_REALTIME_CONTRACT_VERSION,
+        [RUNTIME_REALTIME_CLIENT_PROFILE_HEADER]: RUNTIME_REALTIME_CLIENT_PROFILE,
+      },
+    })
       .then(async (response) => ({ response, body: await response.json() as { ok?: boolean; data?: RealtimeManualCommitStatus } }))
       .then(({ response, body }) => setVoiceAvailable(response.ok && Boolean(body.ok) && isVerifiedManualCommitStatus(body.data)))
       .catch(() => setVoiceAvailable(false));
@@ -241,6 +255,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     nexusMutedRef.current = false;
     const client = new RealtimeVoiceClient({
       onState: setVoiceState,
+      onActivationStep: setActivationStep,
       onAmplitude: setAmplitude,
       onUserTranscript: async (text, idempotencyKey) => {
         latestUserTranscript.current = text;
@@ -373,7 +388,8 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
     void ask(skill.prompt);
   }
 
-  const voiceConnected = !browserListening && !["idle", "error"].includes(voiceState);
+  const voiceConnected = !browserListening
+    && ["listening", "thinking", "speaking", "interrupted"].includes(voiceState);
   const browserSpeech = browserSpeechAvailability();
   const avatarState = deriveAssistantAvatarState({ voiceState, textBusy: busy || browserListening, hasError: Boolean(error) });
   const runtimeHealthy = runtimeState === "Healthy";
@@ -415,7 +431,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
             <button type="button" data-active={nexusMuted} aria-pressed={nexusMuted} onClick={toggleNexusMute}>{nexusMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}{nexusMuted ? "Unmute NEXUS" : "Mute NEXUS"}</button>
           </>}
           {voiceConnected ? <button onClick={stopVoice}><MicOff size={15} />End</button> : <>
-            {browserSpeech.input && <button onClick={() => void askByVoice()} disabled={!textAction.available || browserListening || busy}><Mic size={15} />{browserListening ? "Listening…" : "Ask by voice"}</button>}
+            {browserSpeech.input && <button onClick={() => void askByVoice()} disabled={!textAction.available || browserListening || busy} title="Continuity input only; this does not prove governed Realtime live voice readiness."><Mic size={15} />{browserListening ? "Listening…" : "Ask by voice (continuity)"}</button>}
             <button onClick={() => void startVoice()} disabled={!voiceAvailable || !realtimeAction.available || voiceState === "connecting"}><Mic size={15} />Start live</button>
           </>}
         </div>
@@ -427,6 +443,7 @@ export function NexusCopilot({ activeArea, activeLabel, runtimeState, onNavigate
           <span>{message.speaker === "nexus" ? "NEXUS" : "You"}</span><p>{message.text}</p>{message.limitation && <small>{message.limitation}</small>}
         </article>)}
         {busy && <div className="nexus-copilot__thinking"><i /><i /><i /><span>Reasoning over registered context</span></div>}
+        {voiceState === "connecting" && <p className="nexus-copilot__error" role="status">Voice activation: {activationStep.replaceAll("_", " ")}</p>}
         {error && <p className="nexus-copilot__error">{error}</p>}
       </div>
 

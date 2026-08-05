@@ -50,6 +50,14 @@ test("runtime information exposes discovery and preserved truth boundaries", asy
   }
 });
 
+test("voice readiness dimensions do not infer provider connectivity from a live client session", async () => {
+  const source = await read("../src/components/VoiceWorkspace.tsx");
+  assert.match(source, /status\?\.providerConnected === true \? "Yes — Runtime reported"/);
+  assert.match(source, /status\?\.providerConnected === false \? "No — Runtime reported" : "Not reported"/);
+  assert.doesNotMatch(source, /<dt>Provider connected<\/dt><dd>\{liveProof/);
+  assert.match(source, /<dt>Live connection established<\/dt><dd>\{connected && liveProof\?\.connectionState === "live"/);
+});
+
 test("connection lifecycle renders every required state", async () => {
   const [source, app, coordination] = await Promise.all([
     read("../src/components/RuntimeHealth.tsx"),
@@ -212,7 +220,7 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(realtime, /track\.enabled = !this\.microphoneMuted && !this\.turnProcessing/);
   assert.match(realtime, /setOutputMuted/);
   assert.doesNotMatch(realtime, /HTMLAudioElement|document\.createElement\(["']audio/);
-  assert.match(realtime, /attempted to attach output media to a transcription-only session/);
+  assert.match(realtime, /attempted to attach forbidden output audio/);
   assert.match(realtime, /onRuntimeResponse\(responseText\)/);
   assert.doesNotMatch(realtime, /type:\s*"response\.create"/);
   assert.doesNotMatch(realtime, /\.play\(/);

@@ -9,6 +9,12 @@ import type { CanonicalActionAvailability } from "../lib/portal-client";
 import {
   isVerifiedManualCommitStatus,
   RealtimeVoiceClient,
+  RUNTIME_REALTIME_CLIENT_PROFILE,
+  RUNTIME_REALTIME_CLIENT_PROFILE_HEADER,
+  RUNTIME_REALTIME_CONTRACT_HEADER,
+  RUNTIME_REALTIME_CONTRACT_VERSION,
+  type RealtimeActivationStep,
+  type RealtimeLiveProof,
   type RealtimeManualCommitStatus,
   type RealtimeVoiceState,
 } from "../lib/realtime-voice-client";
@@ -74,6 +80,8 @@ export function VoiceWorkspace({
   textAction: CanonicalActionAvailability;
 }) {
   const [voiceState, setVoiceState] = useState<RealtimeVoiceState>("idle");
+  const [activationStep, setActivationStep] = useState<RealtimeActivationStep>("readiness");
+  const [liveProof, setLiveProof] = useState<RealtimeLiveProof | null>(null);
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [nexusMuted, setNexusMuted] = useState(false);
   const nexusMutedRef = useRef(false);
@@ -130,7 +138,15 @@ export function VoiceWorkspace({
 
   async function refreshStatus() {
     try {
-      const response = await fetch("/api/runtime/realtime-voice", { credentials: "same-origin", headers: { Accept: "application/json", "Cache-Control": "no-cache" } });
+      const response = await fetch("/api/runtime/realtime-voice", {
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "Cache-Control": "no-cache",
+          [RUNTIME_REALTIME_CONTRACT_HEADER]: RUNTIME_REALTIME_CONTRACT_VERSION,
+          [RUNTIME_REALTIME_CLIENT_PROFILE_HEADER]: RUNTIME_REALTIME_CLIENT_PROFILE,
+        },
+      });
       const body = await response.json() as { ok?: boolean; data?: VoiceStatus; error?: { message?: string } };
       if (!response.ok || !body.ok || !body.data) throw new Error(body.error?.message ?? "Realtime voice status is unavailable.");
       setStatus(body.data);
@@ -205,11 +221,21 @@ export function VoiceWorkspace({
     setMessage(null);
     setAssistantTranscript("");
     latestUserTranscript.current = "";
+    setLiveProof(null);
+    setActivationStep("readiness");
     setMicrophoneMuted(false);
     setNexusMuted(false);
     nexusMutedRef.current = false;
     const client = new RealtimeVoiceClient({
-      onState: setVoiceState,
+      onState: (nextState) => {
+        setVoiceState(nextState);
+        if (nextState === "idle" || nextState === "error") setLiveProof(null);
+        if (nextState === "listening") {
+          setMessage("Live voice is connected with verified microphone, PCM capture, analyser, Gateway, and current-artifact receipt postconditions.");
+        }
+      },
+      onActivationStep: setActivationStep,
+      onLiveProof: setLiveProof,
       onAmplitude: setAmplitude,
       onUserTranscript: async (text, idempotencyKey) => {
         latestUserTranscript.current = text;
@@ -252,7 +278,6 @@ export function VoiceWorkspace({
     liveClient.current = client;
     try {
       await client.connect();
-      setMessage("Live voice is connected. Speak naturally; you can interrupt NEXUS at any time.");
     } catch (error) {
       setVoiceState("error");
       setMessage(messageFrom(error));
@@ -266,6 +291,7 @@ export function VoiceWorkspace({
     setMicrophoneMuted(false);
     setNexusMuted(false);
     nexusMutedRef.current = false;
+    setLiveProof(null);
     setMessage("Live voice session ended. No provider credential was stored in the browser.");
   }
 
@@ -402,11 +428,12 @@ export function VoiceWorkspace({
       </div>
       <div className="voice-text-fallback">
         <textarea value={transcript} onChange={(event) => { setTranscript(event.target.value); setPendingRequest((current) => current?.attempts === 0 && current.payload.historyAlreadyRecorded ? current : null); }} disabled={!textAction.available} placeholder={textAction.available ? "Or type a request for the governed Runtime Voice Operator" : "Runtime Voice Operator is unavailable"} autoComplete="off" />
-        {browserSpeech.input && <button onClick={() => void useBrowserMicrophone()} disabled={!textAction.available || busy || browserListening} title="Uses this browser's speech recognition, then submits the transcript through the governed Runtime Voice Operator"><Mic size={17} /> {browserListening ? "Listening…" : "Use browser microphone"}</button>}
+        {browserSpeech.input && <button onClick={() => void useBrowserMicrophone()} disabled={!textAction.available || busy || browserListening} title="Continuity input only; this does not prove governed Realtime live voice readiness."><Mic size={17} /> {browserListening ? "Listening…" : "Use browser microphone (continuity)"}</button>}
         {pendingRequest && <button onClick={() => void routeGovernedTranscript("", pendingRequest.payload.source, pendingRequest.payload.fallbackContext, pendingRequest.payload.historyAlreadyRecorded, pendingRequest)} disabled={!textAction.available || busy} title={textAction.available ? undefined : textAction.reason}><Send size={17} /> {pendingRequest.attempts === 0 ? "Send captured transcript through governed Voice" : "Retry exact governed Voice request"}</button>}
         <button onClick={() => void sendText()} disabled={!textAction.available || busy || !transcript.trim()}><Send size={17} /> Send text</button>
       </div>
-      <p className="boundary-note">{browserSpeech.input ? "Browser microphone fallback is available and bounded to 8 seconds." : "Browser speech recognition is unavailable; typed governed fallback remains available."} {browserSpeech.output ? "Browser speech playback can read the actual Runtime response aloud." : "Browser speech playback is unavailable; responses remain visible as text."}</p>
+      <p className="boundary-note">{browserSpeech.input ? "Browser microphone fallback is continuity-only, bounded to 8 seconds, and never proves governed Realtime live voice readiness." : "Browser speech recognition is unavailable; typed governed continuity remains available and does not prove live voice readiness."} {browserSpeech.output ? "Browser speech playback can read the actual Runtime response aloud." : "Browser speech playback is unavailable; responses remain visible as text."}</p>
+      {voiceState === "connecting" && <p className="workspace-message" role="status">Voice activation step: {displayLabel(activationStep)}</p>}
       {message && <p className="workspace-message" role="status">{message}</p>}
       <ExecutiveInteractionApproval
         admission={pendingApproval}
@@ -420,7 +447,14 @@ export function VoiceWorkspace({
 
     <DataPanel eyebrow="Voice system" title="Connection contract" icon={<Volume2 size={18} />}>
       <dl className="voice-facts">
-        <div><dt>Realtime provider</dt><dd>{liveProviderAvailable ? "Available" : "Unavailable"}</dd></div>
+        <div><dt>Runtime reachable</dt><dd>{status ? "Yes" : "No current proof"}</dd></div>
+        <div><dt>Runtime ready</dt><dd>Evaluated separately; not inferred from voice status</dd></div>
+        <div><dt>Voice contract ready</dt><dd>{manualCommitVerified ? `${RUNTIME_REALTIME_CONTRACT_VERSION} verified` : "No"}</dd></div>
+        <div><dt>Provider connected</dt><dd>{status?.providerConnected === true ? "Yes — Runtime reported" : status?.providerConnected === false ? "No — Runtime reported" : "Not reported"}</dd></div>
+        <div><dt>Production ready</dt><dd>Evaluated separately; not inferred from voice status</dd></div>
+        <div><dt>Live connection established</dt><dd>{connected && liveProof?.connectionState === "live" ? "Yes" : "No"}</dd></div>
+        <div><dt>Current artifact receipt</dt><dd>{liveProof ? "Verified for this session" : status?.providerConnectionVerifiedForCurrentArtifact ? "Historical current-artifact proof only" : "No proof"}</dd></div>
+        <div><dt>Realtime provider</dt><dd>{liveProviderAvailable ? "Available for activation" : "Unavailable"}</dd></div>
         <div><dt>Provider / model</dt><dd>{status?.provider && status?.model ? `${status.provider} · ${status.model}` : "Not reported"}</dd></div>
         <div><dt>Voice / transport</dt><dd>{status?.voice && status?.transport ? `${status.voice} · ${status.transport}` : "Not reported"}</dd></div>
         <div><dt>Browser capture</dt><dd>{supported ? "Secure WebRTC capture supported" : "Unavailable in this browser"}</dd></div>

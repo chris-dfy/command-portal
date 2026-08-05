@@ -11,6 +11,22 @@ export type RealtimeVoiceState = "idle" | "connecting" | "listening" | "thinking
 export const RUNTIME_PROMPT_ECHO_HEADER = "X-NEXUS-Prompt-Echo-Signature";
 export const RUNTIME_REALTIME_INPUT_MODE_HEADER = "X-NEXUS-Realtime-Input-Mode";
 export const RUNTIME_REALTIME_INPUT_MODE = "client-pcm-append-commit-v1";
+export const RUNTIME_REALTIME_CONTRACT_HEADER = "X-NEXUS-Realtime-Contract-Version";
+export const RUNTIME_REALTIME_CONTRACT_VERSION = "nexus.realtime-voice@2.0.0";
+export const RUNTIME_REALTIME_CLIENT_PROFILE_HEADER = "X-NEXUS-Realtime-Client-Profile";
+export const RUNTIME_REALTIME_CLIENT_PROFILE = "trackless-pcm-transcription-v1";
+export const RUNTIME_REALTIME_ARTIFACT_IDENTITY_HEADER = "X-NEXUS-Artifact-Identity-Digest";
+export const RUNTIME_REALTIME_RECEIPT_DIGEST_HEADER = "X-NEXUS-Realtime-Receipt-Digest";
+
+export type RealtimeActivationStep =
+  | "readiness"
+  | "get_user_media"
+  | "pcm_capture"
+  | "analyser_gate"
+  | "offer"
+  | "gateway_post"
+  | "remote_description"
+  | "live";
 
 export type RealtimeTranscriptAdmission =
   | { admitted: true; spokenSummary: string }
@@ -21,8 +37,27 @@ export type RealtimeVoiceErrorContext = {
   retryProhibited?: boolean;
 };
 
+export type RealtimeLiveProof = {
+  contractVersion: typeof RUNTIME_REALTIME_CONTRACT_VERSION;
+  transportProfile: typeof RUNTIME_REALTIME_CLIENT_PROFILE;
+  artifactIdentityDigest: string;
+  receiptDigest: string;
+  connectionState: "live";
+  microphoneTrackLive: true;
+  pcmCaptureActive: true;
+  pcmSamplesObserved: true;
+  analyserGateActive: true;
+  providerAudioTransceiverDirection: "inactive";
+  providerAudioSenderTrackAttached: false;
+  remoteAudioTrackObserved: false;
+};
+
 export type RealtimeManualCommitStatus = {
   state?: string;
+  contractVersion?: string;
+  transportProfile?: string;
+  supportedClientProfiles?: string[];
+  preActivationNegotiationRequired?: boolean;
   serverVAD?: boolean;
   clientAudioAppendRequired?: boolean;
   inputAudioAppendEvent?: string;
@@ -31,10 +66,18 @@ export type RealtimeManualCommitStatus = {
   providerOfferAudioDirection?: string;
   providerOfferAudioTrackAttached?: boolean;
   rtpAudioNegotiated?: boolean;
+  artifactIdentity?: { identityDigest?: string };
+  providerConnected?: boolean;
+  providerConnectionVerifiedForCurrentArtifact?: boolean;
 };
 
 export function isVerifiedManualCommitStatus(status: RealtimeManualCommitStatus | null | undefined): boolean {
   return status?.state === "available"
+    && status.contractVersion === RUNTIME_REALTIME_CONTRACT_VERSION
+    && status.transportProfile === RUNTIME_REALTIME_CLIENT_PROFILE
+    && Array.isArray(status.supportedClientProfiles)
+    && status.supportedClientProfiles.includes(RUNTIME_REALTIME_CLIENT_PROFILE)
+    && status.preActivationNegotiationRequired === true
     && status.serverVAD === false
     && status.clientAudioAppendRequired === true
     && status.inputAudioAppendEvent === "input_audio_buffer.append"
@@ -42,7 +85,8 @@ export function isVerifiedManualCommitStatus(status: RealtimeManualCommitStatus 
     && status.inputAudioCommitEvent === "input_audio_buffer.commit"
     && status.providerOfferAudioDirection === "inactive"
     && status.providerOfferAudioTrackAttached === false
-    && status.rtpAudioNegotiated === false;
+    && status.rtpAudioNegotiated === false
+    && /^sha256:[0-9a-f]{64}$/.test(status.artifactIdentity?.identityDigest ?? "");
 }
 
 export type RealtimeVoiceCallbacks = {
@@ -53,6 +97,10 @@ export type RealtimeVoiceCallbacks = {
   /** Narrate only the Runtime-returned response after current-turn admission. */
   onRuntimeResponse: (responseText: string) => void;
   onError: (message: string, context?: RealtimeVoiceErrorContext) => void;
+  /** Bounded, non-secret pre-activation diagnostics for release and support proof. */
+  onActivationStep?: (step: RealtimeActivationStep) => void;
+  /** Emitted only after every governed transport and audio postcondition is true. */
+  onLiveProof?: (proof: RealtimeLiveProof) => void;
 };
 
 type RealtimeEvent = {
@@ -203,6 +251,24 @@ const normalizeTranscript = (value: string) => value
 const REALTIME_ITEM_ID_PATTERN = /^[A-Za-z0-9._:-]{1,200}$/;
 const MAXIMUM_SESSION_TURNS = 128;
 const MAXIMUM_IDLE_BUFFER_MS = 4_000;
+const ACTIVATION_TIMEOUT_MS = 15_000;
+const SAFE_REALTIME_REASON_CODE = /^[a-z][a-z0-9_]{0,79}$/;
+const SAFE_REALTIME_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+export function tracklessRealtimeOfferIsValid(sdp: string): boolean {
+  const normalized = sdp.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!normalized.trimStart().startsWith("v=0")) return false;
+  const sections = normalized.split(/\nm=/).slice(1).map((section) => `m=${section}`);
+  const audio = sections.filter((section) => section.startsWith("m=audio "));
+  const application = sections.filter((section) => section.startsWith("m=application "));
+  if (sections.length !== 2 || audio.length !== 1 || application.length !== 1) return false;
+  const audioPort = audio[0].split(/\s+/, 2)[1] ?? "";
+  const directions = audio[0].match(/^a=(?:inactive|sendrecv|sendonly|recvonly)$/gm) ?? [];
+  return audioPort !== "" && audioPort !== "0"
+    && directions.length === 1
+    && directions[0] === "a=inactive"
+    && !/^a=(?:msid|ssrc):/m.test(audio[0]);
+}
 
 export function runtimePromptEchoSignatureFromHeaders(headers: Pick<Headers, "get">): string | null {
   const value = headers.get(RUNTIME_PROMPT_ECHO_HEADER)?.trim() ?? "";
@@ -251,15 +317,26 @@ function isProviderOutputEvent(type: string): boolean {
 export class RealtimeVoiceClient {
   private readonly callbacks: RealtimeVoiceCallbacks;
   private peer: RTCPeerConnection | null = null;
+  private providerAudioTransceiver: RTCRtpTransceiver | null = null;
   private channel: RTCDataChannel | null = null;
   private stream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
   private pcmCapture: RealtimePcmCapture | null = null;
   private animationFrame: number | null = null;
+  private activationTimer: ReturnType<typeof setTimeout> | null = null;
+  private activationAttempt = 0;
   private microphoneMuted = false;
   private transportReady = false;
   private promptEchoSignature: string | null = null;
   private realtimeInputModeAttested = false;
+  private contractAttested = false;
+  private artifactIdentityDigest: string | null = null;
+  private receiptDigest: string | null = null;
+  private channelOpen = false;
+  private pcmSamplesObserved = false;
+  private analyserFrameObserved = false;
+  private remoteAudioTrackObserved = false;
+  private activationStep: RealtimeActivationStep = "readiness";
   private turnProcessing = false;
   private canonicalAdmissionInFlight = false;
   private stoppedDuringCanonicalAdmission = false;
@@ -287,12 +364,26 @@ export class RealtimeVoiceClient {
 
   async connect() {
     if (!RealtimeVoiceClient.supported()) throw new Error("This browser does not support secure live voice sessions.");
+    const activationAttempt = ++this.activationAttempt;
     this.callbacks.onState("connecting");
+    this.markActivationStep("readiness");
+    this.activationTimer = globalThis.setTimeout(() => {
+      if (activationAttempt !== this.activationAttempt || this.transportReady) return;
+      const step = this.activationStep;
+      this.stop();
+      this.fail(`Realtime activation timed out at ${step}.`);
+    }, ACTIVATION_TIMEOUT_MS);
     try {
       const statusResponse = await fetch("/api/runtime/realtime-voice", {
         credentials: "same-origin",
-        headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+        headers: {
+          Accept: "application/json",
+          "Cache-Control": "no-cache",
+          [RUNTIME_REALTIME_CONTRACT_HEADER]: RUNTIME_REALTIME_CONTRACT_VERSION,
+          [RUNTIME_REALTIME_CLIENT_PROFILE_HEADER]: RUNTIME_REALTIME_CLIENT_PROFILE,
+        },
       });
+      this.assertActivationCurrent(activationAttempt);
       if (statusResponse.status === 401) window.dispatchEvent(new Event(OPERATIONAL_SESSION_INVALID_EVENT));
       let statusBody: {
         ok?: boolean;
@@ -301,6 +392,7 @@ export class RealtimeVoiceClient {
       };
       try {
         statusBody = await statusResponse.json() as typeof statusBody;
+        this.assertActivationCurrent(activationAttempt);
       } catch {
         throw new Error("NEXUS Runtime returned an invalid Realtime voice status contract.");
       }
@@ -310,100 +402,174 @@ export class RealtimeVoiceClient {
           ?? "NEXUS Runtime has not verified the required ordered PCM append/commit contract.",
         );
       }
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      this.markActivationStep("get_user_media");
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
       });
+      if (activationAttempt !== this.activationAttempt) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error("Realtime activation was superseded before microphone admission.");
+      }
+      this.stream = stream;
+      const microphoneTrack = stream.getAudioTracks()[0];
+      if (
+        !microphoneTrack
+        || microphoneTrack.readyState !== "live"
+        || stream.getAudioTracks().length !== 1
+      ) {
+        throw new Error("Browser microphone capture did not produce exactly one live audio track.");
+      }
       this.applyMicrophoneMute();
-      await this.startAmplitudeMeter(this.stream);
-      this.pcmCapture = await createRealtimePcmCapture(this.stream, (samples) => {
+      this.markActivationStep("pcm_capture");
+      const pcmCapture = await createRealtimePcmCapture(stream, (samples) => {
+        this.pcmSamplesObserved = true;
+        this.maybeActivateLive();
         if (this.microphoneMuted || this.turnProcessing) return;
         if (this.pcmTurns.acceptSamples(samples)) return;
         this.stop();
         this.fail("Realtime PCM audio could not be appended to the governed provider turn.");
       });
+      if (activationAttempt !== this.activationAttempt) {
+        pcmCapture.stop();
+        throw new Error("Realtime activation was superseded during PCM capture.");
+      }
+      this.pcmCapture = pcmCapture;
+      this.markActivationStep("analyser_gate");
+      await this.startAmplitudeMeter(stream);
+      this.assertActivationCurrent(activationAttempt);
 
       const peer = new RTCPeerConnection();
       this.peer = peer;
       peer.ontrack = (event) => {
+        if (event.track.kind !== "audio") return;
+        this.remoteAudioTrackObserved = true;
         event.track.stop();
         event.streams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
         this.stop();
-        this.fail("Realtime provider attempted to attach output media to a transcription-only session.");
+        this.fail("Realtime provider attempted to attach forbidden output audio.");
       };
       peer.onconnectionstatechange = () => {
         if (["failed", "disconnected"].includes(peer.connectionState)) {
           this.stop();
           this.fail("The live voice connection was interrupted.");
+          return;
         }
+        this.maybeActivateLive();
       };
       const inactiveAudioTransceiver = peer.addTransceiver("audio", { direction: "inactive" });
+      this.providerAudioTransceiver = inactiveAudioTransceiver;
       if (inactiveAudioTransceiver.direction !== "inactive" || inactiveAudioTransceiver.sender.track !== null) {
         throw new Error("Realtime provider compatibility media must remain inactive and trackless.");
       }
-      const channel = peer.createDataChannel("oai-events");
+      const channel = peer.createDataChannel("oai-events", { ordered: true });
       this.channel = channel;
       channel.addEventListener("message", (event) => this.handleEvent(event.data));
       channel.addEventListener("open", () => {
-        if (!this.promptEchoSignature || !this.realtimeInputModeAttested) {
+        if (!this.promptEchoSignature || !this.realtimeInputModeAttested || !this.contractAttested) {
           this.stop();
-          this.fail("Realtime transport opened without the governed manual-commit admission boundary.");
+          this.fail("Realtime transport opened without the governed negotiated admission boundary.");
           return;
         }
-        this.transportReady = true;
-        this.idleBufferClearedAtMs = null;
-        this.speechTurnSegmenter.reset();
-        if (!this.pcmTurns.clearProviderBuffer()) {
-          this.stop();
-          this.fail("Realtime ordered PCM transport could not initialize.");
-          return;
-        }
-        this.callbacks.onState("listening");
+        this.channelOpen = true;
+        this.maybeActivateLive();
       });
       channel.addEventListener("close", () => {
+        this.channelOpen = false;
         this.transportReady = false;
         if (this.peer) this.callbacks.onState("idle");
       });
 
+      this.markActivationStep("offer");
       const offer = await peer.createOffer();
+      this.assertActivationCurrent(activationAttempt);
+      if (!offer.sdp || !tracklessRealtimeOfferIsValid(offer.sdp)) {
+        throw new Error("Browser WebRTC offer violated the inactive trackless audio contract.");
+      }
       await peer.setLocalDescription(offer);
+      this.assertActivationCurrent(activationAttempt);
+      this.markActivationStep("gateway_post");
       const response = await fetch("/api/runtime/realtime/call", {
         method: "POST",
         credentials: "same-origin",
         headers: {
           Accept: "application/sdp",
           "Content-Type": "application/sdp",
+          [RUNTIME_REALTIME_CONTRACT_HEADER]: RUNTIME_REALTIME_CONTRACT_VERSION,
+          [RUNTIME_REALTIME_CLIENT_PROFILE_HEADER]: RUNTIME_REALTIME_CLIENT_PROFILE,
           ...operationalSessionClient.hostedMutationHeaders(),
         },
         body: offer.sdp,
       });
+      this.assertActivationCurrent(activationAttempt);
       if (!response.ok) {
         if (response.status === 401) window.dispatchEvent(new Event(OPERATIONAL_SESSION_INVALID_EVENT));
-        let message = `Live voice session could not start (${response.status}).`;
+        let reasonCode = "realtime_call_failed";
+        let requestId = response.headers.get("x-request-id") ?? "";
         try {
-          const body = await response.json() as { error?: { message?: string } };
-          if (body.error?.message) message = body.error.message;
-        } catch { /* retain the bounded message */ }
-        throw new Error(message);
+          const body = await response.json() as {
+            error?: { code?: string; reasonCode?: string; requestId?: string };
+          };
+          const candidateReason = body.error?.reasonCode || body.error?.code || "";
+          if (SAFE_REALTIME_REASON_CODE.test(candidateReason)) reasonCode = candidateReason;
+          if (body.error?.requestId) requestId = body.error.requestId;
+        } catch { /* retain the bounded diagnostics */ }
+        const request = SAFE_REALTIME_REQUEST_ID.test(requestId)
+          ? ` Request ID: ${requestId}.`
+          : "";
+        throw new Error(`Live voice session could not start. Reason: ${reasonCode}.${request}`);
       }
       const answer = await response.text();
+      this.assertActivationCurrent(activationAttempt);
       if (!answer.trimStart().startsWith("v=0")) throw new Error("Live voice session returned an invalid connection response.");
       const promptEchoSignature = runtimePromptEchoSignatureFromHeaders(response.headers);
       if (!promptEchoSignature) throw new Error("NEXUS Runtime omitted the governed Realtime transcript-admission boundary.");
       const realtimeInputMode = runtimeRealtimeInputModeFromHeaders(response.headers);
       if (!realtimeInputMode) throw new Error("NEXUS Runtime did not attest the exact ordered PCM append/commit mode for this call.");
+      const negotiatedContract = response.headers.get(RUNTIME_REALTIME_CONTRACT_HEADER) ?? "";
+      const negotiatedProfile = response.headers.get(RUNTIME_REALTIME_CLIENT_PROFILE_HEADER) ?? "";
+      const artifactIdentityDigest = response.headers.get(RUNTIME_REALTIME_ARTIFACT_IDENTITY_HEADER) ?? "";
+      const receiptDigest = response.headers.get(RUNTIME_REALTIME_RECEIPT_DIGEST_HEADER) ?? "";
+      if (
+        negotiatedContract !== RUNTIME_REALTIME_CONTRACT_VERSION
+        || negotiatedProfile !== RUNTIME_REALTIME_CLIENT_PROFILE
+      ) {
+        throw new Error("NEXUS Runtime did not attest the negotiated Realtime client contract.");
+      }
+      if (
+        !/^sha256:[0-9a-f]{64}$/.test(artifactIdentityDigest)
+        || !/^sha256:[0-9a-f]{64}$/.test(receiptDigest)
+      ) {
+        throw new Error("NEXUS Runtime omitted the current-artifact Realtime receipt binding.");
+      }
       this.promptEchoSignature = promptEchoSignature;
       this.realtimeInputModeAttested = true;
+      this.contractAttested = true;
+      this.artifactIdentityDigest = artifactIdentityDigest;
+      this.receiptDigest = receiptDigest;
+      this.markActivationStep("remote_description");
       await peer.setRemoteDescription({ type: "answer", sdp: answer });
+      this.assertActivationCurrent(activationAttempt);
+      this.maybeActivateLive();
     } catch (error) {
       this.stop();
-      throw error;
+      const message = error instanceof Error
+        ? error.message
+        : "NEXUS Runtime could not establish the governed Realtime session.";
+      throw new Error(`${message} Activation step: ${this.activationStep}.`);
     }
   }
 
   stop() {
+    this.activationAttempt += 1;
     const preserveCanonicalAdmission = this.canonicalAdmissionInFlight
       && this.turnAdmissions.activeTurnKey() !== null;
     this.transportReady = false;
+    this.channelOpen = false;
+    this.pcmSamplesObserved = false;
+    this.analyserFrameObserved = false;
+    this.remoteAudioTrackObserved = false;
+    if (this.activationTimer !== null) globalThis.clearTimeout(this.activationTimer);
+    this.activationTimer = null;
     if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
     this.animationFrame = null;
     this.stream?.getTracks().forEach((track) => track.stop());
@@ -415,10 +581,14 @@ export class RealtimeVoiceClient {
     this.channel = null;
     this.peer?.close();
     this.peer = null;
+    this.providerAudioTransceiver = null;
     void this.audioContext?.close();
     this.audioContext = null;
     this.promptEchoSignature = null;
     this.realtimeInputModeAttested = false;
+    this.contractAttested = false;
+    this.artifactIdentityDigest = null;
+    this.receiptDigest = null;
     if (preserveCanonicalAdmission) {
       this.stoppedDuringCanonicalAdmission = true;
     } else {
@@ -492,7 +662,7 @@ export class RealtimeVoiceClient {
     }
     if (isProviderOutputEvent(type)) {
       this.stop();
-      this.fail(`Realtime provider emitted forbidden output event ${type || "(missing type)"}.`);
+      this.fail("Realtime provider emitted a forbidden output event.");
       return;
     }
     switch (type) {
@@ -512,7 +682,7 @@ export class RealtimeVoiceClient {
       case "conversation.item.input_audio_transcription.failed":
       case "error":
         this.stop();
-        this.fail(event.error?.message || "The live transcription provider reported an error.");
+        this.fail("The live transcription provider reported a bounded protocol failure. Reason: realtime_provider_error.");
         break;
       default:
         // Session, rate-limit, buffer-commit, and transcription-delta events
@@ -681,6 +851,65 @@ export class RealtimeVoiceClient {
     this.callbacks.onError(protectedMessage, protectedContext);
   }
 
+  private markActivationStep(step: RealtimeActivationStep) {
+    this.activationStep = step;
+    this.callbacks.onActivationStep?.(step);
+  }
+
+  private assertActivationCurrent(attempt: number) {
+    if (attempt !== this.activationAttempt) {
+      throw new Error("Realtime activation was superseded or stopped before live admission.");
+    }
+  }
+
+  private maybeActivateLive() {
+    if (this.transportReady) return;
+    const track = this.stream?.getAudioTracks()[0];
+    if (
+      this.peer?.connectionState !== "connected"
+      || !this.channelOpen
+      || this.channel?.readyState !== "open"
+      || track?.readyState !== "live"
+      || !this.pcmCapture
+      || !this.pcmSamplesObserved
+      || !this.analyserFrameObserved
+      || this.providerAudioTransceiver?.currentDirection !== "inactive"
+      || this.providerAudioTransceiver.sender.track !== null
+      || this.remoteAudioTrackObserved
+      || !this.promptEchoSignature
+      || !this.realtimeInputModeAttested
+      || !this.contractAttested
+      || !this.artifactIdentityDigest
+      || !this.receiptDigest
+    ) return;
+    this.transportReady = true;
+    if (this.activationTimer !== null) globalThis.clearTimeout(this.activationTimer);
+    this.activationTimer = null;
+    this.idleBufferClearedAtMs = null;
+    this.speechTurnSegmenter.reset();
+    if (!this.pcmTurns.clearProviderBuffer()) {
+      this.stop();
+      this.fail("Realtime ordered PCM transport could not initialize.");
+      return;
+    }
+    this.markActivationStep("live");
+    this.callbacks.onLiveProof?.({
+      contractVersion: RUNTIME_REALTIME_CONTRACT_VERSION,
+      transportProfile: RUNTIME_REALTIME_CLIENT_PROFILE,
+      artifactIdentityDigest: this.artifactIdentityDigest,
+      receiptDigest: this.receiptDigest,
+      connectionState: "live",
+      microphoneTrackLive: true,
+      pcmCaptureActive: true,
+      pcmSamplesObserved: true,
+      analyserGateActive: true,
+      providerAudioTransceiverDirection: "inactive",
+      providerAudioSenderTrackAttached: false,
+      remoteAudioTrackObserved: false,
+    });
+    this.callbacks.onState("listening");
+  }
+
   private processAmplitudeSample(amplitude: number, observedAtMs: number) {
     this.callbacks.onAmplitude(this.microphoneMuted || this.turnProcessing ? 0 : amplitude);
     if (!this.transportReady || this.microphoneMuted || this.turnProcessing) {
@@ -777,6 +1006,8 @@ export class RealtimeVoiceClient {
       analyser.getByteFrequencyData(values);
       const mean = values.reduce((sum, value) => sum + value, 0) / (values.length * 255);
       const amplitude = Math.min(1, mean * 3.2);
+      this.analyserFrameObserved = true;
+      this.maybeActivateLive();
       this.processAmplitudeSample(amplitude, performance.now());
       this.animationFrame = requestAnimationFrame(update);
     };

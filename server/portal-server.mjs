@@ -87,6 +87,12 @@ export const CONTEXT_ASSERTION_ALGORITHM = "hmac-sha256";
 export const REALTIME_PROMPT_ECHO_HEADER = "X-NEXUS-Prompt-Echo-Signature";
 export const REALTIME_INPUT_MODE_HEADER = "X-NEXUS-Realtime-Input-Mode";
 export const REALTIME_INPUT_MODE = "client-pcm-append-commit-v1";
+export const REALTIME_CONTRACT_HEADER = "X-NEXUS-Realtime-Contract-Version";
+export const REALTIME_CONTRACT_VERSION = "nexus.realtime-voice@2.0.0";
+export const REALTIME_CLIENT_PROFILE_HEADER = "X-NEXUS-Realtime-Client-Profile";
+export const REALTIME_CLIENT_PROFILE = "trackless-pcm-transcription-v1";
+export const REALTIME_ARTIFACT_IDENTITY_HEADER = "X-NEXUS-Artifact-Identity-Digest";
+export const REALTIME_RECEIPT_DIGEST_HEADER = "X-NEXUS-Realtime-Receipt-Digest";
 const CONTEXT_ASSERTION_AUDIENCE = "nexus-runtime";
 const CONTEXT_ASSERTION_ISSUER = "command-portal-experience-gateway";
 const CONTEXT_ASSERTION_KEY_ID = "context-assertion-command-portal-v1";
@@ -1278,6 +1284,18 @@ function boundedRetryAfterMs(value) {
   return Math.min(seconds * 1_000, 120_000);
 }
 
+function boundedRealtimeReasonCode(value, fallback = "realtime_failed") {
+  const normalized = String(value ?? "").trim();
+  return /^[a-z][a-z0-9_]{0,79}$/.test(normalized) ? normalized : fallback;
+}
+
+function boundedRealtimeRequestId(value) {
+  const normalized = String(value ?? "").trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(normalized)
+    ? normalized
+    : null;
+}
+
 function structuredLog(event, fields = {}) {
   console.log(JSON.stringify({ timestamp: nowIso(), event, ...fields }));
 }
@@ -1998,6 +2016,40 @@ async function readRawBody(request, maximumBytes, contentType) {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
+}
+
+export function realtimeOfferMatchesTracklessProfile(value) {
+  const normalized = Buffer.isBuffer(value)
+    ? value.toString("utf8").replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+    : String(value ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!normalized.trimStart().startsWith("v=0")) return false;
+  const sections = normalized.split(/\nm=/).slice(1).map((section) => `m=${section}`);
+  const audio = sections.filter((section) => section.startsWith("m=audio "));
+  const application = sections.filter((section) => section.startsWith("m=application "));
+  if (sections.length !== 2 || audio.length !== 1 || application.length !== 1) return false;
+  const audioPort = audio[0].split(/\s+/, 2)[1] ?? "";
+  const directions = audio[0].match(/^a=(?:inactive|sendrecv|sendonly|recvonly)$/gm) ?? [];
+  return audioPort !== "" && audioPort !== "0"
+    && directions.length === 1
+    && directions[0] === "a=inactive"
+    && !/^a=(?:msid|ssrc):/m.test(audio[0]);
+}
+
+export function realtimeAnswerMatchesTracklessProfile(value) {
+  const normalized = Buffer.isBuffer(value)
+    ? value.toString("utf8").replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+    : String(value ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!normalized.trimStart().startsWith("v=0")) return false;
+  const sections = normalized.split(/\nm=/).slice(1).map((section) => `m=${section}`);
+  const audio = sections.filter((section) => section.startsWith("m=audio "));
+  const application = sections.filter((section) => section.startsWith("m=application "));
+  if (sections.length !== audio.length + application.length || audio.length > 1 || application.length !== 1) return false;
+  if (audio.length === 0) return true;
+  const audioPort = audio[0].split(/\s+/, 2)[1] ?? "";
+  const directions = audio[0].match(/^a=(?:inactive|sendrecv|sendonly|recvonly)$/gm) ?? [];
+  if (/^a=(?:msid|ssrc):/m.test(audio[0])) return false;
+  return audioPort === "0"
+    || (directions.length === 1 && directions[0] === "a=inactive");
 }
 
 function strictKeys(payload, allowed) {
@@ -4518,6 +4570,35 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
   if (config.operationalEnabled && !sessionAuthority.csrfValid(request, claims)) {
     return sendJson(response, 403, { ok: false, error: { code: "csrf_invalid", message: "CSRF verification failed." }, truth: TRUTH });
   }
+  const requestedContract = String(
+    request.headers[REALTIME_CONTRACT_HEADER.toLowerCase()] ?? "",
+  ).trim();
+  const requestedProfile = String(
+    request.headers[REALTIME_CLIENT_PROFILE_HEADER.toLowerCase()] ?? "",
+  ).trim();
+  if (!requestedContract || !requestedProfile) {
+    return sendJson(response, 428, {
+      ok: false,
+      error: {
+        code: "realtime_contract_required",
+        message: "A versioned Realtime client contract and transport profile are required.",
+      },
+      truth: TRUTH,
+    });
+  }
+  if (
+    requestedContract !== REALTIME_CONTRACT_VERSION
+    || requestedProfile !== REALTIME_CLIENT_PROFILE
+  ) {
+    return sendJson(response, 409, {
+      ok: false,
+      error: {
+        code: "realtime_contract_incompatible",
+        message: "The browser and Runtime Realtime transport contracts are incompatible.",
+      },
+      truth: TRUTH,
+    });
+  }
   const alias = resolveGatewayRuntimeActionAlias("POST", url.pathname);
   const admission = await ensureRuntimeActionAdmission(
     alias,
@@ -4541,10 +4622,18 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
     const failure = error instanceof GatewayFailure ? error : new GatewayFailure("invalid_sdp", "Realtime session offer is invalid.", "Unknown", 400);
     return sendJson(response, failure.status, { ok: false, error: { code: failure.code, message: failure.message }, truth: TRUTH });
   }
-  if (!offer.toString("utf8").trimStart().startsWith("v=0")) {
-    return sendJson(response, 400, { ok: false, error: { code: "invalid_sdp", message: "Realtime session offer is not valid SDP." }, truth: TRUTH });
+  if (!realtimeOfferMatchesTracklessProfile(offer)) {
+    return sendJson(response, 409, {
+      ok: false,
+      error: {
+        code: "realtime_offer_incompatible",
+        message: "Realtime SDP does not match the inactive trackless transport profile.",
+      },
+      truth: TRUTH,
+    });
   }
 
+  const gatewayRequestId = randomUUID();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.realtimeTimeoutMs);
   try {
@@ -4557,6 +4646,9 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
           Accept: "application/sdp",
           "Content-Type": "application/sdp",
           Authorization: `Bearer ${config.runtimeToken}`,
+          "X-Request-ID": gatewayRequestId,
+          [REALTIME_CONTRACT_HEADER]: requestedContract,
+          [REALTIME_CLIENT_PROFILE_HEADER]: requestedProfile,
           ...(assertion ? { "X-NEXUS-Context-Assertion": assertion } : {})
         },
         body: offer,
@@ -4569,19 +4661,33 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
     }
     if ([401, 403].includes(upstream.status)) throw new GatewayFailure("runtime_unauthorized", "Runtime rejected the server credential.", "Unauthorized", 502);
     if (!upstream.ok) {
-      let message = "Runtime could not create the Realtime voice session.";
+      let reasonCode = "realtime_upstream_failed";
       try {
         const body = await upstream.json();
-        if (typeof body?.error?.message === "string") message = body.error.message.slice(0, 300);
-      } catch { /* keep the safe message */ }
-      throw new GatewayFailure("realtime_unavailable", message, "Unavailable", upstream.status >= 500 ? 503 : 502);
+        reasonCode = boundedRealtimeReasonCode(
+          body?.error?.code ?? body?.reason,
+          reasonCode,
+        );
+      } catch { /* retain the bounded reason code */ }
+      throw new GatewayFailure(
+        "realtime_unavailable",
+        "Runtime could not create the Realtime voice session.",
+        "Unavailable",
+        upstream.status >= 500 ? 503 : 502,
+        false,
+        {
+          reasonCode,
+          requestId: boundedRealtimeRequestId(upstream.headers.get("x-request-id"))
+            ?? gatewayRequestId,
+        },
+      );
     }
     if (!String(upstream.headers.get("content-type") ?? "").toLowerCase().startsWith("application/sdp")) {
       throw new GatewayFailure("realtime_response_invalid", "Runtime returned an invalid Realtime response.", "Unknown", 502);
     }
     const answer = Buffer.from(await upstream.arrayBuffer());
-    if (answer.byteLength > 262_144 || !answer.toString("utf8").trimStart().startsWith("v=0")) {
-      throw new GatewayFailure("realtime_response_invalid", "Runtime returned an invalid Realtime response.", "Unknown", 502);
+    if (answer.byteLength > 262_144 || !realtimeAnswerMatchesTracklessProfile(answer)) {
+      throw new GatewayFailure("realtime_response_invalid", "Runtime response violated the inactive trackless Realtime profile.", "Unknown", 502);
     }
     const promptEchoSignature = upstream.headers.get(REALTIME_PROMPT_ECHO_HEADER)?.trim() ?? "";
     if (!promptEchoSignature || promptEchoSignature.length > 512 || !/^[\x20-\x7e]+$/.test(promptEchoSignature)) {
@@ -4601,6 +4707,32 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
         502,
       );
     }
+    const negotiatedContract = upstream.headers.get(REALTIME_CONTRACT_HEADER) ?? "";
+    const negotiatedProfile = upstream.headers.get(REALTIME_CLIENT_PROFILE_HEADER) ?? "";
+    if (
+      negotiatedContract !== requestedContract
+      || negotiatedProfile !== requestedProfile
+    ) {
+      throw new GatewayFailure(
+        "realtime_contract_incompatible",
+        "Runtime did not attest the requested Realtime contract and transport profile.",
+        "Unavailable",
+        409,
+      );
+    }
+    const artifactIdentityDigest = upstream.headers.get(REALTIME_ARTIFACT_IDENTITY_HEADER) ?? "";
+    const receiptDigest = upstream.headers.get(REALTIME_RECEIPT_DIGEST_HEADER) ?? "";
+    if (
+      !/^sha256:[0-9a-f]{64}$/.test(artifactIdentityDigest)
+      || !/^sha256:[0-9a-f]{64}$/.test(receiptDigest)
+    ) {
+      throw new GatewayFailure(
+        "realtime_response_invalid",
+        "Runtime omitted the current-artifact Realtime receipt binding.",
+        "Unknown",
+        502,
+      );
+    }
     structuredLog("experience_gateway_realtime_session", { route: url.pathname, status: upstream.status });
     response.writeHead(upstream.status, {
       "Content-Type": "application/sdp",
@@ -4609,11 +4741,32 @@ async function handleRealtimeCall(request, response, config, runtimeFetch, sessi
       "X-Content-Type-Options": "nosniff",
       [REALTIME_PROMPT_ECHO_HEADER]: promptEchoSignature,
       [REALTIME_INPUT_MODE_HEADER]: realtimeInputMode,
+      [REALTIME_CONTRACT_HEADER]: negotiatedContract,
+      [REALTIME_CLIENT_PROFILE_HEADER]: negotiatedProfile,
+      [REALTIME_ARTIFACT_IDENTITY_HEADER]: artifactIdentityDigest,
+      [REALTIME_RECEIPT_DIGEST_HEADER]: receiptDigest,
+      "X-Request-ID": boundedRealtimeRequestId(upstream.headers.get("x-request-id"))
+        ?? gatewayRequestId,
     });
     return response.end(answer);
   } catch (error) {
     const failure = error instanceof GatewayFailure ? error : new GatewayFailure("realtime_gateway_error", "Realtime session creation failed safely.", "Unknown", 500);
-    return sendJson(response, failure.status, { ok: false, error: { code: failure.code, message: failure.message }, truth: TRUTH });
+    const reasonCode = boundedRealtimeReasonCode(
+      failure.details?.reasonCode,
+      boundedRealtimeReasonCode(failure.code),
+    );
+    const requestId = boundedRealtimeRequestId(failure.details?.requestId)
+      ?? gatewayRequestId;
+    return sendJson(response, failure.status, {
+      ok: false,
+      error: {
+        code: failure.code,
+        message: failure.message,
+        reasonCode,
+        requestId,
+      },
+      truth: TRUTH,
+    });
   } finally {
     clearTimeout(timer);
   }

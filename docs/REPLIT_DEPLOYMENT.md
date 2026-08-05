@@ -142,6 +142,14 @@ rolled-back release identities and revocation status in the sanitized receipt.
 
 Build with `npm run build` and start with `npm run start`. Never create a browser-visible `VITE_` runtime variable. After deployment, verify every allowlisted route, mutation rejection, secret isolation, failure rendering, and the live topology.
 
+## Governed Realtime voice promotion gate
+
+Every Command Portal promotion that can expose voice must run an authenticated synthetic browser canary through the published Experience Gateway, not directly against Runtime. The canary must first negotiate the exact `nexus.realtime-voice@2.0.0` contract and `trackless-pcm-transcription-v1` profile, then prove the browser activation sequence: readiness, `getUserMedia`, one live microphone track, 24 kHz PCM capture, analyser activity, an inactive trackless audio SDP offer, the Gateway `POST /api/runtime/realtime/call`, connected peer transport, and open ordered data channel.
+
+The successful SDP response must bind the current deployment to the exact Runtime artifact identity and a verified Realtime receipt digest. The promotion record must bind the root/program source commit, Runtime source commit, immutable carrier, composed-source digest, image or artifact digest, contract version, deployment identity, and those postconditions. A receipt from an earlier artifact or deployment is historical evidence only and cannot satisfy current readiness.
+
+No governed SDP call, no current-artifact receipt, or no verified audio postconditions means the promotion is blocked or rolled back. Push-to-talk remains continuity-only and cannot satisfy this gate. Unknown or masked Runtime errors fail closed with only a bounded safe reason code and request ID. The published UI must report Runtime reachable, Runtime ready, voice contract ready, provider connected, production ready, and live connection established separately; it must never derive one from another or report live voice before `connectionState=live`.
+
 For the earlier Mission 1 tenant-context assertion rollout, deploy in this
 order: first add that context-assertion secret to this portal and republish it
 so text and voice already carry the signed header; then deploy Runtime with the

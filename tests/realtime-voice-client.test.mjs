@@ -6,9 +6,16 @@ import {
   ClientSpeechTurnSegmenter,
   isVerifiedManualCommitStatus,
   RealtimeVoiceClient,
+  RUNTIME_REALTIME_ARTIFACT_IDENTITY_HEADER,
+  RUNTIME_REALTIME_CLIENT_PROFILE,
+  RUNTIME_REALTIME_CLIENT_PROFILE_HEADER,
+  RUNTIME_REALTIME_CONTRACT_HEADER,
+  RUNTIME_REALTIME_CONTRACT_VERSION,
   RUNTIME_REALTIME_INPUT_MODE,
   RUNTIME_REALTIME_INPUT_MODE_HEADER,
+  RUNTIME_REALTIME_RECEIPT_DIGEST_HEADER,
   runtimeRealtimeInputModeFromHeaders,
+  tracklessRealtimeOfferIsValid,
 } from "../src/lib/realtime-voice-client.ts";
 import {
   RealtimePcmAppendCoordinator,
@@ -117,6 +124,10 @@ afterEach(() => {
 test("only the exact Runtime manual-commit status enables live voice", () => {
   const verified = {
     state: "available",
+    contractVersion: RUNTIME_REALTIME_CONTRACT_VERSION,
+    transportProfile: RUNTIME_REALTIME_CLIENT_PROFILE,
+    supportedClientProfiles: [RUNTIME_REALTIME_CLIENT_PROFILE],
+    preActivationNegotiationRequired: true,
     serverVAD: false,
     clientAudioAppendRequired: true,
     inputAudioAppendEvent: "input_audio_buffer.append",
@@ -125,12 +136,17 @@ test("only the exact Runtime manual-commit status enables live voice", () => {
     providerOfferAudioDirection: "inactive",
     providerOfferAudioTrackAttached: false,
     rtpAudioNegotiated: false,
+    artifactIdentity: { identityDigest: `sha256:${"a".repeat(64)}` },
   };
   assert.equal(isVerifiedManualCommitStatus(verified), true);
   for (const status of [
     undefined,
     null,
     { ...verified, state: "unavailable" },
+    { ...verified, contractVersion: "nexus.realtime-voice@1.0.0" },
+    { ...verified, transportProfile: "full-duplex-rtp-v1" },
+    { ...verified, supportedClientProfiles: [] },
+    { ...verified, preActivationNegotiationRequired: false },
     { ...verified, serverVAD: true },
     { ...verified, serverVAD: undefined },
     { ...verified, clientAudioAppendRequired: false },
@@ -144,6 +160,7 @@ test("only the exact Runtime manual-commit status enables live voice", () => {
     { ...verified, providerOfferAudioTrackAttached: true },
     { ...verified, providerOfferAudioTrackAttached: undefined },
     { ...verified, rtpAudioNegotiated: true },
+    { ...verified, artifactIdentity: { identityDigest: "historical" } },
   ]) assert.equal(isVerifiedManualCommitStatus(status), false);
 });
 
@@ -207,7 +224,7 @@ test("the browser rejects missing or wrong per-call attestation before accepting
   const remoteDescriptions = [];
   const transceiverOffers = [];
   let callInputMode = null;
-  const track = { enabled: true, stop() {} };
+  const track = { enabled: true, readyState: "live", stop() {} };
   const stream = { getAudioTracks: () => [track], getTracks: () => [track] };
   class FakeAudioContext {
     state = "running";
@@ -231,12 +248,17 @@ test("the browser rejects missing or wrong per-call attestation before accepting
     connectionState = "connected";
     addTransceiver(kind, options) {
       transceiverOffers.push({ kind, options });
-      return { direction: options?.direction, sender: { track: null } };
+      return { direction: options?.direction, currentDirection: "inactive", sender: { track: null } };
     }
     createDataChannel() {
       return { readyState: "connecting", addEventListener() {}, close() {} };
     }
-    async createOffer() { return { type: "offer", sdp: "v=0\r\na=offer\r\n" }; }
+    async createOffer() {
+      return {
+        type: "offer",
+        sdp: "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=inactive\r\na=rtpmap:111 opus/48000/2\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:1\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n",
+      };
+    }
     async setLocalDescription() {}
     async setRemoteDescription(description) { remoteDescriptions.push(description); }
     close() {}
@@ -265,6 +287,10 @@ test("the browser rejects missing or wrong per-call attestation before accepting
             ok: true,
             data: {
               state: "available",
+              contractVersion: RUNTIME_REALTIME_CONTRACT_VERSION,
+              transportProfile: RUNTIME_REALTIME_CLIENT_PROFILE,
+              supportedClientProfiles: [RUNTIME_REALTIME_CLIENT_PROFILE],
+              preActivationNegotiationRequired: true,
               serverVAD: false,
               clientAudioAppendRequired: true,
               inputAudioAppendEvent: "input_audio_buffer.append",
@@ -273,6 +299,7 @@ test("the browser rejects missing or wrong per-call attestation before accepting
               providerOfferAudioDirection: "inactive",
               providerOfferAudioTrackAttached: false,
               rtpAudioNegotiated: false,
+              artifactIdentity: { identityDigest: `sha256:${"a".repeat(64)}` },
             },
           }), { status: 200, headers: { "Content-Type": "application/json" } });
         }
@@ -281,6 +308,10 @@ test("the browser rejects missing or wrong per-call attestation before accepting
           headers: {
             "Content-Type": "application/sdp",
             "X-NEXUS-Prompt-Echo-Signature": "nexus governed runtime prompt signature boundary",
+            [RUNTIME_REALTIME_CONTRACT_HEADER]: RUNTIME_REALTIME_CONTRACT_VERSION,
+            [RUNTIME_REALTIME_CLIENT_PROFILE_HEADER]: RUNTIME_REALTIME_CLIENT_PROFILE,
+            [RUNTIME_REALTIME_ARTIFACT_IDENTITY_HEADER]: `sha256:${"a".repeat(64)}`,
+            [RUNTIME_REALTIME_RECEIPT_DIGEST_HEADER]: `sha256:${"b".repeat(64)}`,
             ...(callInputMode === null
               ? {}
               : { [RUNTIME_REALTIME_INPUT_MODE_HEADER]: callInputMode }),
@@ -642,6 +673,17 @@ test("provider protocol data without an event type fails closed", () => {
   assert.match(fixture.errors.at(-1), /without an event type/);
 });
 
+test("provider failures expose only a bounded safe reason code", () => {
+  const fixture = makeClient();
+  fixture.dispatch({
+    type: "error",
+    error: { message: "masked-provider-secret-must-not-reach-the-operator" },
+  });
+  assert.equal(fixture.states.at(-1), "error");
+  assert.match(fixture.errors.at(-1), /Reason: realtime_provider_error/);
+  assert.doesNotMatch(fixture.errors.at(-1), /masked-provider-secret/);
+});
+
 test("invalid or non-monotonic acoustic samples fail closed", () => {
   const fixture = makeClient();
   fixture.client.processAmplitudeSample(Number.NaN, 1);
@@ -669,5 +711,72 @@ test("the browser offer has one inactive trackless audio section and no provider
   assert.doesNotMatch(source, /session\.update|\binstructions\b|\btools\s*:/);
   assert.doesNotMatch(source, /srcObject\s*=\s*event\.streams/);
   assert.doesNotMatch(source, /HTMLAudioElement|document\.createElement\(['"]audio/);
-  assert.match(source, /attempted to attach output media to a transcription-only session/);
+  assert.match(source, /attempted to attach forbidden output audio/);
+  const offer = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\nm=audio 9 UDP\/TLS\/RTP\/SAVPF 111\r\na=mid:0\r\na=inactive\r\na=rtpmap:111 opus\/48000\/2\r\nm=application 9 UDP\/DTLS\/SCTP webrtc-datachannel\r\na=mid:1\r\na=sctp-port:5000\r\n";
+  assert.equal(tracklessRealtimeOfferIsValid(offer), true);
+  assert.equal(tracklessRealtimeOfferIsValid(offer.replace("a=inactive", "a=sendrecv")), false);
+  assert.equal(tracklessRealtimeOfferIsValid(offer.replace("a=inactive", "a=inactive\r\na=msid:stream track")), false);
+  assert.equal(tracklessRealtimeOfferIsValid(offer.replace("a=inactive", "a=inactive\r\na=ssrc:1 cname:track")), false);
+  assert.equal(tracklessRealtimeOfferIsValid(offer.replace("m=audio 9", "m=audio 0")), false);
+  assert.equal(tracklessRealtimeOfferIsValid(`${offer}m=video 9 UDP/TLS/RTP/SAVPF 96\r\n`), false);
+});
+
+test("Live Voice Active proof requires exact negotiated audio, microphone, PCM, analyser, and artifact postconditions", () => {
+  const proofs = [];
+  const states = [];
+  const sent = [];
+  const client = new RealtimeVoiceClient({
+    onState: (state) => states.push(state),
+    onAmplitude() {},
+    onUserTranscript: async () => ({ admitted: false }),
+    onRuntimeResponse() {},
+    onError() {},
+    onLiveProof: (proof) => proofs.push(proof),
+  });
+  clients.push(client);
+  client.peer = { connectionState: "connected", close() {} };
+  client.providerAudioTransceiver = {
+    currentDirection: "inactive",
+    sender: { track: null },
+  };
+  client.channelOpen = true;
+  client.channel = {
+    readyState: "open",
+    send: (raw) => sent.push(JSON.parse(raw)),
+    close() {},
+  };
+  client.stream = {
+    getAudioTracks: () => [{ readyState: "live", stop() {} }],
+    getTracks: () => [],
+  };
+  client.pcmCapture = { stop() {}, sampleRate: 24_000 };
+  client.pcmSamplesObserved = true;
+  client.analyserFrameObserved = true;
+  client.promptEchoSignature = "nexus governed runtime prompt signature boundary";
+  client.realtimeInputModeAttested = true;
+  client.contractAttested = true;
+  client.artifactIdentityDigest = `sha256:${"a".repeat(64)}`;
+  client.receiptDigest = `sha256:${"b".repeat(64)}`;
+  client.maybeActivateLive();
+  assert.equal(states.at(-1), "listening");
+  assert.deepEqual(sent.map((event) => event.type), ["input_audio_buffer.clear"]);
+  assert.deepEqual(proofs, [{
+    contractVersion: RUNTIME_REALTIME_CONTRACT_VERSION,
+    transportProfile: RUNTIME_REALTIME_CLIENT_PROFILE,
+    artifactIdentityDigest: `sha256:${"a".repeat(64)}`,
+    receiptDigest: `sha256:${"b".repeat(64)}`,
+    connectionState: "live",
+    microphoneTrackLive: true,
+    pcmCaptureActive: true,
+    pcmSamplesObserved: true,
+    analyserGateActive: true,
+    providerAudioTransceiverDirection: "inactive",
+    providerAudioSenderTrackAttached: false,
+    remoteAudioTrackObserved: false,
+  }]);
+
+  client.transportReady = false;
+  client.providerAudioTransceiver.currentDirection = "sendrecv";
+  client.maybeActivateLive();
+  assert.equal(proofs.length, 1);
 });
