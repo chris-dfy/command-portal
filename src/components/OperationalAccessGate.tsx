@@ -17,7 +17,9 @@ export function OperationalAccessGate({
     setError("");
     try {
       const session = await operationalSessionClient.status();
-      if (!session.authenticated) throw new Error("The private workspace session was not established.");
+      if (!session.authenticated) {
+        throw new Error("The private workspace session was not established.");
+      }
       operationalSessionClient.use(session);
       onAuthenticated(session);
     } catch (caught) {
@@ -38,6 +40,6 @@ export function OperationalAccessGate({
       <button className="secondary-action" onClick={() => void reconnect()} disabled={busy}><RefreshCw size={14} />{busy ? "Connecting…" : "Retry secure connection"}</button>
     </div>
     {error && <div className="operation-error" role="alert"><TriangleAlert size={17} /><span>{error}</span></div>}
-    <p className="boundary-note">The Experience Gateway issues an HttpOnly, scoped session only through the private hosted boundary. Connection grants API access—not operational Authority—and never bypasses mission governance.</p>
+    <p className="boundary-note">The Experience Gateway issues an HttpOnly, scoped session only through the private hosted boundary. Connection grants bounded API access—not operational Authority—and never bypasses mission governance.</p>
   </section>;
 }

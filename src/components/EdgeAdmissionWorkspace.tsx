@@ -46,6 +46,7 @@ import {
   type PrivateDraftOperation,
 } from "../lib/private-draft-operation";
 import type { CapabilityRegistryProjection } from "../lib/types";
+import { admitCanonicalActionIntent } from "../lib/canonical-action-intent";
 
 const ADMISSION_REFRESH_INTERVAL_MS = 5_000;
 const ADMISSION_REQUEST_SCOPE = "edge:node_admission:request";
@@ -352,6 +353,7 @@ export function EdgeAdmissionWorkspace({
   const [mutating, setMutating] = useState<"cancel" | "reissue" | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionOutcome, setActionOutcome] = useState<string | null>(null);
   const [pendingCreate, setPendingCreate] = useState<PendingAdmissionCreate | null>(null);
   const [pendingMutation, setPendingMutation] = useState<{ operation: string; requestId: string; key: string } | null>(null);
   const [receipt, setReceipt] = useState<SafeArtifact | null>(null);
@@ -486,6 +488,7 @@ export function EdgeAdmissionWorkspace({
     setForm((current) => ({ ...current, [key]: value }));
     setPendingCreate(null);
     setActionError(null);
+    setActionOutcome(null);
   }
 
   async function createAdmission(event: FormEvent<HTMLFormElement>) {
@@ -519,13 +522,16 @@ export function EdgeAdmissionWorkspace({
     setPendingCreate(operation);
     setCreating(true);
     setActionError(null);
+    setActionOutcome(null);
     try {
-      const admission = responseAdmission(await localNexusClient.createRuntimeAdmission(operation.payload, operation.idempotencyKey));
-      setAdmissions((current) => [admission, ...current.filter((item) => item.admissionRequestId !== admission.admissionRequestId)]);
-      setSelectedAdmission(admission);
-      setSelectedId(admission.admissionRequestId);
+      const admission = await admitCanonicalActionIntent(
+        `Create a governed Edge Runtime admission request with this Mission-bound intent: ${JSON.stringify(operation.payload)}.`,
+        operation.idempotencyKey,
+      );
+      setActionOutcome(admission.spokenSummary);
       setPendingCreate(clearPrivateDraftAfterSuccess());
       setForm((current) => ({ ...INITIAL_FORM, missionId: current.missionId, nodeClass: current.nodeClass }));
+      await loadAdmissions(true);
       onFleetRefresh();
     } catch (error) {
       setPendingCreate(retainPrivateDraftAfterFailure(operation));
@@ -548,14 +554,15 @@ export function EdgeAdmissionWorkspace({
     setPendingMutation({ operation, requestId: selectedAdmission.admissionRequestId, key: idempotencyKey });
     setMutating(operation);
     setActionError(null);
+    setActionOutcome(null);
     try {
-      const response = operation === "cancel"
-        ? await localNexusClient.cancelRuntimeAdmission(selectedAdmission.admissionRequestId, Number(selectedAdmission.version), "Operator cancelled the governed admission request", idempotencyKey)
-        : await localNexusClient.reissueRuntimeAdmissionChallenge(selectedAdmission.admissionRequestId, Number(selectedAdmission.version), "Operator requested a governed replacement challenge", idempotencyKey);
-      const admission = responseAdmission(response);
-      setSelectedAdmission(admission);
-      setAdmissions((current) => [admission, ...current.filter((item) => item.admissionRequestId !== admission.admissionRequestId)]);
+      const admission = await admitCanonicalActionIntent(
+        `${operation === "cancel" ? "Cancel" : "Reissue the enrollment challenge for"} governed Edge Runtime admission ${JSON.stringify(selectedAdmission.admissionRequestId)} at expected version ${JSON.stringify(selectedAdmission.version)}.`,
+        idempotencyKey,
+      );
+      setActionOutcome(admission.spokenSummary);
       setPendingMutation(null);
+      await loadAdmission(selectedAdmission.admissionRequestId, true);
       onFleetRefresh();
     } catch (error) {
       setActionError(messageFrom(error));
@@ -643,6 +650,7 @@ export function EdgeAdmissionWorkspace({
           <label><span>Existing Evidence references (optional)</span><textarea rows={2} value={form.evidenceRefs} onChange={(event) => updateForm("evidenceRefs", event.target.value)} placeholder="Evidence IDs only—never secure enrollment material" autoComplete="off" /></label>
           {!capabilitiesValid && <p className="edge-admission-error"><TriangleAlert />At least one canonical nexus.* capability is required.</p>}
           {actionError && <p className="edge-admission-error" role="alert"><TriangleAlert />{actionError}</p>}
+          {actionOutcome && <p className="edge-admission-gate" role="status"><ShieldCheck />{actionOutcome}</p>}
           {!canCreate && !pendingCreate && <p className="edge-admission-gate"><ShieldCheck />{gateReason}</p>}
           {pendingCreate && <p className="edge-admission-gate"><ShieldCheck />The failed request is held privately with its exact idempotency key; submitted text will not be restored into editable fields.</p>}
           <footer><NexusButton variant="primary" type="submit" loading={creating} disabled={!createAction.available || (!canCreate && !pendingCreate)}><Plus />{pendingCreate ? "Retry exact governed admission" : "Request governed admission"}</NexusButton></footer>

@@ -77,10 +77,10 @@ test("voice, mute, interruption, and Runtime truth contracts are preserved", asy
     read("../src/components/VoiceWorkspace.tsx"),
     read("../src/lib/realtime-voice-client.ts"),
   ]);
-  assert.match(copilot, /hifClient\.start\(request, "text", \{\}, conversationId\.current\)/);
+  assert.match(copilot, /admitExecutiveInteraction\(request, "text", conversationId\.current\)/);
   assert.match(copilot, /setMicrophoneMuted/);
   assert.match(copilot, /setOutputMuted/);
   assert.match(realtime, /"interrupted"/);
-  assert.match(voice, /Runtime owns the provider session and truth boundaries/i);
+  assert.match(voice, /WebRTC carries ordered microphone PCM on its data channel only/i);
   assert.match(copilot, /Runtime evidence remains authoritative/);
 });

@@ -61,22 +61,7 @@ export type GatewayEnvelope<T = unknown> = {
   error?: { code: string; message: string };
 };
 
-export type RuntimeRoute =
-  | "status"
-  | "health"
-  | "ready"
-  | "version"
-  | "providers"
-  | "capabilities"
-  | "proofs"
-  | "receipts"
-  | "environment"
-  | "diagnostics"
-  | "governance"
-  | "connectors"
-  | "capability-registry"
-  | "conclave"
-  | "eox";
+export type RuntimeRoute = RuntimeBootstrapRouteKey;
 
 export type RuntimeSnapshot = Partial<Record<RuntimeRoute, GatewayEnvelope>>;
 
@@ -237,3 +222,6 @@ export type CapabilityRegistryProjection = {
   limitations: string[];
   secretValuesExposed: false;
 };
+import type {
+  RuntimeBootstrapRouteKey,
+} from "../../shared/runtime-bootstrap-contract.mjs";

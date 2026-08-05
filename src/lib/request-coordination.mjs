@@ -20,9 +20,6 @@ export function derivePortalConnectionState(
   failures,
   loading,
 ) {
-  if (!Object.keys(snapshot).length) {
-    return loading ? "Connecting" : "Unavailable";
-  }
   const envelopes = [
     ...Object.values(snapshot),
     ...failures,
@@ -34,6 +31,13 @@ export function derivePortalConnectionState(
     (state) => states.includes(state),
   );
   if (trustFailure) return trustFailure;
+
+  if (!Object.keys(snapshot).length) {
+    if (loading) return "Connecting";
+    return CONNECTION_FAILURE_PRIORITY.find(
+      (state) => states.includes(state),
+    ) ?? "Unavailable";
+  }
 
   const healthState = snapshot.health?.gateway?.connectionState;
   const readyState = snapshot.ready?.gateway?.connectionState;

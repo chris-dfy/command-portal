@@ -10,12 +10,12 @@ The avatar renders exactly six states, each mapped to actual interaction state â
 |---|---|
 | `idle` | No live voice session and no governed text request in flight |
 | `listening` | A Realtime voice session is capturing operator audio |
-| `thinking` | NEXUS is forming a response (Realtime turn or governed HIF text request), or the voice session is negotiating (`connecting`) |
-| `speaking` | Realtime audio output is streaming |
+| `thinking` | NEXUS is forming a response after canonical Runtime admission, or the voice session is negotiating (`connecting`) |
+| `speaking` | Governed browser narration of the canonical Runtime response is active |
 | `interrupted` | The operator interrupted NEXUS mid-response (`response.cancel` + output buffer clear) |
 | `error` | The voice session or governed request failed; presentation fails closed |
 
-`deriveAssistantAvatarState({ voiceState, textBusy, hasError })` performs this mapping from the `RealtimeVoiceState` enum plus HIF text-request and error state.
+`deriveAssistantAvatarState({ voiceState, textBusy, hasError })` performs this mapping from the `RealtimeVoiceState` enum plus canonical text-request and error state.
 
 ## Amplitude and mute truthfulness
 
@@ -32,7 +32,7 @@ The avatar renders exactly six states, each mapped to actual interaction state â
 
 ## Preserved contracts
 
-The avatar changes nothing about: governed HIF text chat, Realtime voice negotiation over the same-origin gateway, microphone/output mute, interruption, skills, message history, route allowlists, signed operational sessions, server-only credentials, or Runtime-owned capability/Authority/execution. Model-native reasoning is not proof; no capability, completed Action, receipt, postcondition, or Outcome may be claimed without Runtime evidence. When the Runtime or voice is unavailable, presentation stays useful but explicit that they are unavailable (`data-unavailable`, "Voice unavailable â€” Runtime voice cannot be established").
+The avatar changes nothing about: canonical Runtime interaction admission, Realtime voice negotiation over the same-origin gateway, microphone/output mute, interruption, skills, message history, route allowlists, signed operational sessions, server-only credentials, or Runtime-owned capability/Authority/execution. Model-native reasoning is not proof; no capability, completed Action, receipt, postcondition, or Outcome may be claimed without Runtime evidence. When the Runtime or voice is unavailable, presentation stays useful but explicit that they are unavailable (`data-unavailable`, "Voice unavailable â€” Runtime voice cannot be established").
 
 ## Responsive behavior
 

@@ -60,7 +60,8 @@ test("connection lifecycle renders every required state", async () => {
     assert.match(source, new RegExp(`\"${state}\"`));
   }
   assert.match(app, /derivePortalConnectionState\(snapshot, failures, loading\)/);
-  assert.match(coordination, /return loading \? "Connecting" : "Unavailable"/);
+  assert.match(coordination, /if \(loading\) return "Connecting"/);
+  assert.match(coordination, /CONNECTION_FAILURE_PRIORITY\.find/);
   assert.doesNotMatch(coordination, /if \(loading\) return "Retrying"/);
 });
 
@@ -96,11 +97,12 @@ test("Replit publishes the fixed hosted binding without committing server secret
   for (const binding of [
     'COMMAND_PORTAL_OPERATIONAL_API_BASE_URL = "https://nexus-runtime-dev.fly.dev"',
     'COMMAND_PORTAL_OPERATIONAL_ENABLED = "true"',
+    'COMMAND_PORTAL_SESSION_MODE = "automatic_private_workspace"',
     'COMMAND_PORTAL_OPERATOR_USER_ID = "nexus-workspace-service"',
     'COMMAND_PORTAL_TENANT_ID = "nexicron"',
     'COMMAND_PORTAL_WORKSPACE_ID = "primary"',
     'COMMAND_PORTAL_OPERATOR_ROLE = "operator"',
-    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "operations:read,operations:write,actions:simulate,evidence:write,edge:node_admission:request"',
+    'COMMAND_PORTAL_OPERATIONAL_SCOPES = "edge:node_admission:request,evidence:write,operations:read,operations:write,repository:metadata:read"',
     'COMMAND_PORTAL_PROVIDER_INTERACTIVE_AUTH_ENABLED = "true"',
     'COMMAND_PORTAL_PROVIDER_SESSION_SECRET_REF = "secret-manager:experience-gateway/mission-3/provider-session-current"',
     'COMMAND_PORTAL_PROVIDER_SESSION_KEY_ID = "provider-session-current"',
@@ -109,6 +111,7 @@ test("Replit publishes the fixed hosted binding without committing server secret
     'COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_VERSION = "1.0.0"',
     'COMMAND_PORTAL_EXECUTIVE_SESSION_POLICY_DIGEST = "sha256:b1f6a2cdf2153ac48236867e5e1aeab794842256410f3f314fc2655008a2be78"',
   ]) assert.match(replit, new RegExp(binding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(replit, /approvals:decide/);
   for (const secretName of [
     "COMMAND_PORTAL_OPERATIONAL_RUNTIME_TOKEN",
     "COMMAND_PORTAL_OPERATOR_ACCESS_KEY",
@@ -118,7 +121,7 @@ test("Replit publishes the fixed hosted binding without committing server secret
     "COMMAND_PORTAL_EXECUTIVE_SESSION_COOKIE_SECRET",
     "COMMAND_PORTAL_EXECUTIVE_REGISTRATIONS_JSON",
     "NEXUS_HUMAN_SESSION_ASSERTION_SECRET",
-    "NEXUS_CONTEXT_ASSERTION_SECRET",
+    "NEXUS_CONTEXT_ASSERTION_COMMAND_PORTAL_SECRET",
   ]) assert.doesNotMatch(replit, new RegExp(`^${secretName}\\s*=`, "m"));
 });
 
@@ -130,13 +133,11 @@ test("hosted workspaces bootstrap automatically without a browser credential for
     read("../src/components/OperationsWorkspace.tsx"),
   ]);
   assert.match(app, /operationalSessionClient\.status\(\)/);
+  assert.match(gate, /operationalSessionClient\.status\(\)/);
   assert.match(gate, /Retry secure connection/);
-  assert.match(gate, /private deployment admits the user/i);
-  assert.match(gate, /Connection grants API access—not operational Authority/i);
+  assert.match(gate, /private deployment admits the user/);
   assert.doesNotMatch(gate, /password|accessKey|Operator access key|current-password|KeyRound/);
-  for (const forbidden of ['sessionRequest("/login"', "login:", "accessKey"]) {
-    assert.equal(client.includes(forbidden), false);
-  }
+  assert.match(client, /login: \(accessKey: string\)/);
   assert.match(operations, /Private workspace managed/);
   assert.match(operations, /Authentication and access scope do not create operational Authority/);
 });
@@ -160,24 +161,27 @@ test("provider sign-out stays within the CSP-closed same-origin request boundary
 });
 
 test("local-first workspaces delegate intake, project intelligence, and Realtime voice to Runtime", async () => {
-  const [app, registry, intake, projects, voice, realtime, browserSpeech, client, hif, documentResult] = await Promise.all([
+  const [app, registry, intake, projects, voice, realtime, pcm, browserSpeech, client, admission, documentResult] = await Promise.all([
     read("../src/App.tsx"),
     surfaceRegistry(),
     read("../src/components/DocumentIntake.tsx"),
     read("../src/components/ProjectStudio.tsx"),
     read("../src/components/VoiceWorkspace.tsx"),
     read("../src/lib/realtime-voice-client.ts"),
+    read("../src/lib/realtime-pcm-input.ts"),
     read("../src/lib/browser-speech.ts"),
     read("../src/lib/local-client.ts"),
-    read("../src/lib/hif-client.ts"),
+    read("../src/lib/runtime-voice-admission.ts"),
     read("../src/lib/document-intake-result.ts"),
   ]);
   for (const label of ["Document Intelligence", "Projects", "Voice Operations"]) {
     assert.equal(registry.surfaces.some((surface) => surface.label === label), true);
   }
   assert.match(app, /<DocumentIntake capabilityRegistry=\{capabilityRegistry\} session=\{operationalSession\}/);
-  for (const contract of ["/intake/upload", "/intake/query", "/projects", "/scope", "/estimate", "/planning-model", "/compile", "/voice-operator/route-transcript"]) assert.match(client, new RegExp(contract));
-  assert.match(intake, /FileReader/);
+  for (const contract of ["/executive-interactions", "/scope", "/estimate", "/planning-model"]) assert.match(client, new RegExp(contract));
+  for (const retired of ["intakeUpload", "intakeQuery", "projectCreate", "projectCompile"]) assert.doesNotMatch(client, new RegExp(retired));
+  assert.doesNotMatch(intake, /FileReader|readAsDataURL/);
+  assert.match(intake, /admitCanonicalActionIntent/);
   assert.match(intake, /canonicalHostedControlAvailability/);
   assert.match(intake, /pathTemplate: "\/intake\/history"/);
   assert.match(intake, /pathTemplate: "\/intake\/upload"/);
@@ -185,9 +189,7 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(intake, /"operations:read"/);
   assert.doesNotMatch(intake, /pathTemplate: "\/intake\/query"[\s\S]{0,180}"operations:write"/);
   assert.match(intake, /"evidence:write"/);
-  assert.match(intake, /successfulDocumentUploadMessage/);
-  assert.match(documentResult, /Source inventory remains degraded/);
-  assert.match(documentResult, /Source inventory refresh is degraded/);
+  assert.match(intake, /browser has retained the selected file bytes locally/);
   assert.match(intake, /projectId/);
   assert.match(intake, /Ask ingested sources/);
   assert.match(projects, /browser performs no project calculation/i);
@@ -195,27 +197,44 @@ test("local-first workspaces delegate intake, project intelligence, and Realtime
   assert.match(projects, /never fabricates a price/i);
   assert.match(realtime, /RTCPeerConnection/);
   assert.match(realtime, /echoCancellation: true/);
-  assert.match(realtime, /output_audio_buffer\.clear/);
+  assert.match(realtime, /conversation\.item\.input_audio_transcription\.completed/);
+  assert.match(pcm, /type: "input_audio_buffer\.append"/);
+  assert.match(pcm, /type: "input_audio_buffer\.commit"/);
+  assert.match(realtime, /input_audio_buffer\.committed/);
+  assert.match(realtime, /status\.serverVAD === false/);
+  assert.match(realtime, /status\.clientAudioCommitRequired === true/);
+  assert.match(realtime, /status\.clientAudioAppendRequired === true/);
+  assert.match(realtime, /status\.providerOfferAudioDirection === "inactive"/);
+  assert.match(realtime, /status\.providerOfferAudioTrackAttached === false/);
+  assert.match(realtime, /addTransceiver\("audio", \{ direction: "inactive" \}\)/);
+  assert.doesNotMatch(realtime, /\.addTrack\(/);
   assert.match(realtime, /setMicrophoneMuted/);
-  assert.match(realtime, /track\.enabled = !this\.microphoneMuted/);
+  assert.match(realtime, /track\.enabled = !this\.microphoneMuted && !this\.turnProcessing/);
   assert.match(realtime, /setOutputMuted/);
-  assert.match(realtime, /this\.audio\.muted = muted/);
+  assert.doesNotMatch(realtime, /HTMLAudioElement|document\.createElement\(["']audio/);
+  assert.match(realtime, /attempted to attach output media to a transcription-only session/);
+  assert.match(realtime, /onRuntimeResponse\(responseText\)/);
+  assert.doesNotMatch(realtime, /type:\s*"response\.create"/);
+  assert.doesNotMatch(realtime, /\.play\(/);
   for (const control of ["Mute microphone", "Mute NEXUS", "Unmute microphone", "Unmute NEXUS"]) assert.match(voice, new RegExp(control));
-  assert.match(voice, /Runtime owns the provider session and truth boundaries/i);
+  assert.match(voice, /WebRTC carries ordered microphone PCM on its data channel only/i);
   assert.match(voice, /model-native knowledge/i);
   assert.match(browserSpeech, /SpeechRecognition/);
   assert.match(browserSpeech, /speechSynthesis\.speak\(utterance\)/);
   assert.match(browserSpeech, /Browser microphone did not capture speech within/);
   assert.match(voice, /speakBrowserResponse\(responseText\)/);
+  assert.match(voice, /if \(!nexusMutedRef\.current\) speakBrowserResponse\(responseText\)/);
   assert.match(voice, /actual Runtime response locally/);
-  assert.match(realtime, /REALTIME_RESPONSE_TIMEOUT_MS = 10_000/);
-  assert.match(realtime, /"response_timeout"/);
-  for (const event of ["SpeechStarted", "SpeechInterrupted", "ConversationStarted", "AvatarMoveRequested", "NavigationRequested", "FocusRequested", "PresentationStarted", "StreamingChunk"]) assert.match(hif, new RegExp(event));
-  assert.match(voice, /localNexusClient\.routeTranscript\([\s\S]*?explicitOperation\.payload\.transcript,[\s\S]*?explicitOperation\.payload\.source,[\s\S]*?signal,[\s\S]*?explicitOperation\.idempotencyKey/);
+  assert.match(realtime, /forbidden output event/);
+  assert.match(voice, /admitRuntimeVoiceTranscript\(/);
+  assert.match(admission, /The sole browser admission path for both text and finalized voice input/);
+  assert.match(admission, /localNexusClient\.executiveInteraction\(request, approvalId\)/);
+  assert.match(admission, /lookupUncertainInteraction\(request\)/);
+  assert.doesNotMatch(admission, /hifClient|routeTranscript|executiveIntentEndpointIsAbsent|voiceOperatorEndpointIsAbsent/);
   assert.match(voice, /setTranscript\(""\)/);
-  assert.match(voice, /governed NEXUS Runtime Voice Operator/);
-  assert.match(hif, /clientId: "nexus-web"/);
-  for (const source of [app, intake, projects, voice, realtime, client, hif]) {
+  assert.match(voice, /governed Runtime Voice Operator/);
+  assert.doesNotMatch(client, /executiveIntent|routeTranscript|executeAction/);
+  for (const source of [app, intake, projects, voice, realtime, client, admission]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
   }
 });
@@ -225,7 +244,10 @@ test("mission control consumes the versioned Runtime parity contract", async () 
     read("../src/App.tsx"), read("../src/components/OperationsWorkspace.tsx"), read("../src/lib/local-client.ts")
   ]);
   for (const label of ["Mission Control", "Mission portfolio", "Mission Executor", "Mission receipts", "Operational Replay", "Capability-specific readiness"]) assert.match(`${app}\n${workspace}`, new RegExp(label));
-  for (const operation of ["capabilityReadiness", "missions", "mission", "missionReceipts", "operationalReplayForMission", "planMission"]) assert.match(client, new RegExp(operation));
+  for (const operation of ["capabilityReadiness", "missions", "mission", "missionReceipts", "operationalReplayForMission", "executiveInteraction"]) assert.match(client, new RegExp(operation));
+  assert.match(workspace, /admitExecutiveInteraction\(/);
+  assert.match(workspace, /PORTAL_CANONICAL_ACTIONS\.copilotInteractionStart/);
+  assert.doesNotMatch(`${client}\n${workspace}`, /"\/missions\/plan"|localNexusClient\.planMission/);
   assert.match(workspace, /Mission status, task graph, receipts, and Replay come from independent canonical Runtime routes/);
   assert.match(workspace, /Authentication and role never establish operational Authority/);
   for (const boundary of ["Hosted Operational Gateway", "Session expiration", "server-derived", "authenticated Runtime"]) assert.match(workspace, new RegExp(boundary));
@@ -236,7 +258,8 @@ test("mission control consumes the versioned Runtime parity contract", async () 
   assert.match(app, /hosted-operational-context/);
   assert.match(app, /localNexusClient\.capabilityReadiness\(\)/);
   assert.match(app, /Capability state/);
-  assert.match(app, /Capability reason/);
+  assert.match(app, /Verified Runtime reason/);
+  assert.match(app, /Technical details/);
   assert.match(app, /AREA_CAPABILITY_IDS/);
   assert.match(app, /Runtime commit/);
   assert.match(app, /runtimeCommit=\{deployedRuntimeCommit\}/);
@@ -245,8 +268,12 @@ test("mission control consumes the versioned Runtime parity contract", async () 
 });
 
 test("Operations Center manifests the Runtime-owned Executive Operating Loop", async () => {
-  const [app, center, contract, portalClient] = await Promise.all([
-    read("../src/App.tsx"), read("../src/components/OperationsCenter.tsx"), read("../src/lib/eox-client.ts"), read("../src/lib/portal-client.ts")
+  const [app, center, contract, portalClient, bootstrapContract] = await Promise.all([
+    read("../src/App.tsx"),
+    read("../src/components/OperationsCenter.tsx"),
+    read("../src/lib/eox-client.ts"),
+    read("../src/lib/portal-client.ts"),
+    read("../shared/runtime-bootstrap-contract.mjs"),
   ]);
   assert.match(app, /areaFromPath\(window\.location\.pathname\)/);
   assert.match(app, /"web\.dashboard\.operations-center": <OperationsCenter/);
@@ -254,7 +281,8 @@ test("Operations Center manifests the Runtime-owned Executive Operating Loop", a
   for (const label of ["Operations Center", "Executive Brief", "Operational Health", "Attention Queue", "Recommended Actions", "Operational Understanding", "Mission Timeline", "Executive state"]) assert.match(center, new RegExp(label));
   assert.match(center, /assessment\.loop\.map/);
   assert.match(center, /Executive Operating Loop/);
-  assert.match(portalClient, /"eox"/);
+  assert.match(portalClient, /RUNTIME_BOOTSTRAP_ROUTE_KEYS/);
+  assert.match(bootstrapContract, /\["eox", "\/api\/runtime\/eox"\]/);
   for (const significance of ["Business impact", "Operational impact", "Mission impact", "Why this matters"]) assert.match(center, new RegExp(significance, "i"));
   assert.doesNotMatch(center, /Begin Executive Briefing|speechSynthesis|HighlightRequested|eoxClient/);
   assert.match(center, /persistent NEXUS copilot is the client presentation surface/i);
@@ -285,39 +313,38 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
     read("../src/lib/local-client.ts"), read("../src/styles.css")
   ]);
   assert.equal(registry.surfaces.find((surface) => surface.id === "conclave")?.label, "Conclave");
-  assert.match(app, /<ConclaveWorkspace onReplay=\{openReplay\} readiness=\{operationalReadiness\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\}/);
-  for (const label of ["Conclave synthesis", "Dissent preserved", "Not authorized", "Required before progression"]) assert.match(conclave, new RegExp(label));
-  assert.match(client, /localNexusClient\.createConclaveWorkspace/);
-  assert.match(client, /localNexusClient\.runConclaveWorkspace/);
-  assert.match(client, /localNexusClient\.conclaveWorkspace/);
-  assert.match(client, /isVerifiedCanonicalReview/);
+  assert.match(app, /<ConclaveWorkspace onReplay=\{openReplay\} readiness=\{operationalReadiness\} session=\{operationalSession\} capabilityRegistry=\{capabilityRegistry\} availability=\{hostedContextData\}/);
+  for (const label of ["Conclave synthesis", "authorize external actions", "Required before progression"]) assert.match(conclave, new RegExp(label));
+  assert.doesNotMatch(client, /localNexusClient\.(?:createConclaveWorkspace|runConclaveWorkspace)/);
   assert.match(directory, /lifecyclePosture === "canonical_operational"/);
   assert.match(directory, /reviewIntegrityVerified === true/);
   assert.match(directory, /terminalReceiptVerified === true/);
   assert.match(directory, /completionReceipt[\s\S]*runReceipt/);
-  assert.match(client, /runPending: true/);
+  assert.match(client, /createdConclaveRunIdentity/);
   assert.match(client, /expectedWorkspaceVersion/);
   assert.doesNotMatch(client, /\/api\/runtime\/conclave\/reviews|runConclaveReview/);
   assert.match(conclave, /localNexusClient\.conclaveWorkspaces\(\)/);
-  assert.match(conclave, /Durable Runtime records/);
-  assert.match(conclave, /Browser-local Review draft/);
+  assert.match(conclave, /Saved Reviews/);
+  assert.match(conclave, /Operational question/);
   assert.match(conclave, /not yet a Runtime record/);
   assert.match(conclave, /defaultConclaveWorkspace/);
   assert.match(conclave, /conclaveDirectoryLabel/);
   assert.match(conclave, /Verified canonical Review result/);
   assert.match(conclave, /Historical prompt only — not a Review result/);
-  assert.match(conclave, /does not substitute a static one-shot review/);
-  assert.match(conclave, /Run governed review/);
-  assert.match(conclave, /Creation does not dispatch a run/);
+  assert.match(conclave, /does not substitute a browser-only result/);
+  assert.match(conclave, /Run review/);
+  assert.match(conclave, /requests creation of a governed Review record/);
+  assert.match(conclave, /does not run tasks or authorize external actions/);
   assert.match(conclave, /createAllowed: creationAllowed, runAllowed/);
-  assert.match(conclave, /createConclaveInvestigation/);
+  assert.match(conclave, /admitCanonicalActionIntent/);
   assert.match(conclave, /workspaceDisplayStatus\(workspace\)/);
   assert.match(conclave, /workspace\.lifecyclePosture === "legacy_read_only"/);
   assert.doesNotMatch(conclave, /displayStatus\s*\?\?\s*(?:workspace\??\.)?status/);
   assert.match(conclave, /const predecessor: ConclavePredecessor/);
   assert.match(conclave, /workspaceVersion:\s*workspace\.workspaceVersion/);
   assert.match(conclave, /Unblock an evidence-waiting task/);
-  assert.match(conclave, /localNexusClient\.admitConclaveEvidence/);
+  assert.doesNotMatch(conclave, /localNexusClient\.admitConclaveEvidence/);
+  assert.match(conclave, /Admit this Evidence to Conclave Review/);
   assert.match(conclave, /evidence:write/);
   assert.match(conclave, /canonicalHostedControlAvailability/);
   assert.match(conclave, /pathTemplate: "\/conclave\/workspaces"/);
@@ -340,8 +367,7 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
       new RegExp(`evidenceSourceClassifications[\\s\\S]{0,240}"${producerOwned}"`),
     );
   }
-  assert.match(localClient, /admitConclaveEvidence/);
-  assert.match(localClient, /\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/evidence/);
+  assert.doesNotMatch(localClient, /admitConclaveEvidence|createConclaveWorkspace|runConclaveWorkspace/);
   assert.match(conclave, /useState\(""\)/);
   assert.match(conclave, /placeholder=\{suggestedProposal\}/);
   assert.doesNotMatch(client, /gateway\.data\.data/);
@@ -351,10 +377,10 @@ test("Conclave is a visible Runtime-owned decision challenge capability", async 
 });
 
 test("NEXUS remains a Runtime-governed conversational copilot across every portal area", async () => {
-  const [app, copilot, hif, realtime, styles, platformStyles] = await Promise.all([
+  const [app, copilot, admission, realtime, styles, platformStyles] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/components/NexusCopilot.tsx"),
-    read("../src/lib/hif-client.ts"),
+    read("../src/lib/runtime-voice-admission.ts"),
     read("../src/lib/realtime-voice-client.ts"),
     read("../src/styles.css"),
     read("../src/platform/nexus-platform.css"),
@@ -364,16 +390,15 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.doesNotMatch(app, /className="nx-platform"/);
   assert.match(app, /open=\{copilotOpen\}/);
   assert.match(copilot, /open: boolean/);
-  assert.match(copilot, /Enterprise executive operating intelligence/);
-  assert.match(copilot, /hifClient\.start\(request, "text", \{\}, conversationId\.current\)/);
+  assert.match(copilot, /NEXUS/);
+  assert.match(copilot, /admitExecutiveInteraction\(request, "text", conversationId\.current\)/);
   assert.match(copilot, /RealtimeVoiceClient/);
   assert.match(copilot, /Model-native reasoning is labeled\. Runtime evidence remains authoritative/);
   assert.match(copilot, /plan, scope, and price a NEXUS project/i);
   for (const control of ["Mute mic", "Mute NEXUS", "Unmute mic", "Unmute NEXUS"]) assert.match(copilot, new RegExp(control));
   assert.match(copilot, /if \(voiceConnected\) stopVoice\(\)/);
-  assert.match(hif, /conversationId/);
-  assert.match(hif, /return gateway\.data/);
-  assert.doesNotMatch(hif, /gateway\.data\.data/);
+  assert.match(admission, /The sole browser admission path for both text and finalized voice input/);
+  assert.doesNotMatch(admission, /hifClient|routeTranscript|executiveIntentEndpointIsAbsent|voiceOperatorEndpointIsAbsent/);
   assert.match(realtime, /RTCPeerConnection/);
   assert.doesNotMatch(app, /Begin Executive Briefing/);
   assert.match(styles, /Persistent NEXUS executive copilot/);
@@ -382,7 +407,7 @@ test("NEXUS remains a Runtime-governed conversational copilot across every porta
   assert.match(platformStyles, /container-name: portal-main/);
   assert.match(styles, /@container portal-main/);
   assert.match(styles, /Modules respond to the workspace width/);
-  for (const source of [app, copilot, hif]) {
+  for (const source of [app, copilot, admission]) {
     assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(source), false);
   }
 });
@@ -484,6 +509,7 @@ test("canonical shell bootstraps the hosted operational session before mounting 
   assert.match(app, /requiresOperationalSession && !operationalSession\.authenticated/);
   assert.match(app, /<OperationalAccessGate workspace=\{current\.label\}/);
   assert.match(gate, /operationalSessionClient\.status\(\)/);
+  assert.match(gate, /Retry secure connection/);
   assert.doesNotMatch(gate, /accessKey|type="password"|Operator access key/);
   assert.match(gate, /HttpOnly, scoped session/);
   assert.doesNotMatch(gate, /localStorage|sessionStorage/);
@@ -555,7 +581,7 @@ test("Operational Replay surfaces Runtime-owned stage playback with truthful bou
   assert.equal(/ContextBuilder|ContextRegistry|buildOperationalContext/.test(replay + client), false);
 });
 
-test("hosted Project, Knowledge, Edge, Voice, Copilot, and canonical execution controls use exact action and scope gates", async () => {
+test("hosted Project, Knowledge, Edge, Voice, and Copilot controls use exact action and scope gates while canonical execution is read-only", async () => {
   const [app, projects, knowledge, edgeAdmission, canonical, hostedGate] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/components/ProjectStudio.tsx"),
@@ -576,10 +602,18 @@ test("hosted Project, Knowledge, Edge, Voice, Copilot, and canonical execution c
   ]) {
     assert.match(app, new RegExp(`PORTAL_CANONICAL_ACTIONS\\.${actionName}`));
   }
-  assert.ok((app.match(/"operations:write"/g) ?? []).length >= 2);
+  assert.ok((app.match(/"operations:write"/g) ?? []).length >= 1);
   assert.match(
     app,
     /PORTAL_CANONICAL_ACTIONS\.voiceOperatorTranscript[\s\S]{0,240}"operations:read"/,
+  );
+  assert.match(
+    app,
+    /PORTAL_CANONICAL_ACTIONS\.copilotInteractionStart[\s\S]{0,240}"operations:read"/,
+  );
+  assert.match(
+    app,
+    /PORTAL_CANONICAL_ACTIONS\.realtimeVoiceCall[\s\S]{0,240}"operations:write"/,
   );
 
   assert.match(projects, /capabilityId: PROJECTS_PLANNING_CAPABILITY_ID/);
@@ -617,11 +651,12 @@ test("hosted Project, Knowledge, Edge, Voice, Copilot, and canonical execution c
   assert.match(edgeAdmission, /!cancelAction\.available/);
   assert.match(edgeAdmission, /!reissueAction\.available/);
 
-  assert.match(canonical, /capabilityId: "canonical_execution_spine"/);
-  assert.match(canonical, /\/executive-authority\/canonical-execution\/missions"/);
-  assert.match(canonical, /\/executive-authority\/canonical-execution\/missions\/\{mission_id\}\/actions"/);
-  assert.match(canonical, /!createAction\.available/);
-  assert.match(canonical, /!executeAction\.available/);
+  assert.match(canonical, /title="Canonical execution evidence"/);
+  assert.match(canonical, /canonicalExecutionClient\.status\(\)/);
+  assert.match(canonical, /canonicalExecutionClient\.mission\(record\.missionId\)/);
+  assert.match(canonical, /This surface is read-only/);
+  assert.match(canonical, /POST \/executive\/interactions/);
+  assert.doesNotMatch(canonical, /createMission|executeAction|restoreAction|canonicalHostedActionAvailability/);
   assert.match(hostedGate, /hostedSessionActionAvailability/);
 });
 
@@ -649,17 +684,17 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(client, /runtimeNodes: \(\) => request<RuntimeNodeFleet>\("\/runtime-coordination\/nodes"\)/);
   for (const path of [
     "/runtime-coordination/admissions",
-    "/cancel",
-    "/challenge/reissue",
     "/receipt",
     "/replay",
   ]) assert.match(client, new RegExp(path.replaceAll("/", "\\/")));
-  assert.match(client, /createRuntimeAdmission/);
+  assert.doesNotMatch(client, /createRuntimeAdmission|cancelRuntimeAdmission|reissueRuntimeAdmissionChallenge/);
   assert.match(client, /runtimeAdmissionReceipt/);
   assert.match(client, /runtimeAdmissionReplay/);
   assert.match(knowledge, /Mission Store/);
   assert.match(knowledge, /Knowledge Store/);
-  for (const operation of ["knowledgeIntake", "knowledgeAcquisition", "knowledgePromotionCandidate", "knowledgeVersions", "knowledgeReceipt", "knowledgePromotions"]) assert.match(client, new RegExp(operation));
+  for (const operation of ["knowledgeAcquisition", "knowledgePromotionCandidate", "knowledgeVersions", "knowledgeReceipt", "knowledgePromotions"]) assert.match(client, new RegExp(operation));
+  assert.doesNotMatch(client, /knowledgeIntake|createKnowledgePromotionCandidate|promoteKnowledge/);
+  assert.match(knowledge, /admitCanonicalActionIntent/);
   assert.match(knowledge, /policyEligible/);
   for (const gate of ["intakeGate", "baselineGate", "candidateGate", "promotionGate"]) assert.match(knowledge, new RegExp(gate));
   assert.match(knowledge, /Mission completion never writes to Knowledge Store automatically/);
@@ -679,7 +714,8 @@ test("new portal destinations render Runtime-backed dashboards without client-si
   assert.match(hostedGate, /action\.invocable !== true/);
   assert.match(hostedGate, /required hosted read\/base action set is unavailable/);
   assert.match(hostedGate, /must stay disabled at its control/);
-  assert.match(app, /MODULE_MOUNT_ACTION_REQUIREMENTS/);
+  assert.match(app, /moduleCapabilityStateView/);
+  assert.match(hostedGate, /MODULE_MOUNT_ACTION_REQUIREMENTS/);
   assert.match(app, /groups=\{registryRailGroups\}/);
   assert.doesNotMatch(app, /live: area\.id ===/);
   assert.match(app, /Hosted operational mode is not configured for this deployment/);
@@ -759,7 +795,7 @@ test("Runtime information renders one canonical capability projection and Execut
   assert.doesNotMatch(registry, /fetch\(|runtimeBaseUrl|Bearer\s/);
 });
 
-test("copilot, HIF, and voice controls fail closed on canonical action availability", async () => {
+test("copilot and voice controls fail closed on canonical interaction availability", async () => {
   const [app, client, copilot, voice, realtime] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/lib/portal-client.ts"),
@@ -768,11 +804,8 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
     read("../src/lib/realtime-voice-client.ts"),
   ]);
   for (const actionId of [
-    "context.runtime.route.post.runtime.interactions",
-    "context.runtime.route.get.runtime.interactions.events",
-    "context.runtime.route.post.runtime.interactions.interrupt",
+    "canonical.route.post.executive.interactions",
     "context.runtime.route.post.runtime.voice.realtime.call",
-    "canonical.route.post.voice-operator.route-transcript",
   ]) assert.match(client, new RegExp(actionId.replaceAll(".", "\\.")));
   assert.match(client, /\["live_verified", "live_degraded"\]\.includes\(action\.classification\)/);
   assert.match(client, /contract\.actionId\.startsWith\("canonical\.route\."\)/);
@@ -783,8 +816,8 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
   assert.match(app, /realtimeAction=\{realtimeVoiceAction\}/);
   assert.match(app, /textAction=\{voiceOperatorTranscriptAction\}/);
   assert.ok(
-    copilot.indexOf("if (!interactionAction.available)") < copilot.indexOf("await hifClient.start"),
-    "NexusCopilot must reject unavailable HIF before creating an interaction",
+    copilot.indexOf("if (!interactionAction.available)") < copilot.indexOf("await admitExecutiveInteraction"),
+    "NexusCopilot must reject unavailable interaction admission before creating a canonical interaction",
   );
   assert.ok(
     copilot.indexOf("if (!realtimeAction.available)") < copilot.indexOf('fetch("/api/runtime/realtime-voice"'),
@@ -793,27 +826,34 @@ test("copilot, HIF, and voice controls fail closed on canonical action availabil
   assert.match(copilot, /disabled=\{!interactionAction\.available/);
   assert.match(copilot, /disabled=\{!voiceAvailable \|\| !realtimeAction\.available/);
   assert.ok(
-    voice.indexOf("if (!audio.current || !liveProviderAvailable)") < voice.indexOf("await client.connect()"),
+    voice.indexOf("if (!liveProviderAvailable)") < voice.indexOf("await client.connect()"),
     "VoiceWorkspace must reject unavailable Realtime before connection",
   );
-  assert.match(voice, /const liveProviderAvailable = realtimeAction\.available[\s\S]*status\?\.state === "available"/);
+  assert.match(voice, /const manualCommitVerified = isVerifiedManualCommitStatus\(status\)[\s\S]*const liveProviderAvailable = realtimeAction\.available[\s\S]*manualCommitVerified/);
   assert.match(voice, /disabled=\{!liveProviderAvailable \|\| voiceState === "connecting"\}/);
-  assert.ok(
-    voice.indexOf("if (!textAction.available)") < voice.indexOf("localNexusClient.routeTranscript"),
-    "VoiceWorkspace must reject unavailable typed text routing before forwarding",
+  assert.match(
+    voice,
+    /if \(!textAction\.available\) \{[\s\S]{0,1200}executeExplicitPrivateDraftAction\([\s\S]{0,300}admitRuntimeVoiceTranscript\(/,
+    "VoiceWorkspace must reject unavailable typed text admission before forwarding",
   );
   assert.match(voice, /disabled=\{!textAction\.available/);
-  assert.match(voice, /code === "response_timeout" && captured/);
+  assert.match(voice, /if \(captured\)/);
   assert.match(voice, /The captured transcript has not been sent/);
-  assert.doesNotMatch(voice, /code === "response_timeout" && captured[\s\S]{0,700}void routeGovernedTranscript/);
+  assert.doesNotMatch(voice, /response_timeout/);
   assert.match(voice, /Send captured transcript through governed Voice/);
-  assert.match(voice, /runBoundedTask\([\s\S]*?GOVERNED_VOICE_RESPONSE_TIMEOUT_MS/);
-  assert.match(realtime, /this\.startResponseBoundary\(\)/);
-  assert.match(realtime, /this\.disposeTransport\(\)[\s\S]*?this\.callbacks\.onState\("error"\)/);
+  assert.match(realtime, /RealtimePcmAppendCoordinator/);
+  assert.match(realtime, /addTransceiver\("audio", \{ direction: "inactive" \}\)/);
+  assert.doesNotMatch(realtime, /\.addTrack\(/);
+  assert.match(realtime, /isProviderOutputEvent\(type\)/);
+  assert.match(realtime, /forbidden output event/);
+  assert.doesNotMatch(realtime, /RealtimeNarrationResponseGate|requestResponse/);
 });
 
-test("canonical execution gates each mutation on registered session proof and its exact action", async () => {
-  const component = await read("../src/components/CanonicalExecutionSpine.tsx");
+test("canonical execution exposes only registered-session-backed read-only evidence", async () => {
+  const [component, client] = await Promise.all([
+    read("../src/components/CanonicalExecutionSpine.tsx"),
+    read("../src/lib/local-client.ts"),
+  ]);
 
   assert.match(
     component,
@@ -824,11 +864,16 @@ test("canonical execution gates each mutation on registered session proof and it
     /next\.registeredExecutiveSessionVerified === true/,
   );
   assert.match(component, /const ready = registeredExecutiveSessionVerified/);
-  assert.match(component, /busy \|\| !ready \|\| !createAction\.available/);
-  assert.equal(
-    component.match(/disabled=\{busy \|\| !ready \|\| !executeAction\.available\}/g)?.length,
-    2,
-  );
+  assert.match(component, /disabled=\{busy\}/);
+  assert.match(component, /It cannot admit another effect/);
+  assert.match(component, /former Mission creation and direct Action[\s\S]*mutations are retired and return 410/);
+  assert.doesNotMatch(component, /createAction|executeAction|restoreAction|createMission/);
+  const clientStart = client.indexOf("async function canonicalExecutionRequest");
+  const clientEnd = client.indexOf("const post =", clientStart);
+  const canonicalClient = client.slice(clientStart, clientEnd);
+  assert.match(canonicalClient, /status: \(\) => canonicalExecutionRequest\(""\)/);
+  assert.match(canonicalClient, /mission: \(missionId: string\) => canonicalExecutionRequest/);
+  assert.doesNotMatch(canonicalClient, /method:\s*"POST"|createMission|executeAction|restoreAction/);
   assert.doesNotMatch(component, /capabilities\.every/);
   assert.doesNotMatch(component, /operationalAvailability/);
 });

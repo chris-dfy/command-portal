@@ -4,11 +4,15 @@ import { deriveAssistantAvatarState, NexusAvatar } from "./NexusAvatar";
 import "./NexusAvatar.css";
 import { DataPanel } from "./DataPanel";
 import { displayLabel } from "../lib/presentation";
-import { localNexusClient, type VoiceRouteResult } from "../lib/local-client";
+import { localNexusClient, newExecutiveInteractionId } from "../lib/local-client";
 import type { CanonicalActionAvailability } from "../lib/portal-client";
-import { RealtimeVoiceClient, type RealtimeVoiceState } from "../lib/realtime-voice-client";
+import {
+  isVerifiedManualCommitStatus,
+  RealtimeVoiceClient,
+  type RealtimeManualCommitStatus,
+  type RealtimeVoiceState,
+} from "../lib/realtime-voice-client";
 import { browserSpeechAvailability, recognizeBrowserSpeech, speakBrowserResponse } from "../lib/browser-speech";
-import { runBoundedTask } from "../lib/request-coordination.mjs";
 import {
   beginPrivateDraftAttempt,
   clearPrivateDraftAfterSuccess,
@@ -18,15 +22,34 @@ import {
   snapshotPrivateDraftOperation,
   type PrivateDraftOperation,
 } from "../lib/private-draft-operation";
+import {
+  admitApprovedExecutiveInteraction,
+  admitRuntimeVoiceTranscript,
+  clearPendingExecutiveApproval,
+  pendingExecutiveApprovalId,
+  recoverPendingExecutiveApproval,
+  rememberPendingExecutiveApproval,
+  runtimeInteractionTrace,
+  type RuntimeInteractionAdmission,
+  validateExecutiveInteractionDenial,
+} from "../lib/runtime-voice-admission";
+import { ExecutiveInteractionApproval } from "./ExecutiveInteractionApproval";
 import { OperationalResultLineage, type OpenOperationalReplay } from "./OperationalResultLineage";
 
-type VoiceStatus = {
+type VoiceStatus = RealtimeManualCommitStatus & {
   state?: string;
   provider?: string;
   model?: string;
   voice?: string;
   transport?: string;
   serverVAD?: boolean;
+  clientAudioAppendRequired?: boolean;
+  inputAudioAppendEvent?: string;
+  clientAudioCommitRequired?: boolean;
+  inputAudioCommitEvent?: string;
+  providerOfferAudioDirection?: string;
+  providerOfferAudioTrackAttached?: boolean;
+  rtpAudioNegotiated?: boolean;
   interruptResponse?: boolean;
   contextAssemblyOwner?: string;
   limitations?: string[];
@@ -40,7 +63,6 @@ type VoiceRequestPayload = {
   historyAlreadyRecorded: boolean;
 };
 type PendingVoiceRequest = PrivateDraftOperation<VoiceRequestPayload>;
-const GOVERNED_VOICE_RESPONSE_TIMEOUT_MS = 12_000;
 
 export function VoiceWorkspace({
   onReplay,
@@ -54,6 +76,7 @@ export function VoiceWorkspace({
   const [voiceState, setVoiceState] = useState<RealtimeVoiceState>("idle");
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [nexusMuted, setNexusMuted] = useState(false);
+  const nexusMutedRef = useRef(false);
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [amplitude, setAmplitude] = useState(0);
   const [transcript, setTranscript] = useState("");
@@ -62,33 +85,48 @@ export function VoiceWorkspace({
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [browserListening, setBrowserListening] = useState(false);
-  const [routeResult, setRouteResult] = useState<VoiceRouteResult | null>(null);
+  const [latestAdmission, setLatestAdmission] = useState<RuntimeInteractionAdmission | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<RuntimeInteractionAdmission | null>(null);
+  const [approvalBusy, setApprovalBusy] = useState<"approve" | "deny" | null>(null);
   const [pendingRequest, setPendingRequest] = useState<PendingVoiceRequest | null>(null);
-  const audio = useRef<HTMLAudioElement | null>(null);
   const liveClient = useRef<RealtimeVoiceClient | null>(null);
   const latestUserTranscript = useRef("");
+  const conversationId = useRef(newExecutiveInteractionId());
 
   const connected = ["listening", "thinking", "speaking", "interrupted"].includes(voiceState);
   const supported = RealtimeVoiceClient.supported();
   const browserSpeech = browserSpeechAvailability();
+  const manualCommitVerified = isVerifiedManualCommitStatus(status);
   const liveProviderAvailable = realtimeAction.available
     && supported
-    && status?.state === "available";
+    && manualCommitVerified;
   const liveProviderReason = !realtimeAction.available
     ? realtimeAction.reason
     : !supported
       ? "This browser does not support secure WebRTC microphone capture."
-      : status?.state !== "available"
-        ? status?.limitations?.[0] ?? "The Runtime has not verified an available Realtime voice provider contract."
+      : !manualCommitVerified
+        ? status?.limitations?.[0] ?? "The Runtime has not verified the required ordered PCM append/commit contract."
         : "The exact Realtime voice action, provider contract, and browser capture path are available.";
-  const resultProofId = routeResult?.proof?.proofId ?? routeResult?.event?.proofId;
-  const resultReceiptId = routeResult?.receipt?.receiptId ?? routeResult?.event?.receiptId;
+  const resultProofId = latestAdmission?.proofIds[0];
+  const resultReceiptId = latestAdmission?.receiptIds[0];
 
   useEffect(() => {
     if (realtimeAction.available) void refreshStatus();
     else setMessage(realtimeAction.reason);
     return () => liveClient.current?.stop();
   }, [realtimeAction.available, realtimeAction.reason]);
+
+  useEffect(() => {
+    void recoverPendingExecutiveApproval()
+      .then((admission) => {
+        if (!admission) return;
+        setLatestAdmission(admission);
+        setPendingApproval(admission);
+        setAssistantTranscript(admission.spokenSummary);
+        setMessage(`Recovered from the Runtime interaction ledger. ${runtimeInteractionTrace(admission)}`);
+      })
+      .catch((error) => setMessage(messageFrom(error)));
+  }, []);
 
   async function refreshStatus() {
     try {
@@ -102,8 +140,65 @@ export function VoiceWorkspace({
     }
   }
 
+  function presentAdmission(admission: RuntimeInteractionAdmission) {
+    setLatestAdmission(admission);
+    rememberPendingExecutiveApproval(admission);
+    setPendingApproval(pendingExecutiveApprovalId(admission) ? admission : null);
+    setAssistantTranscript(admission.spokenSummary);
+    setHistory((items) => [
+      { speaker: "NEXUS", text: admission.spokenSummary } as TranscriptEntry,
+      ...items,
+    ].slice(0, 10));
+    setMessage(["Runtime returned the canonical governed interaction result.", runtimeInteractionTrace(admission)].join(" "));
+  }
+
+  async function approvePendingIntent() {
+    const pending = pendingApproval;
+    const approvalId = pendingExecutiveApprovalId(pending);
+    if (!pending || !approvalId || approvalBusy) return;
+    setMessage(null);
+    setApprovalBusy("approve");
+    try {
+      const response = await localNexusClient.approve(approvalId);
+      presentAdmission(await admitApprovedExecutiveInteraction(response, pending));
+    } catch (error) {
+      setMessage(messageFrom(error));
+    } finally {
+      setApprovalBusy(null);
+    }
+  }
+
+  async function denyPendingIntent() {
+    const pending = pendingApproval;
+    const approvalId = pendingExecutiveApprovalId(pending);
+    if (!pending || !approvalId || approvalBusy) return;
+    setMessage(null);
+    setApprovalBusy("deny");
+    try {
+      const response = await localNexusClient.deny(
+        approvalId,
+        "Denied by the authenticated operator in NEXUS Command Voice Workspace.",
+      );
+      validateExecutiveInteractionDenial(
+        response,
+        approvalId,
+        pending.interactionResult.interaction_id,
+      );
+      clearPendingExecutiveApproval(pending.interactionResult.interaction_id);
+      setPendingApproval(null);
+      const denial = `Runtime recorded the denial for approval ${approvalId}. No approval continuation was admitted.`;
+      setAssistantTranscript(denial);
+      setHistory((items) => [{ speaker: "NEXUS", text: denial } as TranscriptEntry, ...items].slice(0, 10));
+      setMessage(denial);
+    } catch (error) {
+      setMessage(messageFrom(error));
+    } finally {
+      setApprovalBusy(null);
+    }
+  }
+
   async function startLiveVoice() {
-    if (!audio.current || !liveProviderAvailable) {
+    if (!liveProviderAvailable) {
       setMessage(liveProviderReason);
       return;
     }
@@ -112,22 +207,26 @@ export function VoiceWorkspace({
     latestUserTranscript.current = "";
     setMicrophoneMuted(false);
     setNexusMuted(false);
-    audio.current.muted = false;
-    const client = new RealtimeVoiceClient(audio.current, {
+    nexusMutedRef.current = false;
+    const client = new RealtimeVoiceClient({
       onState: setVoiceState,
       onAmplitude: setAmplitude,
-      onUserTranscript: (text) => {
+      onUserTranscript: async (text, idempotencyKey) => {
         latestUserTranscript.current = text;
         setHistory((items) => [{ speaker: "You", text } as TranscriptEntry, ...items].slice(0, 10));
+        const admission = await admitRuntimeVoiceTranscript(text, conversationId.current, idempotencyKey);
+        presentAdmission(admission);
+        latestUserTranscript.current = "";
+        return admission;
       },
-      onAssistantTranscript: (text) => {
-        if (text.trim()) latestUserTranscript.current = "";
-        setAssistantTranscript(text);
+      onRuntimeResponse: (responseText) => {
+        if (!nexusMutedRef.current) speakBrowserResponse(responseText);
       },
-      onError: (errorMessage, code) => {
+      onError: (errorMessage, context) => {
         setMessage(errorMessage);
+        if (context?.retryProhibited) return;
         const captured = latestUserTranscript.current.trim();
-        if (code === "response_timeout" && captured) {
+        if (captured) {
           const staged = snapshotPrivateDraftOperation(
             {
               transcript: captured,
@@ -135,7 +234,7 @@ export function VoiceWorkspace({
               fallbackContext: "Live voice timed out; the captured utterance was sent only after your explicit governed Voice action.",
               historyAlreadyRecorded: true,
             },
-            `voice-transcript:${globalThis.crypto.randomUUID()}`,
+            newExecutiveInteractionId(),
           );
           setPendingRequest((current) => (
             current
@@ -161,12 +260,12 @@ export function VoiceWorkspace({
   }
 
   function stopLiveVoice() {
-    if (assistantTranscript.trim()) setHistory((items) => [{ speaker: "NEXUS", text: assistantTranscript.trim() } as TranscriptEntry, ...items].slice(0, 10));
     liveClient.current?.stop();
     liveClient.current = null;
     latestUserTranscript.current = "";
     setMicrophoneMuted(false);
     setNexusMuted(false);
+    nexusMutedRef.current = false;
     setMessage("Live voice session ended. No provider credential was stored in the browser.");
   }
 
@@ -181,6 +280,7 @@ export function VoiceWorkspace({
     const muted = !nexusMuted;
     liveClient.current?.setOutputMuted(muted);
     setNexusMuted(muted);
+    nexusMutedRef.current = muted;
     setMessage(muted ? "NEXUS audio is muted. Responses remain visible as text." : "NEXUS audio playback is restored.");
   }
 
@@ -204,7 +304,7 @@ export function VoiceWorkspace({
         fallbackContext,
         historyAlreadyRecorded,
       },
-      `voice-transcript:${globalThis.crypto.randomUUID()}`,
+      newExecutiveInteractionId(),
     );
     const presentOperatorTranscript = shouldPresentPrivateDraft(
       staged,
@@ -224,23 +324,17 @@ export function VoiceWorkspace({
     try {
       const response = await executeExplicitPrivateDraftAction(
         operation,
-        (explicitOperation) => runBoundedTask(
-          (signal) => localNexusClient.routeTranscript(
-            explicitOperation.payload.transcript,
-            explicitOperation.payload.source,
-            signal,
-            explicitOperation.idempotencyKey,
-          ),
-          { timeoutMs: GOVERNED_VOICE_RESPONSE_TIMEOUT_MS },
+        (explicitOperation) => admitRuntimeVoiceTranscript(
+          explicitOperation.payload.transcript,
+          conversationId.current,
+          explicitOperation.idempotencyKey,
         ),
       );
-      const responseText = response.spokenSummary?.trim()
-        || response.event?.failureReason?.trim()
-        || "NEXUS recorded the request without a spoken summary.";
-      const proofId = response.proof?.proofId ?? response.event?.proofId;
-      const receiptId = response.receipt?.receiptId ?? response.event?.receiptId;
+      const responseText = response.spokenSummary;
       const spoken = operation.payload.source === "browser_speech" && !nexusMuted && speakBrowserResponse(responseText);
-      setRouteResult(response);
+      setLatestAdmission(response);
+      rememberPendingExecutiveApproval(response);
+      setPendingApproval(pendingExecutiveApprovalId(response) ? response : null);
       setPendingRequest(clearPrivateDraftAfterSuccess());
       setAssistantTranscript(responseText);
       setHistory((items) => [
@@ -249,14 +343,13 @@ export function VoiceWorkspace({
       ].slice(0, 10));
       setMessage([
         operation.payload.fallbackContext,
-        "Text request was processed by the governed NEXUS Runtime Voice Operator.",
+        "Text request was processed by the canonical NEXUS Runtime interaction coordinator.",
+        runtimeInteractionTrace(response),
         operation.payload.source === "browser_speech"
           ? spoken
             ? "The browser is playing the actual Runtime response locally."
             : "Browser speech output is unavailable; the actual Runtime response remains visible as text."
           : "",
-        proofId ? `Proof ${proofId}.` : "",
-        receiptId ? `Receipt ${receiptId}.` : "",
       ].filter(Boolean).join(" "));
     } catch (error) {
       setPendingRequest(retainPrivateDraftAfterFailure(operation));
@@ -290,9 +383,8 @@ export function VoiceWorkspace({
   }
 
   return <div className="experience-grid local-workspace">
-    <audio ref={audio} autoPlay muted={nexusMuted} className="voice-audio" aria-hidden="true" />
     <DataPanel eyebrow="Runtime-managed Realtime voice" title="Speak with NEXUS" icon={<Mic size={18} />} className="span-2">
-      <p className="workspace-intro">A natural, full-duplex voice session with server voice detection, streaming audio, and interruption. The Runtime owns the provider session and truth boundaries; this browser owns only microphone capture and playback.</p>
+      <p className="workspace-intro">A governed voice session with bounded browser speech-turn detection and provider transcription. WebRTC carries ordered microphone PCM on its data channel only; one manual commit follows the appended audio for each detected turn, each final transcript enters the canonical Runtime once, and browser narration speaks only Runtime response text.</p>
       <div className="realtime-voice-stage">
         <NexusAvatar state={deriveAssistantAvatarState({ voiceState, textBusy: busy, hasError: false })} amplitude={amplitude} size="lg" micMuted={microphoneMuted && connected} unavailable={!connected && !liveProviderAvailable} />
         <div className="voice-stage-copy">
@@ -316,7 +408,13 @@ export function VoiceWorkspace({
       </div>
       <p className="boundary-note">{browserSpeech.input ? "Browser microphone fallback is available and bounded to 8 seconds." : "Browser speech recognition is unavailable; typed governed fallback remains available."} {browserSpeech.output ? "Browser speech playback can read the actual Runtime response aloud." : "Browser speech playback is unavailable; responses remain visible as text."}</p>
       {message && <p className="workspace-message" role="status">{message}</p>}
-      {routeResult && <OperationalResultLineage proofId={resultProofId} receiptId={resultReceiptId} onOpenReplay={onReplay} />}
+      <ExecutiveInteractionApproval
+        admission={pendingApproval}
+        busy={approvalBusy}
+        onApprove={() => void approvePendingIntent()}
+        onDeny={() => void denyPendingIntent()}
+      />
+      {latestAdmission && <OperationalResultLineage proofId={resultProofId} receiptId={resultReceiptId} onOpenReplay={onReplay} />}
       <p className="boundary-note">Realtime conversation may use model-native knowledge. Organization-specific facts, live operational state, completed actions, and authoritative evidence still require registered Runtime context, connectors, proofs, and receipts.</p>
     </DataPanel>
 
@@ -327,9 +425,9 @@ export function VoiceWorkspace({
         <div><dt>Voice / transport</dt><dd>{status?.voice && status?.transport ? `${status.voice} · ${status.transport}` : "Not reported"}</dd></div>
         <div><dt>Browser capture</dt><dd>{supported ? "Secure WebRTC capture supported" : "Unavailable in this browser"}</dd></div>
         <div><dt>Governed fallback</dt><dd>{textAction.available ? "Typed requests available" : "Unavailable"}</dd></div>
-        <div><dt>Conversation</dt><dd>{status?.serverVAD ? "Server voice detection" : "Not verified"}{status?.interruptResponse ? " · interruption enabled" : ""}</dd></div>
+        <div><dt>Conversation</dt><dd>{manualCommitVerified ? "Client turn detection · manual audio commit" : "Manual commit contract not verified"}{status?.interruptResponse ? " · interruption enabled" : ""}</dd></div>
         <div><dt>Context owner</dt><dd>{status?.contextAssemblyOwner ?? "NEXUS Runtime"}</dd></div>
-        <div><dt>Governed text state</dt><dd>{displayLabel(routeResult?.status ?? "idle")}</dd></div>
+        <div><dt>Governed interaction state</dt><dd>{displayLabel(latestAdmission?.status ?? "idle")}</dd></div>
       </dl>
     </DataPanel>
 
