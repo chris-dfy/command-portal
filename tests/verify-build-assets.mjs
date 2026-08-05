@@ -39,4 +39,17 @@ for (const forbidden of [
   "BEGIN PRIVATE KEY",
 ]) assert.equal(bundle.includes(forbidden), false, `Client output contains forbidden server-only material: ${forbidden}`);
 
-console.log(JSON.stringify({ javascript: javascript[0], stylesheet: stylesheets[0], secretValuesExposed: false }));
+for (const quarantineTruth of [
+  "Full-duplex Realtime voice is quarantined",
+  "Full-duplex quarantined",
+  "continuity_only",
+]) assert.equal(bundle.includes(quarantineTruth), true, `Client output omitted quarantine truth: ${quarantineTruth}`);
+assert.equal(bundle.includes("Live Voice Active"), false, "Quarantined client output must not claim Live Voice Active.");
+
+console.log(JSON.stringify({
+  javascript: javascript[0],
+  stylesheet: stylesheets[0],
+  secretValuesExposed: false,
+  voiceProfile: "continuity_only",
+  liveVoiceActiveClaimPresent: false,
+}));

@@ -142,6 +142,31 @@ rolled-back release identities and revocation status in the sanitized receipt.
 
 Build with `npm run build` and start with `npm run start`. Never create a browser-visible `VITE_` runtime variable. After deployment, verify every allowlisted route, mutation rejection, secret isolation, failure rendering, and the live topology.
 
+## Direct Realtime quarantine release gate
+
+The canonical Command Portal source is a continuity-only adapter until a later
+exact artifact is admitted through the fleet release controller. Browser
+activation fails before Runtime status, microphone permission, PCM capture,
+offer creation, or the Experience Gateway call. The Gateway independently
+returns `503 realtime_voice_quarantined` with a bounded request ID and never
+contacts Runtime. Browser speech remains continuity-only and is not evidence
+of a governed Realtime session.
+
+Every pull request, `main` push, and release-attestation build must pass the
+direct browser/Gateway quarantine tests. Release metadata derives the exact
+content-addressed JavaScript and stylesheet names from the current build and
+pins NCR-1.0.0 plus the continuity-only posture. A tracked deployment receipt
+is attestable only when its source commit, source tree, release-subject digest,
+deployment identity, and live quarantine postconditions all match the current
+artifact. Historical receipts are ignored for the current release.
+
+The GitHub workflow builds and attests a source subject; it does not authorize
+or perform a Replit deployment. Promotion remains blocked until an exclusive
+provider controller can deploy that exact subject, verify the published asset
+identity, prove the Gateway quarantine without a Runtime Realtime call, and
+record automatic rollback evidence. Direct Replit publishing cannot satisfy
+this gate.
+
 For the earlier Mission 1 tenant-context assertion rollout, deploy in this
 order: first add that context-assertion secret to this portal and republish it
 so text and voice already carry the signed header; then deploy Runtime with the
