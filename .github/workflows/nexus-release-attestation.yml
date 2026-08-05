@@ -3,8 +3,10 @@ name: NEXUS release attestation
 on:
   push:
     branches:
+      - main
       - codex/eo-exec-001-live-release
       - codex/runtime-readiness-contract-recovery
+      - codex/command-portal-direct-voice-quarantine
   workflow_dispatch:
 
 permissions:
@@ -23,6 +25,7 @@ jobs:
       - name: Check out the exact release source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Select the production toolchain
@@ -63,7 +66,18 @@ jobs:
           cp -R dist/. "release/stage/dist/"
           cp docs/mission5/NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json "release/stage/"
           SOURCE_TREE="${source_tree}" NPM_VERSION="${npm_version}" node --input-type=module -e '
-            import { writeFileSync } from "node:fs";
+            import { existsSync, readFileSync, writeFileSync } from "node:fs";
+            const html = readFileSync("dist/index.html", "utf8");
+            const javascript = [...html.matchAll(/<script[^>]+src="([^"]+\.js)"/g)].map((match) => match[1]);
+            const stylesheets = [...html.matchAll(/<link[^>]+href="([^"]+\.css)"/g)].map((match) => match[1]);
+            if (javascript.length !== 1 || stylesheets.length !== 1) {
+              throw new Error("release subject must contain exactly one authoritative JavaScript and stylesheet asset");
+            }
+            for (const asset of [...javascript, ...stylesheets]) {
+              if (!asset.startsWith("/assets/") || !existsSync(`dist/${asset.slice(1)}`)) {
+                throw new Error(`release metadata referenced a missing or non-canonical asset: ${asset}`);
+              }
+            }
             const metadata = {
               recordType: "nexus_release_subject",
               schemaVersion: "nexus.release-subject@1.0.0",
@@ -73,11 +87,27 @@ jobs:
               sourceTree: process.env.SOURCE_TREE,
               nodeVersion: process.version,
               npmVersion: process.env.NPM_VERSION,
-              javascript: "/assets/index-UVpvI6wT.js",
-              stylesheet: "/assets/index-BIIqbpcf.css",
+              javascript: javascript[0],
+              stylesheet: stylesheets[0],
               sbom: "NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json",
               vulnerabilityGate: "zero_known_info_low_moderate_high_critical",
-              secretValuesExposed: false
+              secretValuesExposed: false,
+              constitutionalAuthority: {
+                registryId: "NCR",
+                releaseId: "NCR-1.0.0",
+                releaseDigest: "sha256:212678643019c07c38d11c6abf4b4810fb87b5b8cf543b6ccdc958dcb9bdaffa",
+                bundleDigest: "sha256:9ccfc84f2da002ea303fda282915e92833d56452f6aa30f63ca1f103b47ddf27",
+                publicationDigest: "sha256:26a405ff76a5ae001a8d0ddff1069cb00870c240b8fb26148273ff031a819b4a"
+              },
+              voice: {
+                profile: "continuity_only",
+                activationAllowed: false,
+                provesFullDuplexReadiness: false,
+                quarantineCode: "realtime_voice_quarantined",
+                currentArtifactVoiceReceiptDigest: null,
+                verifiedAudioPostconditions: false,
+                deploymentPromotionEligible: false
+              }
             };
             writeFileSync("release/stage/release-metadata.json", `${JSON.stringify(metadata, null, 2)}\n`);
           '
@@ -96,16 +126,39 @@ jobs:
           subject-path: release/command-portal-${{ github.sha }}.tar.gz
           sbom-path: docs/mission5/NEXUS-COMMAND-PORTAL-RELEASE-20260803.sbom.cdx.json
 
-      - name: Validate and read deployment receipt metadata
+      - name: Reject historical deployment receipts for the current release
         id: deployment-receipt
         shell: bash
         run: |
+          set -euo pipefail
           receipt="docs/mission5/NEXUS-COMMAND-PORTAL-DEPLOYMENT-20260803.receipt.json"
           if [[ ! -f "${receipt}" ]]; then
             echo "present=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          jq -e '
+          subject_name="command-portal-${GITHUB_SHA}.tar.gz"
+          subject_path="release/${subject_name}"
+          subject_digest="sha256:$(sha256sum "${subject_path}" | cut -d' ' -f1)"
+          source_tree="$(git rev-parse "${GITHUB_SHA}^{tree}")"
+          if ! jq -e \
+            --arg source_commit "${GITHUB_SHA}" \
+            --arg source_tree "${source_tree}" \
+            --arg subject_name "${subject_name}" \
+            --arg subject_digest "${subject_digest}" '
+              .sourceLineage.releaseCommit == $source_commit and
+              .sourceLineage.releaseTree == $source_tree and
+              .attestation.subjectName == $subject_name and
+              .attestation.subjectDigest == $subject_digest
+            ' "${receipt}" >/dev/null; then
+            echo "Tracked deployment receipt is historical and cannot attest ${GITHUB_SHA}."
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          jq -e \
+            --arg source_commit "${GITHUB_SHA}" \
+            --arg source_tree "${source_tree}" \
+            --arg subject_name "${subject_name}" \
+            --arg subject_digest "${subject_digest}" '
             .recordType == "nexus_engineering_receipt" and
             .schemaVersion == "1.0.0" and
             .completionStatus == "completed" and
@@ -116,12 +169,12 @@ jobs:
             .constitutionalBasis.applicablePrincipleResolutionDigest == "sha256:e4d7beb5788a8cd1aac589161c68f33303a1e6c31bb4e1d54cdf1a72c8cffda2" and
             .authorization.operatorInstruction == "PUBLISH IT." and
             .operatorAcceptance.accepted == true and
-            .sourceLineage.releaseCommit == "64d1e2211f377c4a4c4fd7748583d636fd5c3d1f" and
-            .sourceLineage.releaseTree == "813632d6dfe72099e2e8a00112df288efe68a922" and
-            .attestation.subjectName == "command-portal-64d1e2211f377c4a4c4fd7748583d636fd5c3d1f.tar.gz" and
-            .attestation.subjectDigest == "sha256:e7287068cb2b564b9d1891c2c65dcc934a9279b62d568ae7362984ebf10b4311" and
-            .replitActivation.deploymentId == "350e836b-a349-4504-bab6-efbf6db43022" and
-            .replitActivation.finalBuildId == "dc11c97f-3a6a-40f8-b6a5-ea9b6fed604c" and
+            .sourceLineage.releaseCommit == $source_commit and
+            .sourceLineage.releaseTree == $source_tree and
+            .attestation.subjectName == $subject_name and
+            .attestation.subjectDigest == $subject_digest and
+            (.replitActivation.deploymentId | type == "string" and length > 0) and
+            (.replitActivation.finalBuildId | type == "string" and length > 0) and
             .replitActivation.published == true and
             .deploymentLineage.rollbackActivation.livePostconditionsPassed == true and
             .deploymentLineage.recoveryActivation.livePostconditionsPassed == true and
@@ -138,11 +191,19 @@ jobs:
             .security.vulnerabilityGatePassed == true and
             .security.slsaAndSbomAttestationsVerified == true and
             .nonChanges.productionReadinessChanged == false and
-            .nonChanges.capabilityStateChanged == false
+            .nonChanges.capabilityStateChanged == false and
+            .voiceQuarantinePostconditions.profile == "continuity_only" and
+            .voiceQuarantinePostconditions.activationAllowed == false and
+            .voiceQuarantinePostconditions.provesFullDuplexReadiness == false and
+            .voiceQuarantinePostconditions.gatewayRealtimeCallStatus == 503 and
+            .voiceQuarantinePostconditions.gatewayReasonCode == "realtime_voice_quarantined" and
+            .voiceQuarantinePostconditions.runtimeRealtimeCallCount == 0 and
+            .voiceQuarantinePostconditions.liveVoiceActiveRendered == false and
+            .voiceQuarantinePostconditions.currentArtifactVerified == true
           ' "${receipt}" >/dev/null
           echo "present=true" >> "${GITHUB_OUTPUT}"
-          echo "subject_name=$(jq -r '.attestation.subjectName' "${receipt}")" >> "${GITHUB_OUTPUT}"
-          echo "subject_digest=$(jq -r '.attestation.subjectDigest' "${receipt}")" >> "${GITHUB_OUTPUT}"
+          echo "subject_name=${subject_name}" >> "${GITHUB_OUTPUT}"
+          echo "subject_digest=${subject_digest}" >> "${GITHUB_OUTPUT}"
 
       - name: Attest the deployment receipt
         if: steps.deployment-receipt.outputs.present == 'true'
